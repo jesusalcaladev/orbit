@@ -23,6 +23,9 @@ importers:
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.3
+      dataloader:
+        specifier: ^2.2.3
+        version: 2.2.3
       graphql:
         specifier: ^17.0.2
         version: 17.0.2
@@ -576,6 +579,9 @@ packages:
     peerDependenciesMeta:
       typescript:
         optional: true
+
+  dataloader@2.2.3:
+    resolution: {integrity: sha512-y2krtASINtPFS1rSDjacrFgn1dcUuoREVabwlOGOe4SdxenREqwjwjElAdwvbGM7kgZz9a3KVicWR7vcz8rnzA==}
 
   detect-libc@2.1.2:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
@@ -1445,6 +1451,8 @@ snapshots:
       parse-json: 5.2.0
     optionalDependencies:
       typescript: 7.0.2
+
+  dataloader@2.2.3: {}
 
   detect-libc@2.1.2: {}
 

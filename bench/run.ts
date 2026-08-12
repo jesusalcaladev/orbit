@@ -1,11 +1,11 @@
 /**
- * Orbit benchmark suite — scenarios B1–B7 from the protocol spec.
+ * Orbit benchmark suite — scenarios B1–B9 from the protocol spec.
  *
  * Every measurement runs against the real `@orbit/core` engine (dist build)
  * on this machine. The competition is now MEASURED, not assumed: the
  * GraphQL scenarios (bench/graphql.ts) run the same fixtures through
- * graphql-js (a devDependency of the bench harness only — the core keeps its
- * zero-runtime-dependency contract) on the same hardware.
+ * graphql-js + DataLoader (devDependencies of the bench harness only — the
+ * core keeps its zero-runtime-dependency contract) on the same hardware.
  *
  * Run:  npm run bench   (builds first)
  *
@@ -26,7 +26,7 @@ import {
 } from '@orbit/core';
 import type { DataAdapter, SubscriptionEvent } from '@orbit/core';
 import { buildDeepNest, buildFeed, users } from './fixtures.ts';
-import { graphqlB1, graphqlB2, graphqlB3, graphqlB4 } from './graphql.ts';
+import { graphqlB1, graphqlB2, graphqlB3, graphqlB4, graphqlB9 } from './graphql.ts';
 import { httpB8 } from './http-bench.ts';
 import { gzip, measure, measureThroughput, now, pct } from './measure.ts';
 import { renderChart } from './svg.ts';
@@ -232,6 +232,62 @@ async function benchB3(): Promise<{
     wireRps: wire,
     graphqlRps: rpsCached,
     competitionRps: rpsCached,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// B9 — Deep nest with cache + DataLoader
+//
+// B2 measured the naive N+1 (1,112 resolver calls). B9 measures the FIX on
+// both sides of the SAME 5-level graph:
+//   - Orbit: the cache plugin replays a warm request from memory — 0 DB
+//     round-trips, sub-millisecond P99. (First request warms the store: 5
+//     batched round-trips, one per level.)
+//   - GraphQL + DataLoader: batching collapses the 1,112 resolver calls to 5
+//     DB batches per request (the same floor as Orbit's contract) — but
+//     DataLoader caches WITHIN one request only (fresh loaders per request is
+//     the production setup), so every request still pays all 5 batches.
+// The honest takeaway: DataLoader closes the B2 N+1 gap on a cold request,
+// but Orbit's contract-level cache makes the REPEAT request free.
+// ---------------------------------------------------------------------------
+
+async function benchB9(): Promise<{
+  orbitMs: number;
+  orbitQueries: number;
+  graphqlMs: number;
+  graphqlCalls: number;
+  competitionMs: number;
+}> {
+  const count: Counting = { queries: 0 };
+  const cache = createCachePlugin();
+  const orbit = createOrbit({ adapters: deepNestAdapters(count), plugins: [cache] });
+  const envelope = {
+    query:
+      'user(id="1") { name, posts { title, comments { text, likes { emoji, likedBy { name } } } } }',
+    cache: 'ttl=300',
+  } as const;
+
+  // Warm the store (5 batched round-trips, one per level), then replay warm.
+  await orbit.execute(envelope);
+  const warmQueries = count.queries;
+  count.queries = 0;
+  const times = await measure(() => orbit.execute(envelope), scale(500, 100));
+  const orbitMs = pct(times, 99);
+  const orbitQueries = count.queries;
+
+  // The same graph through graphql-js + DataLoader (fresh loaders per request).
+  const { ms: graphqlMs, callsPerRequest } = await graphqlB9();
+  console.log(
+    `    warm replay p99: ${orbitMs.toFixed(3)} ms (0 DB calls) · graphql-js+DataLoader: ${graphqlMs.toFixed(2)} ms · ${callsPerRequest.toFixed(0)} DB batches/request`,
+  );
+  if (warmQueries !== 5) throw new Error(`B9 warm expected 5 queries, got ${warmQueries}`);
+  if (orbitQueries !== 0) throw new Error(`B9 warm replay expected 0 queries, got ${orbitQueries}`);
+  return {
+    orbitMs,
+    orbitQueries,
+    graphqlMs,
+    graphqlCalls: callsPerRequest,
+    competitionMs: graphqlMs,
   };
 }
 
@@ -592,7 +648,7 @@ interface Result {
 const ok = (met: boolean): string => (met ? '✅' : '⚠️ ');
 
 async function main(): Promise<void> {
-  console.log('Orbit benchmark suite (B1–B8)\n');
+  console.log('Orbit benchmark suite (B1–B9)\n');
 
   const results: Result[] = [];
 
@@ -780,6 +836,28 @@ async function main(): Promise<void> {
     );
   }
 
+  // B9
+  {
+    const r = await benchB9();
+    const met = r.orbitMs < 200;
+    results.push({
+      id: 'B9',
+      label: 'Deep nest · warm cache replay vs DataLoader',
+      metric: 'Warm replay P99 latency',
+      unit: 'ms',
+      lowerIsBetter: true,
+      orbitValue: r.orbitMs,
+      orbitLabel: `${r.orbitMs.toFixed(2)} ms (0 DB calls)`,
+      competitionValue: r.competitionMs,
+      competitionLabel: `${r.competitionMs.toFixed(2)} ms (graphql-js + DataLoader, cold: ${r.graphqlCalls.toFixed(0)} DB batches/request, measured)`,
+      goal: '< 200 ms (0 DB calls warm)',
+      goalMet: met,
+    });
+    console.log(
+      `B9 · Cache replay vs DataLoader     ${ok(met)} orbit ${r.orbitMs.toFixed(2)} ms (${r.orbitQueries} DB calls)  vs  graphql-js+DataLoader ${r.graphqlMs.toFixed(2)} ms cold (${r.graphqlCalls.toFixed(0)} DB calls/request)  (goal < 200 ms)`,
+    );
+  }
+
   // Persist machine-readable results.
   writeFileSync(join(benchDir, 'benchmarks.json'), JSON.stringify(results, null, 2));
 
@@ -795,7 +873,7 @@ async function main(): Promise<void> {
     lowerIsBetter: r.lowerIsBetter,
     goalMet: r.goalMet,
   }));
-  const svg = renderChart('Orbit benchmark suite — B1 to B8', rows);
+  const svg = renderChart('Orbit benchmark suite — B1 to B9', rows);
   writeFileSync(join(benchDir, 'chart.svg'), svg);
 
   console.log('\nBenchmark results written to bench/results/ (benchmarks.json + chart.svg).');

@@ -158,13 +158,14 @@ The core is a single `@orbit/core` package. The SPEC's distribution model is
 | B5 streaming TTFB | ✅ 5–6 ms |
 | B6 reconnect/warm-cache replay | ✅ Excellent |
 | B7 realtime fan-out (200 sockets) | ✅ Excellent — 7.7–9.1 ms fan-out, 3.6–8.4 ms resume replay |
-| B8 wire path (real HTTP, keep-alive) | ✅ ~1.5× graphql-js (~1.6k vs ~1.04k RPS) — same node:http server, same client, measured |
+| B8 wire path (real HTTP, keep-alive) | ✅ ~1.5× graphql-js (~1.5k vs ~1.03k RPS) — same node:http server, same client, measured |
+| B9 deep-nest warm replay (cache vs DataLoader) | ✅ 0.15 ms / 0 DB calls vs 59 ms / 5 DB batches per request — DataLoader closes the cold N+1 but pays all 5 batches every request; Orbit's contract-level cache replays warm from memory |
 
 **Benchmarks are now real head-to-heads:** `graphql` (v17) is a devDependency of
 **the bench harness only** (`bench/graphql.ts` — the core keeps its
 zero-runtime-dependency contract) and runs the same fixtures on the same
 machine. Competition numbers in `docs/benchmarks.md` are measured, not quoted
-from the spec. Run `npm run bench` to refresh B1–B8 on any machine; GitHub
+from the spec. Run `npm run bench` to refresh B1–B9 on any machine; GitHub
 Actions CI (`pnpm run bench` on ubuntu/node 22) uploads the results as an
 artifact on every push.
 
@@ -213,7 +214,7 @@ artifact on every push.
 | Caching core (TTL/SWR/invalidate) | ✅ (in core; → `@orbit/cache`) |
 | In-memory adapter | ✅ (keep in `@orbit/core`) |
 | REST/fetch adapter | ⬜ (`@orbit/rest` new — `fetchAdapter` removed from core) |
-| Benchmarks | ✅ (B1–B8 goals met) |
+| Benchmarks | ✅ (B1–B9 goals met) |
 | Auth plugin | ⬜ (`@orbit/auth`) |
 | Redis cache store | ⬜ (`@orbit/redis`) |
 | Cloudflare KV cache store | ⬜ (`@orbit/kv-cache`) |

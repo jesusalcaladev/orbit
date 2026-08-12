@@ -20,9 +20,15 @@
  *   naive server). The spec's 1111 is the classic no-DataLoader N+1 figure;
  *   here it is MEASURED, not assumed.
  */
+import DataLoader from 'dataloader';
 import { buildSchema, defaultFieldResolver, execute, graphql, parse, validate } from 'graphql';
 import { buildDeepNest, buildFeed, users } from './fixtures.ts';
-import { gzip, measure, measureThroughput, pct } from './measure.ts';
+import { gzip, measure, measureThroughput, now, pct } from './measure.ts';
+
+// CI smoke mode: shared runners are not a benchmark machine — the deep nest is
+// the most expensive scenario, so cut its sample count like every other one.
+const isCI = process.env.CI === 'true';
+const B9_ITERATIONS = isCI ? 40 : 200;
 
 // ---------------------------------------------------------------------------
 // B1 / B3 — Simple query: user by id
@@ -199,6 +205,107 @@ export async function graphqlB2(): Promise<{ resolverCalls: number }> {
     throw new Error(`GraphQL B2 failed: ${result.errors[0]!.message}`);
   }
   return { resolverCalls: calls.count };
+}
+
+// ---------------------------------------------------------------------------
+// B9 — Deep nest with DataLoader: the N+1 fix, honestly measured
+//
+// B2 counts the naive N+1 (1,112 resolver calls). B9 measures the fix: the
+// same 5-level graph through graphql-js + DataLoader, which batches sibling
+// keys per level — exactly the per-level batching Orbit's contract guarantees
+// — and counts the resulting DB calls. Then it measures warm-repeat latency:
+// DataLoader caches WITHIN one request only (fresh loaders per request, the
+// production setup), so every request still pays the 5 DB batches; Orbit with
+// its cache plugin replays warm requests from memory at 0 DB calls.
+// ---------------------------------------------------------------------------
+
+const nestDocument = parse(nestSource);
+
+/**
+ * B9 — deep nest with DataLoader.
+ *
+ * Fresh DataLoaders per request (the correct production setup: a shared
+ * loader would leak cross-request caching). `calls` counts batchFn
+ * invocations — one DB batch per level, the same 5-call floor as Orbit.
+ * Latency is P99 over repeated executions of a pre-parsed document.
+ */
+export async function graphqlB9(): Promise<{ ms: number; callsPerRequest: number }> {
+  const { posts, comments, likes, likedBy } = buildDeepNest();
+  const validationErrors = validate(nestSchema, nestDocument);
+  if (validationErrors.length > 0) {
+    throw new Error(`GraphQL B9 document invalid: ${validationErrors[0]!.message}`);
+  }
+
+  const makeExecutable = () => {
+    const calls = { count: 0 };
+    // Batchers model one DB batch per level (WHERE … IN (:keys)), exactly
+    // like an adapter's `batch()`.
+    const postsLoader = new DataLoader(async (authorIds: readonly string[]) => {
+      calls.count += 1;
+      return authorIds.map((id) => posts.filter((p) => p.authorId === id));
+    });
+    const commentsLoader = new DataLoader(async (postIds: readonly string[]) => {
+      calls.count += 1;
+      return postIds.map((id) => comments.filter((c) => c.postId === id));
+    });
+    const likesLoader = new DataLoader(async (commentIds: readonly string[]) => {
+      calls.count += 1;
+      return commentIds.map((id) => likes.filter((l) => l.commentId === id));
+    });
+    const likedByLoader = new DataLoader(async (likeIds: readonly string[]) => {
+      calls.count += 1;
+      return likeIds.map((id) => likedBy.filter((l) => l.likeId === id));
+    });
+
+    const resolvers = {
+      user: (_source: unknown, { id }: { id: string }) => {
+        calls.count += 1; // one root lookup
+        return users.find((u) => u.id === id) ?? null;
+      },
+      posts: (parent: { id: string }) => postsLoader.load(parent.id),
+      comments: (parent: { id: string }) => commentsLoader.load(parent.id),
+      likes: (parent: { id: string }) => likesLoader.load(parent.id),
+      likedBy: (parent: { id: string }) => likedByLoader.load(parent.id),
+    };
+
+    return {
+      calls,
+      run: () =>
+        execute({
+          schema: nestSchema,
+          document: nestDocument,
+          rootValue: resolvers,
+          fieldResolver: (source, args, context, info) => {
+            const resolver = resolvers[info.fieldName as keyof typeof resolvers];
+            return typeof resolver === 'function'
+              ? (resolver as (s: unknown, a: unknown) => unknown)(source, args)
+              : defaultFieldResolver(source, args, context, info);
+          },
+        }),
+    };
+  };
+
+  // Warm up (JIT + lazy schema init), then measure repeated executions.
+  const warm = makeExecutable();
+  const warmResult = await warm.run();
+  if (warmResult.errors && warmResult.errors.length > 0) {
+    throw new Error(`GraphQL B9 failed: ${warmResult.errors[0]!.message}`);
+  }
+
+  const times: number[] = [];
+  let totalCalls = 0;
+  for (let i = 0; i < B9_ITERATIONS; i += 1) {
+    const { calls, run } = makeExecutable();
+    const start = now();
+    const result = await run();
+    times.push(now() - start);
+    totalCalls += calls.count;
+    if (result.errors && result.errors.length > 0) {
+      throw new Error(`GraphQL B9 failed: ${result.errors[0]!.message}`);
+    }
+  }
+  times.sort((a, b) => a - b);
+  return { ms: pct(times, 99), callsPerRequest: totalCalls / B9_ITERATIONS };
 }
 
 // ---------------------------------------------------------------------------

@@ -134,7 +134,7 @@ curl -s localhost:3000/orbit \
 { "data": { "name": "Ana", "posts": [{ "title": "Why Orbit?" }] } }
 ```
 
-See [examples/standalone-server.ts](./examples/standalone-server.ts) for a complete zero-dependency server (`npm run example`), the [nine runnable examples](./docs/examples.md) for one facet each, [docs/benchmarks.md](./docs/benchmarks.md) for the B1–B8 numbers against measured graphql-js (including the real-HTTP wire path), and [docs/security.md](./docs/security.md) for the threat model.
+See [examples/standalone-server.ts](./examples/standalone-server.ts) for a complete zero-dependency server (`npm run example`), the [nine runnable examples](./docs/examples.md) for one facet each, [docs/benchmarks.md](./docs/benchmarks.md) for the B1–B9 numbers against measured graphql-js (including the real-HTTP wire path and the cache-vs-DataLoader story), and [docs/security.md](./docs/security.md) for the threat model.
 
 ## Query syntax at a glance
 
@@ -197,7 +197,7 @@ Every failure is an `OrbitError` with a standard code and a correct HTTP status:
 | [Adapters](./docs/adapters.md) | The frozen adapter contract, batching, mutations, realtime `subscribe` |
 | [Realtime](./docs/realtime.md) | WebSocket subscriptions, resume/delta sync, heartbeats — zero-dep RFC 6455 |
 | [Serialization](./docs/serialization.md) | JSON, MessagePack, SSE streaming, gzip — `Accept`/`Accept-Encoding` negotiation |
-| [Benchmarks](./docs/benchmarks.md) | B1–B8 vs measured graphql-js — latency, round-trips, throughput, payload, streaming, realtime, real-HTTP wire path |
+| [Benchmarks](./docs/benchmarks.md) | B1–B9 vs measured graphql-js — latency, round-trips, throughput, payload, streaming, realtime, real-HTTP wire path, cache-vs-DataLoader |
 | [Security](./docs/security.md) | Threat model: payload/depth limits, prototype-pollution hardening, realtime protocol defenses |
 | [Examples](./docs/examples.md) | The nine runnable examples, tour and reading order |
 | [Architecture](./docs/architecture.md) | How the engine executes a query, serialization, extension points |
@@ -220,7 +220,7 @@ pnpm run typecheck   # strict TypeScript (builds the core, then checks examples/
 pnpm run build       # ESM + .d.ts → packages/core/dist
 pnpm run example     # zero-dep demo server on localhost:3000
 pnpm run examples    # all nine runnable examples
-pnpm run bench       # B1–B8 benchmarks + chart (docs/benchmarks.md)
+pnpm run bench       # B1–B9 benchmarks + chart (docs/benchmarks.md)
 ```
 
 ## License
