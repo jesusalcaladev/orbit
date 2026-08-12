@@ -200,6 +200,17 @@ Clients may POST the envelope as `application/json` (default) or
 `application/x-msgpack` (smaller, faster to parse). Selected via
 `Content-Type`.
 
+### File uploads (multipart/form-data) ✅
+
+For mutations with binary data, the client posts `multipart/form-data`
+with an `envelope` field (the JSON envelope, validated exactly like any
+other) plus one field per file. Files are delivered to the adapter's
+`mutate(action, args, ctx)` via `ctx.files` (keyed by field name) — the
+envelope contract is untouched. `maxPayloadBytes` caps the whole multipart
+body (early 413 via `content-length`, then again on the buffered bytes);
+non-file fields other than `envelope` are rejected. See
+[docs/server.md](./docs/server.md#file-uploads-multipartform-data).
+
 ### Response — negotiated from `Accept`
 
 | `Accept` | Response |

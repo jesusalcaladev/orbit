@@ -114,6 +114,61 @@ const result = await orbit.execute(
 // result: { status: 200, data: { name: 'Ana' }, fromCache: false, contentType: 'application/json; charset=utf-8' }
 ```
 
+## File uploads (multipart/form-data)
+
+Orbit supports file uploads **natively in the handler** — no plugin, no
+framework, no new dependency. The frozen envelope contract is untouched:
+files are *context*, never envelope fields.
+
+### Client side
+
+Send `multipart/form-data` with an `envelope` field (the JSON envelope) plus
+one field per file:
+
+```ts
+const form = new FormData();
+form.set('envelope', JSON.stringify({
+  do: 'user.uploadAvatar',
+  args: { filter: { id: '1' } },
+}));
+form.set('avatar', avatarFile, 'me.png');
+
+await fetch('/orbit', { method: 'POST', body: form });
+```
+
+### Server side
+
+Every field whose value is a `File` lands in `ctx.files` (keyed by field
+name) — the adapter reads it in `mutate`:
+
+```ts
+const adapter: DataAdapter = {
+  entity: 'user',
+  async mutate(action, args, ctx) {
+    const file = ctx.files?.['avatar'];   // a File — name, type, size, bytes
+    if (action === 'uploadAvatar' && file) {
+      await s3.putObject({ key: `${ctx.state.viewer}/${file.name}`, body: file });
+    }
+    return { id: '1', invalidates: ['cache:user:1'] };
+  },
+};
+```
+
+### Rules
+
+- The `envelope` field is validated exactly like any other envelope (same
+  error codes, same depth limits).
+- Non-file fields other than `envelope` are rejected (`ORBIT_INVALID_QUERY`)
+  — uploads are an explicit contract, not a free-for-all.
+- **Size limit:** `maxPayloadBytes` (default 10 MiB) applies to the **whole
+  multipart body** — enforced twice: early via `content-length` (413 before
+  buffering) and again on the buffered bytes.
+- Responses negotiate normally (`Accept`: JSON, msgpack, or SSE) — the file
+  upload only changes the request shape.
+- Programmatic use: `orbit.execute({ do: 'user.uploadAvatar' }, { files: { avatar } })`.
+- Plugins see `ctx.files` in query hooks (mutations run only `adapter.mutate`,
+  no pipeline), e.g. for size/type validation gates.
+
 ## Payload and depth configuration
 
 ```ts

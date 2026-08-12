@@ -95,6 +95,15 @@ export interface OrbitContext {
   orbit?: OrbitEngineLike;
   /** Content type override — set by plugins to opt into non-JSON serialization. */
   contentType?: string;
+  /**
+   * Uploaded files, keyed by field name — populated by the `handler` when the
+   * request is `multipart/form-data` (the `envelope` field carries the JSON
+   * envelope, every other field whose value is a `File` lands here). Adapters
+   * receive this on `ctx` inside `mutate`; plugins see it too.
+   *
+   * Programmatic use: `orbit.execute({ do: 'user.upload' }, { files: { avatar } })`.
+   */
+  files?: Record<string, File>;
   [key: string]: unknown;
 }
 

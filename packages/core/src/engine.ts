@@ -203,7 +203,10 @@ export class Orbit {
   /**
    * A fetch-compatible HTTP handler with full content negotiation.
    *
-   * - **Input:** JSON or MessagePack envelopes (`Content-Type`).
+   * - **Input:** JSON, MessagePack (`Content-Type: application/x-msgpack`) or
+   *   `multipart/form-data` (file uploads: the `envelope` field carries the
+   *   JSON envelope, every other field whose value is a `File` lands in
+   *   `ctx.files` for the adapter's `mutate`).
    * - **Output:** negotiated from `Accept` — JSON (default), `application/x-msgpack`,
    *   or `text/event-stream` (progressive graph streaming).
    * - **Compression:** gzip via `Accept-Encoding` when the runtime supports it.
@@ -225,8 +228,23 @@ export class Orbit {
         );
       }
 
+      const contentType = request.headers.get('content-type') ?? '';
+      // File uploads travel as multipart/form-data: the `envelope` field is the
+      // JSON envelope, File fields become `ctx.files` (never touch the frozen
+      // envelope contract — files are context, not envelope fields).
+      if (contentType.includes('multipart/form-data')) {
+        const { envelope, files } = await this.#readMultipart(request, contentType);
+        const fullCtx: OrbitContext = files ? { ...base, files } : base;
+        if (format === 'sse') {
+          parseOQS(envelope.query ?? '', { maxDepth: this.#options.maxQueryDepth });
+          return this.#sseResponse(this.stream(envelope, fullCtx), gzip, fullCtx);
+        }
+        const result = await this.execute(envelope, fullCtx);
+        return await this.#toResponse(result, format, gzip);
+      }
+
       const raw = new Uint8Array(await request.arrayBuffer());
-      const isMsgpack = (request.headers.get('content-type') ?? '').includes(MSGPACK_CONTENT_TYPE);
+      const isMsgpack = contentType.includes(MSGPACK_CONTENT_TYPE);
       // Bytes-aware read: uses the known byte length and decodes once.
       const envelope = isMsgpack
         ? readMsgpackEnvelope(raw, this.#options.maxPayloadBytes)
@@ -248,6 +266,73 @@ export class Orbit {
       const orbitError = isOrbitError(error) ? error : await this.#normalizeError(error, base);
       return this.#errorResponse(orbitError, format, gzip);
     }
+  }
+
+  /**
+   * Parse a `multipart/form-data` request into an envelope + files.
+   *
+   * The `envelope` field must be a JSON string (validated exactly like any
+   * other envelope — same error codes, same `maxPayloadBytes` limit on the
+   * whole body). Every other field whose value is a `File` is collected into
+   * `ctx.files` keyed by field name. Non-file fields (other than `envelope`)
+   * are rejected — uploads are a deliberate, explicit contract.
+   */
+  async #readMultipart(
+    request: Request,
+    contentType: string,
+  ): Promise<{ envelope: OrbitEnvelope; files: Record<string, File> }> {
+    const raw = new Uint8Array(await request.arrayBuffer());
+    if (raw.byteLength > this.#options.maxPayloadBytes) {
+      throw new OrbitError(
+        ErrorCode.PAYLOAD_TOO_LARGE,
+        'Request payload exceeds the configured limit',
+        {
+          details: { maxBytes: this.#options.maxPayloadBytes, received: raw.byteLength },
+        },
+      );
+    }
+    let form: FormData;
+    try {
+      // Reconstruct with the ORIGINAL content-type so the boundary travels with
+      // the body (a bare Response loses the multipart boundary).
+      form = await new Response(raw, { headers: { 'content-type': contentType } }).formData();
+    } catch {
+      throw new OrbitError(
+        ErrorCode.INVALID_QUERY,
+        'Envelope is not a valid multipart/form-data body',
+      );
+    }
+
+    const envelopeField = form.get('envelope');
+    if (typeof envelopeField !== 'string') {
+      throw new OrbitError(
+        ErrorCode.INVALID_QUERY,
+        "multipart/form-data uploads must include an 'envelope' field with the JSON envelope",
+        { details: { field: 'envelope' } },
+      );
+    }
+    let envelope: OrbitEnvelope;
+    try {
+      envelope = validateEnvelope(JSON.parse(envelopeField));
+    } catch (error) {
+      if (error instanceof OrbitError) throw error;
+      throw new OrbitError(ErrorCode.INVALID_QUERY, "The 'envelope' field is not valid JSON");
+    }
+
+    const files: Record<string, File> = {};
+    for (const [name, value] of form.entries()) {
+      if (name === 'envelope') continue;
+      if (value instanceof File) {
+        files[name] = value;
+      } else {
+        throw new OrbitError(
+          ErrorCode.INVALID_QUERY,
+          `multipart field '${name}' must be a file or the 'envelope' field`,
+          { details: { field: name } },
+        );
+      }
+    }
+    return { envelope, files };
   }
 
   async #consumeQuery(
