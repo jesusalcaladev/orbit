@@ -182,7 +182,7 @@ cache.clear();                                // everything
 
 ### Bring your own store
 
-`CacheStore` is a 6-method interface — implement it over Redis, Memcached, Cloudflare KV, or anything else:
+`CacheStore` is a five-method interface (four required, `keys()` optional) — implement it over Redis, Memcached, Cloudflare KV, or anything else:
 
 ```ts
 export interface CacheStore {
@@ -193,3 +193,15 @@ export interface CacheStore {
   keys?(): IterableIterator<string>; // optional — powers prefix invalidation
 }
 ```
+
+## The plugin ecosystem
+
+The core ships one built-in plugin (cache) and one reference example
+(`examples/03-auth-plugin.ts`). The first-party **`@orbit/*` plugin and
+adapter packages** — `@orbit/auth`, `@orbit/logging`, `@orbit/redis`,
+`@orbit/postgres`, … — are blueprinted in
+[docs/ecosystem.md](./ecosystem.md): which frozen contract each one
+implements, the monorepo scaffolding conventions, and the build order.
+Every package is a separate workspace under `packages/` that depends on
+`@orbit/core` as a peer — the core never grows.
+

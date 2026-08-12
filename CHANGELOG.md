@@ -4,6 +4,21 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
 
 ## [Unreleased]
 
+### Docs
+- **New `docs/ecosystem.md`** — the blueprint for the first-party
+  `@orbit/*` package ecosystem: every planned package (adapters, caches,
+  plugins, server wrappers, clients), the frozen contract each one
+  implements (`CacheStore`, `DataAdapter`, `OrbitPlugin`, the handler),
+  the monorepo scaffolding conventions, and the build order. Linked from
+  `docs/plugins.md`, the README docs table and ROADMAP §7.
+- **Docs fine-tuning** — `docs/architecture.md` pipeline diagram updated to
+  the real engine internals (`#consumeQuery` / `#resolveLevels` instead of
+  the removed `resolveGraph`); `docs/benchmarks.md` reproduce note fixed
+  (seven → nine scenarios); README test count corrected (295).
+- **Removed `docs/plan-realtime-b3.md`** — the historical planning doc for
+  the realtime transport; superseded by `docs/realtime.md`, spec §10 and
+  the shipped implementation (zero references remained).
+
 ### Security
 - **Prototype-pollution hardening** — attacker-controlled keys (`__proto__`,
   `constructor`) in OQS filters/relations, projected fields and decoded

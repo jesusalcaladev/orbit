@@ -31,7 +31,7 @@ Orbit is a functional pipeline. The core knows nothing of databases — only of 
                            │ miss
                            ▼
               ┌───────────────────────────┐
-              │ resolveGraph (BFS)        │  per level:
+              │ #resolveLevels (BFS)      │  per level:
               │   · group by entity       │    onBeforeExecute (per request)
               │   · batch or parallel     │    adapter.resolve / adapter.batch
               │   · project fields        │    onAfterResolve (per request)

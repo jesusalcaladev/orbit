@@ -36,7 +36,7 @@
 - [ ] **`@orbit/auth`** — hooks `onBeforeResolve`/`onBeforeExecute` with role checks. *Only a hand-written example exists today: `examples/03-auth-plugin.ts`.*
 - [ ] **`@orbit/cache`** — split the core cache plugin out of `@orbit/core` (it currently lives inline in `src/plugins/cache.ts`).
 - [ ] **`@orbit/redis`** — a `RedisCacheStore` implementing the `CacheStore` contract (contract is done and swappable; only the store impl is missing). Supports TTL/SWR and prefix invalidation.
-- [ ] **`@orbit/cloudflare-workers`** — Cloudflare Workers KV `CacheStore`, same contract as `@orbit/redis` (see below).
+- [ ] **`@orbit/kv-cache`** — Cloudflare Workers KV `CacheStore`, same contract as `@orbit/redis` (see below). (`@orbit/cloudflare-workers` is the *server wrapper* package — see §7.)
 - [ ] **`@orbit/logging`** — observability/span-timing around hooks; will help with benchmark B3.
 
 ---
@@ -120,7 +120,9 @@
 ## 7. First-party adapters / plugins / packages (SPEC §9) — ⬜ The bulk of what's missing
 
 The core is a single `@orbit/core` package. The SPEC's distribution model is
-**separate packages**. Future structure (each as its own published package):
+**separate packages**. The full blueprint — contracts, scaffolding
+conventions, build order — lives in **[docs/ecosystem.md](./docs/ecosystem.md)**.
+Future structure (each as its own published package):
 
 ```
 @orbit/core                 ✅ (exists — engine, hooks, OQS, envelope, memory adapter)
@@ -142,7 +144,7 @@ The core is a single `@orbit/core` package. The SPEC's distribution model is
 @orbit/client-react         ⬜ cache-aware React bindings
 ```
 
-- [x] **Monorepo set up** — pnpm workspaces, `packages/core` holds `@orbit/core`; docs/spec/examples live at the root. Further packages slot in as `packages/*`. Turbo/nx can be added when the build graph grows.
+- [x] **Monorepo set up** — pnpm workspaces, `packages/core` holds `@orbit/core`; docs/spec/examples live at the root. Further packages slot in as `packages/*` per `docs/ecosystem.md`. Turbo/nx can be added when the build graph grows.
 - [ ] **Clients** (`@orbit/client`, `@orbit/client-react`) — **defer until the envelope/hook contract is frozen.**
 
 ---

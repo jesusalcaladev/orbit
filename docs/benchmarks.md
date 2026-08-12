@@ -246,7 +246,7 @@ The honest takeaway: **DataLoader closes the cold N+1 gap** (B2's 1,112 → 5, p
 ## Reproduce
 
 ```bash
-npm run bench    # builds dist, runs all seven scenarios, regenerates chart
+npm run bench    # builds dist, runs all nine scenarios (B1–B9), regenerates chart
 ```
 
 Results land in `bench/results/benchmarks.json` (machine-readable) and `bench/results/chart.svg`. The chart above is embedded from that exact SVG — re-run the benchmark before updating this page so the numbers stay real.

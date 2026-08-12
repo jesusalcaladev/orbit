@@ -134,7 +134,7 @@ curl -s localhost:3000/orbit \
 { "data": { "name": "Ana", "posts": [{ "title": "Why Orbit?" }] } }
 ```
 
-See [examples/standalone-server.ts](./examples/standalone-server.ts) for a complete zero-dependency server (`npm run example`), the [nine runnable examples](./docs/examples.md) for one facet each, [docs/benchmarks.md](./docs/benchmarks.md) for the B1–B9 numbers against measured graphql-js (including the real-HTTP wire path and the cache-vs-DataLoader story), and [docs/security.md](./docs/security.md) for the threat model.
+See [examples/standalone-server.ts](./examples/standalone-server.ts) for a complete zero-dependency server (`npm run example`), the [nine runnable examples](./docs/examples.md) for one facet each, [docs/benchmarks.md](./docs/benchmarks.md) for the B1–B9 numbers against measured graphql-js (including the real-HTTP wire path and the cache-vs-DataLoader story), [docs/security.md](./docs/security.md) for the threat model, and [docs/ecosystem.md](./docs/ecosystem.md) for the first-party `@orbit/*` package plan.
 
 ## Query syntax at a glance
 
@@ -194,6 +194,7 @@ Every failure is an `OrbitError` with a standard code and a correct HTTP status:
 | :--- | :--- |
 | [OQS — Query Syntax](./docs/oqs.md) | Full grammar, examples, error cases |
 | [Plugins](./docs/plugins.md) | Hook reference, the pipeline order, writing plugins, the cache plugin |
+| [Ecosystem](./docs/ecosystem.md) | The `@orbit/*` package blueprint — contracts, scaffolding, build order |
 | [Adapters](./docs/adapters.md) | The frozen adapter contract, batching, mutations, realtime `subscribe` |
 | [Realtime](./docs/realtime.md) | WebSocket subscriptions, resume/delta sync, heartbeats — zero-dep RFC 6455 |
 | [Serialization](./docs/serialization.md) | JSON, MessagePack, SSE streaming, gzip — `Accept`/`Accept-Encoding` negotiation |
@@ -214,8 +215,8 @@ in as `packages/*`.
 
 ```bash
 pnpm install         # dev dependencies only (typescript, vitest)
-pnpm test            # 270+ tests, Vitest (runs in packages/core)
-pnpm run test:coverage # 94% stmts / 88% branch / 96% lines
+pnpm test            # 295 tests, Vitest (runs in packages/core)
+pnpm run test:coverage # ~94% stmts / ~88% branch / ~96% lines (see packages/core)
 pnpm run typecheck   # strict TypeScript (builds the core, then checks examples/bench)
 pnpm run build       # ESM + .d.ts → packages/core/dist
 pnpm run example     # zero-dep demo server on localhost:3000
