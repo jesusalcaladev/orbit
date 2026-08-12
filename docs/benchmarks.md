@@ -243,10 +243,28 @@ The honest takeaway: **DataLoader closes the cold N+1 gap** (B2's 1,112 → 5, p
 - **Handler measurements get a longer JIT warm-up** (1,000 ops) because the fetch path needs more warming than the hot execute loop.
 - The harness is fully reproducible: `npm run bench` → console table + `bench/results/*`.
 
+## Core package weight
+
+`npm run size` measures what a client/server actually downloads for the
+protocol core — the built `dist` of `@orbit/core` vs graphql-js (the
+dependency a GraphQL server must ship), on this machine:
+
+| Package | Raw JS | Gzip | Files | Runtime deps |
+| :--- | :--- | :--- | :--- | :--- |
+| `@orbit/core` | **103.5 KB** | **26.4 KB** | 18 | **0** |
+| graphql-js | 1,383 KB | 137.4 KB | 696 | 0 |
+
+Orbit's protocol core ships at **~7.5% of graphql-js's raw bytes** and
+**~19% gzipped** — with zero runtime dependencies (graphql-js ships its own
+`dependencies` too). ~3,590 lines of TypeScript cover the engine, OQS,
+envelope, MessagePack codec, cache plugin, and the RFC 6455 WebSocket
+transport.
+
 ## Reproduce
 
 ```bash
 npm run bench    # builds dist, runs all nine scenarios (B1–B9), regenerates chart
+npm run size     # builds dist, prints the core-vs-graphql weight table above
 ```
 
 Results land in `bench/results/benchmarks.json` (machine-readable) and `bench/results/chart.svg`. The chart above is embedded from that exact SVG — re-run the benchmark before updating this page so the numbers stay real.
