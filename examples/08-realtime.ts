@@ -13,8 +13,8 @@
  */
 import { createServer } from 'node:http';
 import { pathToFileURL } from 'node:url';
-import { createOrbit, createRealtimeServer, memoryAdapter } from '../dist/index.js';
-import type { DataAdapter, Filters, MutationArgs, MutationResult, OrbitContext, SubscriptionEvent } from '../dist/index.js';
+import { createOrbit, createRealtimeServer, memoryAdapter } from '@orbit/core';
+import type { DataAdapter, Filters, MutationArgs, MutationResult, OrbitContext, SubscriptionEvent } from '@orbit/core';
 
 interface Post {
   id: string;
@@ -66,6 +66,9 @@ const postAdapter: DataAdapter = {
 };
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** True when this module is the process entry point (not imported by run-all). */
+const isEntry = import.meta.url === pathToFileURL(process.argv[1] ?? '').href;
 
 export async function main(): Promise<void> {
   const orbit = createOrbit({ adapters: [postAdapter] });
@@ -122,9 +125,20 @@ export async function main(): Promise<void> {
   console.log(`    resumed:    ${replayed ? 'p4 replayed via resume ✅' : 'nothing replayed ❌'}`);
 
   ws2.close();
-  realtime.close();
+  realtime.close(); // terminates every session: close frame + socket destroy
   server.close();
-  console.log('    done (realtime transport: zero-dependency RFC 6455)');
+  server.closeAllConnections(); // backstop for any lingering connection
+
+  // Node's built-in WebSocket (undici) keeps its client-side socket handle
+  // alive even after a clean close — a Node platform behavior, not an Orbit
+  // leak (the server has already terminated every session). When run
+  // standalone, flush the output and exit explicitly. When imported by
+  // run-all, just print — the harness exits once every example is done.
+  if (isEntry) {
+    process.stdout.write('    done (realtime transport: zero-dependency RFC 6455)\n', () => process.exit(0));
+  } else {
+    console.log('    done (realtime transport: zero-dependency RFC 6455)');
+  }
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {

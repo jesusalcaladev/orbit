@@ -15,6 +15,7 @@ import type { OrbitPlugin } from './plugins/types.js';
 import { MSGPACK_CONTENT_TYPE, SSE_CONTENT_TYPE, negotiateFormat, wantsGzip } from './serialize/negotiate.js';
 import type { OrbitFormat } from './serialize/negotiate.js';
 import { encodeMsgpack } from './serialize/msgpack.js';
+import { createCachePlugin } from "./plugins/cache.js";
 import type {
   BatchRequest,
   Filters,
@@ -29,8 +30,9 @@ import type {
   SerializedPayload,
 } from './types.js';
 import { isRecord } from './utils.js';
-
 export const JSON_CONTENT_TYPE = 'application/json; charset=utf-8';
+/** A fetch-compatible handler function for Orbit queries. Takes a Request and returns a Promise<Response>. */
+export type OrbitHandler = (request: Request) => Promise<Response>;
 
 /** Max entries in the parse LRU — bounded so a hot client can't grow it forever. */
 const PARSE_CACHE_MAX = 256;
@@ -44,6 +46,10 @@ export interface OrbitConfig {
   maxQueryDepth?: number;
   /** Maximum envelope size in bytes. Default 10 MiB. */
   maxPayloadBytes?: number;
+  /** Optional cache plugin configuration. When set, automatically mounts
+   *  `createCachePlugin` with these options and integrates caching into the
+   *  handler (reads cache spec from `envelope.cache` or `x-orbit-cache` header). */
+  cache?: import('./plugins/cache.js').CachePluginOptions;
 }
 
 interface OrbitOptions {
@@ -233,8 +239,12 @@ export class Orbit {
     }
   }
 
-  async #consumeQuery(envelope: OrbitEnvelope, ctx: OrbitContext): Promise<OrbitResult> {
-    const gen = this.#queryStages(envelope, ctx);
+  async #consumeQuery(
+    envelope: OrbitEnvelope,
+    ctx: OrbitContext,
+    origin: NodeOrigin = 'client',
+  ): Promise<OrbitResult> {
+    const gen = this.#queryStages(envelope, ctx, origin);
     let final: QueryFinal;
     for (;;) {
       const step = await gen.next();
@@ -255,7 +265,11 @@ export class Orbit {
    * The query pipeline as an async generator: hooks → level-by-level
    * resolution → serialization. `execute` and `stream` both consume it.
    */
-  async *#queryStages(envelope: OrbitEnvelope, ctx: OrbitContext): AsyncGenerator<QueryStage, QueryFinal> {
+  async *#queryStages(
+    envelope: OrbitEnvelope,
+    ctx: OrbitContext,
+    origin: NodeOrigin = 'client',
+  ): AsyncGenerator<QueryStage, QueryFinal> {
     if (typeof envelope.query !== 'string') {
       throw new OrbitError(ErrorCode.INVALID_QUERY, "Missing 'query' string in envelope");
     }
@@ -272,8 +286,8 @@ export class Orbit {
     // via onAfterParse), so repeat queries skip parsing via the LRU.
     let parsed =
       this.#options.plugins.list.length === 0
-        ? this.#parse(raw, 'client')
-        : parseOQS(raw, { maxDepth: this.#options.maxQueryDepth });
+        ? this.#parse(raw, origin)
+        : parseOQS(raw, { maxDepth: this.#options.maxQueryDepth, origin });
 
     // 3. onAfterParse — enrich or replace the parsed tree.
     for (const plugin of this.#options.plugins.list) {
@@ -350,13 +364,15 @@ export class Orbit {
     // Optional re-query of the affected sub-graph. Executed through the SAME
     // query pipeline as a client query (spec §5: "hooks included") — auth
     // gates like `onBeforeResolve` must apply here, or a mutation's `return`
-    // would be an authorization bypass. The sub-envelope carries no `cache`
-    // field, so an envelope-level cache spec never applies to the re-query (a
+    // would be an authorization bypass. Nodes are stamped `origin: 'mutate'`
+    // (per docs/oqs.md): the re-query is a server-initiated read, and plugins
+    // may want to distinguish it. The sub-envelope carries no `cache` field,
+    // so an envelope-level cache spec never applies to the re-query (a
     // post-mutation read should be fresh); only an explicit `x-orbit-cache`
-    // header opts the re-query into caching.
+    // header opts into caching.
     if (typeof envelope.return === 'string') {
       const subEnvelope: OrbitEnvelope = { query: envelope.return };
-      const result = await this.#consumeQuery(subEnvelope, { ...ctx, envelope: subEnvelope });
+      const result = await this.#consumeQuery(subEnvelope, { ...ctx, envelope: subEnvelope }, 'mutate');
       return { ...result, ...(invalidates ? { invalidates } : {}) };
     }
 
@@ -687,6 +703,12 @@ export function createOrbit(config: OrbitConfig = {}): Orbit {
     config.plugins instanceof PluginRegistry
       ? config.plugins
       : new PluginRegistry().register(config.plugins ?? []);
+
+  let cachePlugin: import('./plugins/cache.js').CachePlugin | undefined;
+  if (config.cache !== undefined) {
+    cachePlugin = createCachePlugin(config.cache);
+    plugins.register(cachePlugin);
+  }
 
   return new Orbit({
     adapters,

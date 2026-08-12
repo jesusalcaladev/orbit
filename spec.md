@@ -346,7 +346,7 @@ forwards `mutate`/`subscribe` when provided.
 
 ---
 
-## 11. The plugin pipeline ✅
+## 11. The plugin pipeline — FROZEN ✅
 
 Plugins run in registration order at each stage:
 
@@ -368,6 +368,56 @@ parse → onBeforeParse → onAfterParse → onBeforeResolve → (per node, per 
 
 Short-circuited data is served as-is: the cache plugin stores the *final*
 serialized value, so register cache plugins **after** transformers.
+
+### The parsed query tree (QueryNode) — FROZEN
+
+Every plugin that receives `parsed` (or a `node`) gets this exact shape:
+
+```ts
+interface QueryNode {
+  entity: string;                       // entity name as written, e.g. "user"
+  filters: Record<string, string>;      // verbatim, adapter-interpreted
+  fields: string[];                     // requested leaf fields
+  relations: Record<string, QueryNode>; // nested relations, keyed by relation name
+  origin: 'client' | 'mutate';          // client query vs a mutation's `return` re-query
+}
+```
+
+Decisions (frozen):
+
+| Proposal | Decision | Why |
+| --- | --- | --- |
+| `_origin` (underscore prefix) | **No** — the field is `origin` | It is a public plugin-facing field, not an internal detail. |
+| `_cacheSpec` on the node | **No** — cache specs never live on the node | The node is pure query structure; caching is request context (`ctx.envelope.cache` or the `x-orbit-cache` header), read by the cache plugin. |
+| Mutation `return` nodes | stamped `origin: 'mutate'` | The re-query runs the full pipeline (§5) but is semantically server-initiated — plugins can distinguish it. |
+
+### Hook signatures — FROZEN
+
+```ts
+interface OrbitHooks {
+  onBeforeParse(input: { query: string; ctx: OrbitContext }): string | void;
+  onAfterParse(input: { parsed: QueryNode; ctx: OrbitContext }): QueryNode | void;
+  onBeforeResolve(input: { parsed: QueryNode; ctx: OrbitContext }): { shortCircuit: unknown } | void;
+  onBeforeExecute(input: { entity: string; filters: Filters; node: QueryNode; ctx: OrbitContext }):
+    { filters?: Filters; ctx?: OrbitContext } | void;
+  onAfterResolve(input: { result: unknown; node: QueryNode; ctx: OrbitContext }): unknown | void;
+  onBeforeSerialize(input: { data: unknown; node: QueryNode; ctx: OrbitContext }):
+    unknown | { body: string | Uint8Array; contentType: string } | void;
+  onError(input: { error: OrbitError; ctx: OrbitContext }): OrbitError | void;
+}
+```
+
+Every hook may also return a `Promise` of its return type. Rules (frozen):
+
+- Returning `undefined` (or nothing) always keeps the current value.
+- A short-circuit is *any* object carrying a `shortCircuit` key — plugins must
+  not return data objects with that key unless they intend to short-circuit.
+- A failing `onError` handler never masks the original error.
+- `onBeforeParse`, `onAfterParse` and `onBeforeResolve` run once per query (on
+  the root node); `onBeforeExecute` / `onAfterResolve` run per node, per level.
+- A mutation's `return` re-query runs the full pipeline — hooks included (§5).
+
+Pinned by `test/contract.test.ts` in the core package.
 
 ---
 
@@ -398,6 +448,11 @@ Measured on real hardware by `npm run bench` (see `docs/benchmarks.md`).
 
 **Compat rule:** nothing marked ✅ may change shape in a breaking way without
 a major version bump; additive extensions are always allowed.
+
+**Contract freeze:** the envelope (§3), error codes & response shapes (§6),
+the `DataAdapter` interface (§9) and the parsed tree + hook signatures (§11)
+are frozen as of v0.0.1 and pinned by `test/contract.test.ts` in the core
+package. Anything that moves a frozen shape is a breaking change.
 
 ---
 

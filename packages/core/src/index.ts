@@ -14,7 +14,7 @@
 
 // Engine
 export { Orbit, createOrbit, JSON_CONTENT_TYPE } from './engine.js';
-export type { OrbitConfig } from './engine.js';
+export type { OrbitConfig, OrbitHandler } from './engine.js';
 
 // Serialization & negotiation
 export { encodeMsgpack, decodeMsgpack } from './serialize/msgpack.js';

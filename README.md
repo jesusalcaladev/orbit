@@ -205,15 +205,19 @@ Every failure is an `OrbitError` with a standard code and a correct HTTP status:
 
 ## Development
 
+Orbit is a **pnpm monorepo**: the protocol core lives in `packages/core`
+(`@orbit/core`); docs, spec and examples live at the root. New packages slot
+in as `packages/*`.
+
 ```bash
-npm install          # dev dependencies only (typescript, vitest)
-npm test             # 270+ tests, Vitest
-npm run test:coverage # 94% stmts / 88% branch / 96% lines
-npm run typecheck    # strict TypeScript (builds dist first)
-npm run build        # ESM + .d.ts → dist/
-npm run example      # zero-dep demo server on localhost:3000
-npm run examples     # all nine runnable examples
-npm run bench        # B1–B7 benchmarks + chart (docs/benchmarks.md)
+pnpm install         # dev dependencies only (typescript, vitest)
+pnpm test            # 270+ tests, Vitest (runs in packages/core)
+pnpm run test:coverage # 94% stmts / 88% branch / 96% lines
+pnpm run typecheck   # strict TypeScript (builds the core, then checks examples/bench)
+pnpm run build       # ESM + .d.ts → packages/core/dist
+pnpm run example     # zero-dep demo server on localhost:3000
+pnpm run examples    # all nine runnable examples
+pnpm run bench       # B1–B7 benchmarks + chart (docs/benchmarks.md)
 ```
 
 ## License

@@ -6,6 +6,12 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
 
 ### Fixed
 - **Mutation `return` re-queries now run the full hook pipeline** — `onBeforeParse`, `onAfterParse` and `onBeforeResolve` did not previously run on the post-mutation re-query, so authorization gates (e.g. the `onBeforeResolve` role check in example 03) could be bypassed with `{ do, return }`. The sub-query is now executed exactly like a client query (spec §5: "hooks included"); plugins see the sub-envelope `{ query }`, and no envelope-level `cache` spec applies, so the re-query is fresh unless the client explicitly sends the `x-orbit-cache` header. Regression test in `test/engine.test.ts`.
+- **`RealtimeServer.close()` now terminates sessions' sockets** — it sent a close frame and released hub state but never closed the upgraded TCP sockets, so a following `http.Server.close()` waited forever and the process hung (reproduced in examples 08/09). Every close path now `destroy()`s the socket after writing the close frame (Node keeps upgraded sockets half-open after `end()`); examples 08/09 exit cleanly. Regression test in `test/realtime.test.ts`.
+
+### Changed
+- **Contract freeze (spec §3/§6/§9/§11)** — the `QueryNode` shape and hook signatures are now pinned in the spec and enforced by `test/contract.test.ts`. Decisions: the node field stays `origin` (no `_origin`); cache specs never live on the node (`_cacheSpec` rejected — caching is request context); mutation `return` nodes are stamped `origin: 'mutate'` again, restoring the documented metadata (`docs/oqs.md`, `docs/architecture.md`).
+- **Monorepo (pnpm workspaces)** — the repository is now a multi-package workspace: `packages/core` hosts `@orbit/core` (src, tests, build, vitest config); root examples and benchmarks consume the built package via `@orbit/core`; docs and spec live at the root. `package-lock.json` replaced by `pnpm-lock.yaml`.
+- **Example lifecycle** — 08/09 flush and exit explicitly when run standalone (Node's undici `WebSocket` keeps its client-side socket handle alive after a clean close — a platform behavior, not an Orbit leak); `run-all` flushes the summary and exits once every example is done.
 
 ### Added
 - **B7 · Realtime HTTP benchmark** — real WebSocket connections over `node:http` (raw RFC 6455 client, `bench/ws-client.ts`): 972 subs/s, fan-out to 200 sockets in **8.0 ms** (write path 5.2 ms), resume replay of 500 patches in **3.8 ms** — 25–52× inside the < 200 ms goal. New 7th row in the results table and chart.

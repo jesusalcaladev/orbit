@@ -39,4 +39,9 @@ for (const { name, run } of runs) {
   }
 }
 
-console.log('\nAll examples done.');
+// The imported realtime examples run undici's WebSocket client in-process;
+// its socket handles stay alive after a clean close (a Node platform
+// behavior, not an Orbit leak). Flush the summary and exit explicitly so the
+// harness always completes — preserving the exit code set by a failing
+// example (process.exitCode is 1 on failure).
+process.stdout.write('\nAll examples done.\n', () => process.exit(process.exitCode));

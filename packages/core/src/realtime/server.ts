@@ -166,9 +166,16 @@ export class RealtimeServer {
     );
   }
 
-  /** Close every session and release every shared subscription. */
+  /**
+   * Close every session and release every shared subscription.
+   *
+   * Sessions are TERMINATED, not just disposed: each one receives a close
+   * frame and its socket is ended. Disposing alone would leave the upgraded
+   * TCP connections open, so a following `http.Server.close()` would wait on
+   * them forever and the process would never exit.
+   */
   close(): void {
-    for (const session of this.#sessions) session.dispose();
+    for (const session of this.#sessions) session.shutdown();
     this.#sessions.clear();
     this.#hub.close();
   }
@@ -228,6 +235,14 @@ class Session {
     this.#clientSubs.clear();
   }
 
+  /**
+   * Server-initiated shutdown: close frame + dispose + socket end. Used by
+   * `RealtimeServer.close()` so the process can exit cleanly.
+   */
+  shutdown(): void {
+    this.#terminate(CloseCode.GoingAway, 'server shutdown');
+  }
+
   #scheduleRelease(clientId: string): void {
     this.#hub.detach(clientId);
     const timer = setTimeout(() => {
@@ -266,9 +281,15 @@ class Session {
           }
         }
         // Echo the close, THEN stop the session (send must not be suppressed).
+        // destroy() (not end()) after the frame: Node keeps an upgraded socket
+        // half-open after end() — its handle stays alive and the process never
+        // exits, even when the client has already gone (verified empirically).
+        // Frame delivery is best-effort: on a backed-up connection destroy()
+        // can drop the queued frame (the client would see 1006) — the accepted
+        // trade-off for a guaranteed process exit; end() hangs instead.
         this.#send(closeFrame(CloseCode.Normal));
         this.dispose();
-        this.#socket.end();
+        this.#socket.destroy();
         return;
       }
       case Opcode.Ping:
@@ -428,7 +449,9 @@ class Session {
       // Socket already gone — nothing to send.
     }
     this.dispose();
-    this.#socket.end();
+    // destroy() after the close frame: end() leaves the connection half-open
+    // (see the comment in the Close-frame case above).
+    this.#socket.destroy();
   }
 
   #send(data: Buffer): void {

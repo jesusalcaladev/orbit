@@ -10,8 +10,8 @@
  * Run:  node examples/04-adapter-custom.ts   (after `npm run build`)
  */
 import { pathToFileURL } from 'node:url';
-import { createOrbit } from '../dist/index.js';
-import type { DataAdapter, OrbitContext, SubscriptionEvent } from '../dist/index.js';
+import { createOrbit } from '@orbit/core';
+import type { DataAdapter, OrbitContext, SubscriptionEvent } from '@orbit/core';
 
 interface Country {
   code: string;

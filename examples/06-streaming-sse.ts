@@ -9,7 +9,7 @@
  * Run:  node examples/06-streaming-sse.ts   (after `npm run build`)
  */
 import { pathToFileURL } from 'node:url';
-import { createOrbit, memoryAdapter, SSE_CONTENT_TYPE } from '../dist/index.js';
+import { createOrbit, memoryAdapter, SSE_CONTENT_TYPE } from '@orbit/core';
 
 const users = [{ id: '1', name: 'Ana' }];
 const posts = [

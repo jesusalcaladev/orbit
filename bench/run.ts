@@ -22,8 +22,8 @@ import {
   createRealtimeServer,
   encodeMsgpack,
   memoryAdapter,
-} from '../dist/index.js';
-import type { DataAdapter, SubscriptionEvent } from '../dist/index.js';
+} from '@orbit/core';
+import type { DataAdapter, SubscriptionEvent } from '@orbit/core';
 import { renderChart } from './svg.ts';
 import type { ChartRow } from './svg.ts';
 import { BenchWsClient } from './ws-client.ts';

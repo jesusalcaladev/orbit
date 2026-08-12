@@ -54,7 +54,7 @@
 
 ---
 
-## 3. Envelope & transport (SPEC §4, §7) — ✅ Done, minor alignment
+## 3. Envelope & transport (SPEC §4, §7) — ✅ Done
 
 | Item | Status | Where |
 | :--- | :--- | :--- |
@@ -66,8 +66,7 @@
 | gzip (`CompressionStream`) | ✅ | engine `gzipBytes` |
 | `Accept` / `Accept-Encoding` negotiation | ✅ | `src/serialize/negotiate.ts` |
 
-**🟡 Align parsed-node naming with SPEC:**
-- SPEC proposes `_cacheSpec` / `_origin` on the parsed node. The codebase uses `origin` on the node and keeps the cache spec in `ctx.state` (not on the node). Decide the canonical shape **before shipping adapters/clients** so the wire/plugin contract is stable.
+**✅ Parsed-node naming DECIDED (frozen):** the node field is `origin` (no `_origin`); cache specs never live on the node (`_cacheSpec` rejected — caching is request context, read from `ctx.envelope.cache` / the `x-orbit-cache` header). Mutation `return` nodes are stamped `origin: 'mutate'`. Pinned in spec §11 + `test/contract.test.ts`.
 
 ---
 
@@ -143,7 +142,7 @@ The core is a single `@orbit/core` package. The SPEC's distribution model is
 @orbit/client-react         ⬜ cache-aware React bindings
 ```
 
-- [ ] Set up a **monorepo** (pnpm/turbo/nx) and split the README's `@orbit/core` into the packages above.
+- [x] **Monorepo set up** — pnpm workspaces, `packages/core` holds `@orbit/core`; docs/spec/examples live at the root. Further packages slot in as `packages/*`. Turbo/nx can be added when the build graph grows.
 - [ ] **Clients** (`@orbit/client`, `@orbit/client-react`) — **defer until the envelope/hook contract is frozen.**
 
 ---
@@ -166,9 +165,10 @@ The core is a single `@orbit/core` package. The SPEC's distribution model is
 
 ## 9. Suggested execution order
 
-1. **Freeze the core contract** (hook signatures, `QueryNode` shape, adapter
-   interface, envelope) — decide `_cacheSpec`/`_origin` naming and whether
-   `delete`/`create`/`subscribe` enter the contract.
+1. ✅ **Core contract frozen** — envelope, DataAdapter, error codes, QueryNode
+   shape and hook signatures pinned in spec §3/§6/§9/§11 + `test/contract.test.ts`.
+   Decisions: `origin` (no `_origin`), no `_cacheSpec` on the node, no
+   `delete`/`create` methods, `subscribe` in the contract.
 2. **Attack benchmark B3** — the one weak spot in an otherwise strong core.
 3. **Split packages in a monorepo** — write `@orbit/rest` as a new adapter
    package (`fetchAdapter` was already removed from core; example 04 shows the
@@ -190,6 +190,8 @@ The core is a single `@orbit/core` package. The SPEC's distribution model is
 | Area | Status |
 | :--- | :--- |
 | Core engine (parse → hooks → resolve → serialize) | ✅ |
+| Contract freeze (spec §3/§6/§9/§11 + contract tests) | ✅ |
+| Monorepo (pnpm workspaces) | ✅ (`packages/core`; more packages slot in) |
 | Plugin system (all 7 hooks + registry) | ✅ |
 | OQS + mutations | ✅ |
 | Envelope / serialization / SSE / gzip | ✅ |

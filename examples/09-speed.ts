@@ -22,10 +22,13 @@ import {
   createRealtimeServer,
   encodeMsgpack,
   memoryAdapter,
-} from '../dist/index.js';
-import type { DataAdapter, SubscriptionEvent } from '../dist/index.js';
+} from '@orbit/core';
+import type { DataAdapter, SubscriptionEvent } from '@orbit/core';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** True when this module is the process entry point (not imported by run-all). */
+const isEntry = import.meta.url === pathToFileURL(process.argv[1] ?? '').href;
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -243,8 +246,10 @@ export async function main(): Promise<void> {
     for (const handler of handlers) handler({ type: 'updated', id: 'p1', patch: { n: i } });
   }
   let replayed = 0;
+  let resumeSocket: WebSocket | undefined;
   const resumed = new Promise<void>((resolve) => {
     const ws = new WebSocket(`ws://localhost:${port}/realtime`);
+    resumeSocket = ws;
     ws.onmessage = () => {
       replayed += 1;
       if (replayed === K) resolve();
@@ -258,14 +263,32 @@ export async function main(): Promise<void> {
   const resumeMs = performance.now() - t2; // already milliseconds
   row('realtime resume', `${resumeMs.toFixed(2)} ms`, `(reconnecting client replays ${K} missed patches, not the whole graph)`);
 
+  // Close every client socket first so the server finishes the close
+  // handshakes, then terminate the transport (close frame + socket end) and
+  // the http server. closeAllConnections() is the backstop for any upgraded
+  // socket still lingering (Node ≥ 18.2) — without it the process hangs.
+  resumeSocket?.close();
+  for (const ws of sockets) ws.close();
+  await sleep(50);
   realtime.close();
   server.close();
-  for (const ws of sockets) ws.close();
+  server.closeAllConnections();
 
   out.push('  ' + '─'.repeat(74));
   out.push('  Same machine, same build — run it yourself:  node examples/09-speed.ts');
   out.push('');
-  console.log(out.join('\n'));
+
+  // Node's built-in WebSocket (undici) keeps its client-side socket handles
+  // alive even after a clean close — a Node platform behavior, not an Orbit
+  // leak (the transport above has already terminated every session). When
+  // run standalone, flush the output and exit explicitly; when imported by
+  // run-all, just print — the harness exits once every example is done.
+  const finalOutput = out.join('\n') + '\n';
+  if (isEntry) {
+    process.stdout.write(finalOutput, () => process.exit(0));
+  } else {
+    console.log(finalOutput);
+  }
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {

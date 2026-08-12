@@ -9,8 +9,8 @@
  * Run:  node examples/07-serializer-custom.ts   (after `npm run build`)
  */
 import { pathToFileURL } from 'node:url';
-import { createOrbit, memoryAdapter } from '../dist/index.js';
-import type { OrbitPlugin, SerializedPayload } from '../dist/index.js';
+import { createOrbit, memoryAdapter } from '@orbit/core';
+import type { OrbitPlugin, SerializedPayload } from '@orbit/core';
 
 const users = [
   { id: '1', name: 'Ana', email: 'ana@orbit.dev' },

@@ -323,4 +323,20 @@ describe('RealtimeServer (websocket)', () => {
     ws.send(JSON.stringify({ subscribe: 'post { id }', id: 'big', padding: 'x'.repeat(4096) }));
     await waitFor(() => closed, 'close after oversized message');
   });
+
+  it('close() terminates sessions and their sockets (process can exit)', async () => {
+    await start();
+    const { ws } = await connect();
+    ws.send(JSON.stringify({ subscribe: 'post { id }', id: 'sub-1' }));
+    await waitFor(() => realtime.sessionCount === 1, 'session up');
+
+    // The client must receive the server's close frame and fully close,
+    // otherwise http.Server.close() (and the process) never finishes.
+    const clientClosed = new Promise<void>((resolve) => {
+      ws.onclose = () => resolve();
+    });
+    realtime.close();
+    await clientClosed;
+    expect(realtime.sessionCount).toBe(0);
+  });
 });

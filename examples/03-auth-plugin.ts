@@ -8,8 +8,8 @@
  * Run:  node examples/03-auth-plugin.ts   (after `npm run build`)
  */
 import { pathToFileURL } from 'node:url';
-import { createOrbit, ErrorCode, memoryAdapter, OrbitError } from '../dist/index.js';
-import type { OrbitPlugin } from '../dist/index.js';
+import { createOrbit, ErrorCode, memoryAdapter, OrbitError } from '@orbit/core';
+import type { OrbitPlugin } from '@orbit/core';
 
 interface User {
   id: string;

@@ -17,5 +17,5 @@
     "forceConsistentCasingInFileNames": true,
     "noEmit": true
   },
-  "include": ["examples", "bench"]
+  "include": ["src", "test"]
 }

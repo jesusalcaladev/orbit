@@ -11,7 +11,7 @@
  * Run:  node examples/02-blog-relations.ts   (after `npm run build`)
  */
 import { pathToFileURL } from 'node:url';
-import { createOrbit, memoryAdapter } from '../dist/index.js';
+import { createOrbit, memoryAdapter } from '@orbit/core';
 
 interface User {
   id: string;

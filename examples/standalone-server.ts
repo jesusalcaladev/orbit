@@ -14,8 +14,8 @@
 // The example imports the built package so it runs with Node's native
 // TypeScript support (`npm run example` builds first).
 import { createServer } from 'node:http';
-import { createCachePlugin, createOrbit, memoryAdapter } from '../dist/index.js';
-import type { OrbitContext } from '../dist/index.js';
+import { createCachePlugin, createOrbit, memoryAdapter } from '@orbit/core';
+import type { OrbitContext } from '@orbit/core';
 
 interface User {
   id: string;
