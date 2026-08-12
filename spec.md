@@ -427,13 +427,14 @@ Measured on real hardware by `npm run bench` (see `docs/benchmarks.md`).
 
 | ID | Scenario | Key metric | Competition | Orbit goal |
 | --- | --- | --- | --- | --- |
-| B1 | Simple query (user by id) | P99 latency | REST 5 ms (ref), graphql-js 0.092 ms cached-doc / 1.75 ms naive (measured) | < 3 ms — ✅ 0.05 ms |
+| B1 | Simple query (user by id) | P99 latency | REST 5 ms (ref), graphql-js 0.090 ms cached-doc / 1.7 ms naive (measured) | < 3 ms — ✅ 0.08 ms |
 | B2 | Deep nest (5 levels) | DB round-trips | graphql-js: 1112 resolver calls (measured) | ≤ 5 (1 batch/level) — ✅ 5 |
-| B3 | Throughput | RPS (engine core) | graphql-js 33,669 cached-doc / 2,107 naive (measured) | ~30k — ✅ 107,777 core; full wire path is undici-bound (~11.2k) |
+| B3 | Throughput | RPS (engine core) | graphql-js 33,237 cached-doc / ~2.1k naive (measured) | ~30k — ✅ 110,790 core; full wire path is undici-bound (~13k) |
 | B4 | 20-post feed payload | KB transmitted | graphql-js JSON: 446 KB (measured; 19.1 KB gzipped) | ~120 KB (msgpack + compression) — ✅ 19 KB |
 | B5 | TTFB in streaming | Time to first byte | REST 400 ms (ref, waits for all) | < 50 ms (user first, posts later) — ✅ 6 ms |
-| B6 | Mobile reconnect | Sync time | Apollo refetch: 2 s (ref) | < 200 ms (patch replay) — ✅ 0.1 ms warm · 320 µs resume |
-| B7 | Realtime HTTP (WebSocket fan-out) | Fan-out latency (200 sockets) | spec goal 200 ms | < 200 ms — ✅ 8.3 ms (write path 5.7 ms) · resume 500 patches 3.6 ms |
+| B6 | Mobile reconnect | Sync time | Apollo refetch: 2 s (ref) | < 200 ms (patch replay) — ✅ 0.1 ms warm · ~320 µs resume |
+| B7 | Realtime HTTP (WebSocket fan-out) | Fan-out latency (200 sockets) | spec goal 200 ms | < 200 ms — ✅ 9.4 ms (write path 6.7 ms) · resume 500 patches 3.7 ms |
+| B8 | Wire path · real HTTP (node:http + keep-alive) | Requests/sec over HTTP | graphql-js measured on the same server | ✅ ~1.7× graphql-js (1,627 vs 941 RPS) — same client, same machine |
 
 > Competition column note: graphql-js numbers are MEASURED on the benchmark
 > machine (graphql is a devDependency of the bench harness only — the core
@@ -446,7 +447,7 @@ Measured on real hardware by `npm run bench` (see `docs/benchmarks.md`).
 
 | Version | Contents | Status |
 | --- | --- | --- |
-| **0.0.1** | Core engine, OQS, envelope, errors, JSON/msgpack/SSE, gzip, caching, plugin pipeline, frozen `DataAdapter` + envelope, memoryAdapter, WebSocket realtime transport + security suite, 9 examples, benchmark suite (B1–B7), spec. | ✅ shipped |
+| **0.0.1** | Core engine, OQS, envelope, errors, JSON/msgpack/SSE, gzip, caching, plugin pipeline, frozen `DataAdapter` + envelope, memoryAdapter, WebSocket realtime transport + security suite, prototype-pollution hardening, 9 examples, benchmark suite (B1–B8) incl. a real-HTTP wire path head-to-head, CI (GitHub Actions matrix), spec. | ✅ shipped |
 | **0.1.x** | First real adapters (Postgres, Redis cache store), federation-friendly relation semantics. | 🔜 |
 | **1.0** | Envelope & error codes locked for backwards compatibility; audit of every section in this spec. | 🔜 |
 | **2.0 🔮** | Federated Orbit servers, native (WASM/C++) parsers to close the B3 wire-path gap (engine core already exceeds the goal), first-party client SDKs. | 🔜 |

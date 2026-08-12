@@ -27,6 +27,7 @@ import {
 import type { DataAdapter, SubscriptionEvent } from '@orbit/core';
 import { buildDeepNest, buildFeed, users } from './fixtures.ts';
 import { graphqlB1, graphqlB2, graphqlB3, graphqlB4 } from './graphql.ts';
+import { httpB8 } from './http-bench.ts';
 import { gzip, measure, measureThroughput, now, pct } from './measure.ts';
 import { renderChart } from './svg.ts';
 import type { ChartRow } from './svg.ts';
@@ -38,6 +39,15 @@ import { BenchWsClient } from './ws-client.ts';
 
 const benchDir = join(dirname(fileURLToPath(import.meta.url)), 'results');
 mkdirSync(benchDir, { recursive: true });
+
+/**
+ * CI smoke mode: shared GitHub runners are not a benchmark machine — cut the
+ * sample counts so the suite still exercises every scenario (and the numbers
+ * stay roughly right) without hogging a runner. `npm run bench` locally uses
+ * the full sample counts below.
+ */
+const isCI = process.env.CI === 'true';
+const scale = (n: number, ci: number): number => (isCI ? ci : n);
 
 /**
  * Measure the handler's SERVER-side work only: each fresh Request is built
@@ -81,7 +91,10 @@ async function benchB1(): Promise<{
   // Warm up.
   await orbit.execute({ query: 'user(id="1") { name, email }' });
 
-  const times = await measure(() => orbit.execute({ query: 'user(id="1") { name, email }' }), 2000);
+  const times = await measure(
+    () => orbit.execute({ query: 'user(id="1") { name, email }' }),
+    scale(2000, 400),
+  );
   const orbitP99 = pct(times, 99);
 
   // The same query, same data, through graphql-js on this machine — naive
@@ -193,9 +206,15 @@ async function benchB3(): Promise<{
       body,
     });
 
-  const core = Math.round(await measureThroughput(() => orbit.execute(envelope), 30000));
-  const server = Math.round(await measureServerWork(make, (r) => orbit.handler(r), 8000));
-  const wire = Math.round(await measureThroughput(() => orbit.handler(make()), 4000, 1000));
+  const core = Math.round(
+    await measureThroughput(() => orbit.execute(envelope), scale(30000, 4000)),
+  );
+  const server = Math.round(
+    await measureServerWork(make, (r) => orbit.handler(r), scale(8000, 1000)),
+  );
+  const wire = Math.round(
+    await measureThroughput(() => orbit.handler(make()), scale(4000, 500), scale(1000, 200)),
+  );
 
   // The same query through graphql-js: naive (full pipeline every op) and
   // cached-document (pre-parsed+validated, the production-server equivalent
@@ -348,7 +367,7 @@ async function benchB6(): Promise<{ orbitMs: number; competitionMs: number }> {
   // the first warms the store, the second replays from it.
   const envelope = { query: 'user { id, name, email }', cache: 'ttl=300' } as const;
   await orbit.execute(envelope);
-  const hit = await measure(() => orbit.execute(envelope), 500);
+  const hit = await measure(() => orbit.execute(envelope), scale(500, 200));
   const hitMs = pct(hit, 99);
   console.log(`    warm replay p99: ${hitMs.toFixed(3)} ms`);
 
@@ -573,7 +592,7 @@ interface Result {
 const ok = (met: boolean): string => (met ? '✅' : '⚠️ ');
 
 async function main(): Promise<void> {
-  console.log('Orbit benchmark suite (B1–B7)\n');
+  console.log('Orbit benchmark suite (B1–B8)\n');
 
   const results: Result[] = [];
 
@@ -739,6 +758,28 @@ async function main(): Promise<void> {
     );
   }
 
+  // B8
+  {
+    const { orbitRps, graphqlRps } = await httpB8();
+    const met = orbitRps >= graphqlRps;
+    results.push({
+      id: 'B8',
+      label: 'Wire path · real HTTP (node:http + keep-alive)',
+      metric: 'Requests/sec over HTTP',
+      unit: 'RPS',
+      lowerIsBetter: false,
+      orbitValue: orbitRps,
+      orbitLabel: `${orbitRps.toLocaleString('en-US')} RPS`,
+      competitionValue: graphqlRps,
+      competitionLabel: `${graphqlRps.toLocaleString('en-US')} RPS (graphql-js, measured)`,
+      goal: '≥ graphql-js wire path',
+      goalMet: met,
+    });
+    console.log(
+      `B8 · Wire path real HTTP             ${ok(met)} orbit ${orbitRps.toLocaleString('en-US')} RPS  vs  graphql-js ${graphqlRps.toLocaleString('en-US')} RPS  (node:http + keep-alive, measured)`,
+    );
+  }
+
   // Persist machine-readable results.
   writeFileSync(join(benchDir, 'benchmarks.json'), JSON.stringify(results, null, 2));
 
@@ -754,7 +795,7 @@ async function main(): Promise<void> {
     lowerIsBetter: r.lowerIsBetter,
     goalMet: r.goalMet,
   }));
-  const svg = renderChart('Orbit benchmark suite — B1 to B7', rows);
+  const svg = renderChart('Orbit benchmark suite — B1 to B8', rows);
   writeFileSync(join(benchDir, 'chart.svg'), svg);
 
   console.log('\nBenchmark results written to bench/results/ (benchmarks.json + chart.svg).');

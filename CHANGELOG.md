@@ -4,6 +4,23 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
 
 ## [Unreleased]
 
+### Security
+- **Prototype-pollution hardening** — attacker-controlled keys (`__proto__`,
+  `constructor`) in OQS filters/relations, projected fields and decoded
+  MessagePack maps are now stored as OWN properties via `setOwn`
+  (`Object.defineProperty`), never written through the `__proto__` setter.
+  A query like `user(__proto__="x")` previously rewrote an object's
+  prototype chain; now it is a verbatim filter. Tests in `test/parser.test.ts`,
+  `test/msgpack.test.ts` and `test/engine.test.ts`.
+- **64-bit cache keys** — `fnv1a64` (two independent 32-bit FNV passes, still
+  dependency-free) replaces the single 32-bit hash for cache keys: the
+  collision bound goes from ~65k entries (feasible intentional
+  cache-poisoning) to ~4e9. `fnv1a` stays exported for API compatibility.
+- **New `docs/security.md`** — the threat model: what the core defends
+  (payload/depth limits, ReDoS-free parser, prototype pollution, cache
+  collisions, realtime frame rules) and what is the deployer's job (TLS,
+  rate limiting, auth, HTTP-layer hygiene).
+
 ### Changed
 - **Benchmarks are now real head-to-heads against graphql-js** — B1–B4's
   competition figures were previously reference values quoted from the spec
@@ -39,6 +56,17 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
 - **Example lifecycle** — 08/09 flush and exit explicitly when run standalone (Node's undici `WebSocket` keeps its client-side socket handle alive after a clean close — a platform behavior, not an Orbit leak); `run-all` flushes the summary and exits once every example is done.
 
 ### Added
+- **B8 · Wire-path benchmark (real HTTP)** — `bench/http-bench.ts`: both
+  engines behind an identical `node:http` server, a single keep-alive
+  connection reused by `node:http`'s own client, the same query, the same
+  machine. Orbit serves **~1.5× the requests** of a bare `graphql()` HTTP
+  endpoint (1,661 vs 1,069 RPS). This is the full stack — HTTP parsing, JSON
+  body, handler, serialization — not the in-process core numbers of B3.
+- **GitHub Actions CI** (`.github/workflows/ci.yml`) — a 12-job matrix
+  (ubuntu/macos/windows × Node 18/20/22/24) running typecheck, Biome and the
+  test suite, plus a `bench` job that runs B1–B8 on ubuntu/Node 22 and
+  uploads `bench/results/*` as an artifact with a summary. CI badge in the
+  README.
 - **B7 · Realtime HTTP benchmark** — real WebSocket connections over `node:http` (raw RFC 6455 client, `bench/ws-client.ts`): 972 subs/s, fan-out to 200 sockets in **8.0 ms** (write path 5.2 ms), resume replay of 500 patches in **3.8 ms** — 25–52× inside the < 200 ms goal. New 7th row in the results table and chart.
 - **Security suite for the WebSocket transport** (`test/realtime-security.test.ts` + `test/ws-helper.ts`) — 32 tests speaking raw frames over `net.Socket`: handshake/gates, frame-protocol violations with the right close codes (unmasked, RSV, reserved opcodes, control-frame rules, declared-length DoS → 1009, continuation/fragmentation violations, invalid close payloads/codes, HTTP-after-upgrade), slow-loris resilience, fragmented-message correctness with interleaved control frames, message-level validation (invalid JSON/msgpack, non-objects, bad resume), retention expiry.
 - **`examples/09-speed.ts`** — the speed showcase: engine core µs/op + RPS, full fetch handler, deep 5-level graph, payload shaving, realtime fan-out — measured live on the running machine.

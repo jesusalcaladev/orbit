@@ -157,13 +157,16 @@ The core is a single `@orbit/core` package. The SPEC's distribution model is
 | B4 payload size | ✅ 19 KB (msgpack+gzip) vs graphql-js JSON 446 KB (measured) — gzip equalizes at 19.1 KB; the protocol's edge is round-trips/throughput/streaming, not B4 |
 | B5 streaming TTFB | ✅ 5–6 ms |
 | B6 reconnect/warm-cache replay | ✅ Excellent |
-| B7 realtime fan-out (200 sockets) | ✅ Excellent — 8.0–9.1 ms fan-out, 3.8–8.4 ms resume replay |
+| B7 realtime fan-out (200 sockets) | ✅ Excellent — 7.7–9.1 ms fan-out, 3.6–8.4 ms resume replay |
+| B8 wire path (real HTTP, keep-alive) | ✅ ~1.5× graphql-js (~1.6k vs ~1.04k RPS) — same node:http server, same client, measured |
 
 **Benchmarks are now real head-to-heads:** `graphql` (v17) is a devDependency of
 **the bench harness only** (`bench/graphql.ts` — the core keeps its
 zero-runtime-dependency contract) and runs the same fixtures on the same
 machine. Competition numbers in `docs/benchmarks.md` are measured, not quoted
-from the spec. Run `npm run bench` to refresh B1–B7 on any machine.
+from the spec. Run `npm run bench` to refresh B1–B8 on any machine; GitHub
+Actions CI (`pnpm run bench` on ubuntu/node 22) uploads the results as an
+artifact on every push.
 
 ---
 
@@ -210,7 +213,7 @@ from the spec. Run `npm run bench` to refresh B1–B7 on any machine.
 | Caching core (TTL/SWR/invalidate) | ✅ (in core; → `@orbit/cache`) |
 | In-memory adapter | ✅ (keep in `@orbit/core`) |
 | REST/fetch adapter | ⬜ (`@orbit/rest` new — `fetchAdapter` removed from core) |
-| Benchmarks | ✅ (B1–B7 goals met) |
+| Benchmarks | ✅ (B1–B8 goals met) |
 | Auth plugin | ⬜ (`@orbit/auth`) |
 | Redis cache store | ⬜ (`@orbit/redis`) |
 | Cloudflare KV cache store | ⬜ (`@orbit/kv-cache`) |
