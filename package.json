@@ -12,18 +12,31 @@
     "node": ">=18"
   },
   "scripts": {
+    "prepare": "husky",
     "build": "pnpm --filter @orbit/core run build",
     "typecheck": "pnpm run build && pnpm --filter @orbit/core run typecheck && tsc -p tsconfig.json",
     "test": "pnpm --filter @orbit/core run test",
     "test:watch": "pnpm --filter @orbit/core run test:watch",
     "test:coverage": "pnpm --filter @orbit/core run test:coverage",
+    "format": "biome check --write .",
+    "lint": "biome check .",
     "example": "pnpm run build && node examples/standalone-server.ts",
     "examples": "pnpm run build && node examples/run-all.ts",
     "bench": "pnpm run build && node bench/run.ts"
   },
+  "lint-staged": {
+    "*.{ts,js,json}": [
+      "biome check --write"
+    ]
+  },
   "devDependencies": {
+    "@biomejs/biome": "^2.5.8",
+    "@commitlint/cli": "^21.2.1",
+    "@commitlint/config-conventional": "^21.2.0",
     "@orbit/core": "workspace:*",
     "@types/node": "^24.0.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.3.0",
     "typescript": "^7.0.2"
   }
 }
