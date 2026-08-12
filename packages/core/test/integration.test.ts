@@ -42,7 +42,8 @@ function makeApp() {
         postsResolve(ctx.parent ? 'relation' : 'root');
         let list = posts;
         const parent = ctx.parent;
-        if (parent) list = list.filter((p) => p.authorId === (parent.data as (typeof users)[number]).id);
+        if (parent)
+          list = list.filter((p) => p.authorId === (parent.data as (typeof users)[number]).id);
         if (status) list = list.filter((p) => p.status === status);
         if (id) return list.find((p) => p.id === id);
         return list;

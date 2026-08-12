@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
-import { AdapterRegistry, createOrbit, decodeMsgpack, encodeMsgpack, memoryAdapter, validateEnvelope } from '../src/index.js';
+import {
+  AdapterRegistry,
+  createOrbit,
+  decodeMsgpack,
+  encodeMsgpack,
+  memoryAdapter,
+  validateEnvelope,
+} from '../src/index.js';
 import { ErrorCode } from '../src/errors.js';
 
 // ---------------------------------------------------------------------------
@@ -9,13 +16,15 @@ import { ErrorCode } from '../src/errors.js';
 describe('msgpack coverage — encode families', () => {
   it('encodes bigint as uint64/int64', () => {
     expect(encodeMsgpack(5n)).toEqual(new Uint8Array([0xcf, 0, 0, 0, 0, 0, 0, 0, 5]));
-    expect(encodeMsgpack(-5n)).toEqual(new Uint8Array([0xd3, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfb]));
+    expect(encodeMsgpack(-5n)).toEqual(
+      new Uint8Array([0xd3, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfb]),
+    );
     // round-trips
     expect(decodeMsgpack(encodeMsgpack(2n ** 63n - 1n))).toBe(Number(2n ** 63n - 1n));
   });
 
   it('encodes negative int16 and int64 ranges', () => {
-    expect([...encodeMsgpack(-1000)]).toEqual([0xd1, ...[-1000 >> 8 & 0xff, -1000 & 0xff]]);
+    expect([...encodeMsgpack(-1000)]).toEqual([0xd1, ...[(-1000 >> 8) & 0xff, -1000 & 0xff]]);
     expect(encodeMsgpack(-1000).byteLength).toBe(3);
     expect(decodeMsgpack(encodeMsgpack(-1000))).toBe(-1000);
     const bigNeg = -(2 ** 40);
@@ -95,7 +104,9 @@ describe('msgpack coverage — decode families', () => {
     const arr32 = encodeMsgpack(Array.from({ length: 70_000 }, (_, i) => i));
     expect(decodeMsgpack(arr32)).toHaveLength(70_000);
 
-    const map32 = encodeMsgpack(Object.fromEntries(Array.from({ length: 70_000 }, (_, i) => [`m${i}`, i])));
+    const map32 = encodeMsgpack(
+      Object.fromEntries(Array.from({ length: 70_000 }, (_, i) => [`m${i}`, i])),
+    );
     expect(Object.keys(decodeMsgpack(map32) as Record<string, unknown>)).toHaveLength(70_000);
   });
 });
@@ -149,7 +160,10 @@ describe('AdapterRegistry coverage', () => {
 
   it('lists adapters in registration order', () => {
     const registry = new AdapterRegistry();
-    registry.register([{ entity: 'a', resolve: () => null }, { entity: 'b', resolve: () => null }]);
+    registry.register([
+      { entity: 'a', resolve: () => null },
+      { entity: 'b', resolve: () => null },
+    ]);
     expect(registry.list.map((a) => a.entity)).toEqual(['a', 'b']);
     expect(registry.get('a')).toBeDefined();
     expect(registry.get('nope')).toBeUndefined();
@@ -314,7 +328,9 @@ describe('parse cache', () => {
 
   it('keys distinct queries separately and evicts beyond the LRU bound', async () => {
     const orbit = createOrbit({
-      adapters: memoryAdapter([{ entity: 'user', resolve: ({ id }) => ({ id: id ?? 'anon', name: 'Ana' }) }]),
+      adapters: memoryAdapter([
+        { entity: 'user', resolve: ({ id }) => ({ id: id ?? 'anon', name: 'Ana' }) },
+      ]),
     });
     for (let i = 0; i < 300; i += 1) {
       const result = await orbit.execute({ query: `user(id="${i}") { id }` });
@@ -366,7 +382,11 @@ describe('parse cache', () => {
         },
       ]),
     });
-    const result = await orbit.execute({ do: 'user.update', args: {}, return: 'user(id="9") { id }' });
+    const result = await orbit.execute({
+      do: 'user.update',
+      args: {},
+      return: 'user(id="9") { id }',
+    });
     expect(result.data).toEqual({ id: '9' });
   });
 });

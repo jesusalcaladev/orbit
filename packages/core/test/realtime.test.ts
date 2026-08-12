@@ -3,12 +3,7 @@ import type { Server } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { DataAdapter } from '../src/adapters/types.js';
 import { ErrorCode } from '../src/errors.js';
-import {
-  createOrbit,
-  createRealtimeServer,
-  decodeMsgpack,
-  encodeMsgpack,
-} from '../src/index.js';
+import { createOrbit, createRealtimeServer, decodeMsgpack, encodeMsgpack } from '../src/index.js';
 import type { RealtimeServer, RealtimeServerOptions } from '../src/index.js';
 import { SubscriptionHub } from '../src/realtime/hub.js';
 import type { Filters, MutationArgs, SubscriptionEvent } from '../src/types.js';
@@ -194,7 +189,8 @@ describe('RealtimeServer (websocket)', () => {
   async function connect(path = '/realtime') {
     const ws = new WebSocket(`ws://localhost:${port}${path}`);
     const messages: Array<Record<string, unknown>> = [];
-    ws.onmessage = (event) => messages.push(JSON.parse(String(event.data)) as Record<string, unknown>);
+    ws.onmessage = (event) =>
+      messages.push(JSON.parse(String(event.data)) as Record<string, unknown>);
     await new Promise<void>((resolve, reject) => {
       ws.onopen = () => resolve();
       ws.onerror = () => reject(new Error('websocket failed to open'));

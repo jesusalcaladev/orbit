@@ -45,7 +45,7 @@ describe('encodeMsgpack — primitive bytes', () => {
   it('encodes unicode strings by byte length', () => {
     const value = '🔮orbit';
     const bytes = encodeMsgpack(value);
-    expect(bytes[0]).toBe(0xa0 | 4 + 5); // 4-byte emoji + 5 ascii
+    expect(bytes[0]).toBe(0xa0 | (4 + 5)); // 4-byte emoji + 5 ascii
     expect(decodeMsgpack(bytes)).toBe(value);
   });
 });

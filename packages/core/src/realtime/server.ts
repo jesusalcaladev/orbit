@@ -28,7 +28,15 @@ import { ErrorCode, OrbitError, toOrbitError } from '../errors.js';
 import type { Orbit } from '../engine.js';
 import { decodeMsgpack, encodeMsgpack } from '../serialize/msgpack.js';
 import { isRecord } from '../utils.js';
-import { CloseCode, FrameDecoder, FrameTooLargeError, Opcode, closeFrame, encodeFrame, upgradeResponse } from './frames.js';
+import {
+  CloseCode,
+  FrameDecoder,
+  FrameTooLargeError,
+  Opcode,
+  closeFrame,
+  encodeFrame,
+  upgradeResponse,
+} from './frames.js';
 import type { Frame } from './frames.js';
 import { SubscriptionHub } from './hub.js';
 
@@ -68,7 +76,10 @@ const MAX_FRAGMENT_COUNT = 1000;
 export class RealtimeServer {
   readonly #hub: SubscriptionHub;
   readonly #options: Required<
-    Pick<RealtimeServerOptions, 'path' | 'maxMessageBytes' | 'heartbeatMs' | 'serialize' | 'retentionMs'>
+    Pick<
+      RealtimeServerOptions,
+      'path' | 'maxMessageBytes' | 'heartbeatMs' | 'serialize' | 'retentionMs'
+    >
   >;
   readonly #authorize?: RealtimeServerOptions['authorize'];
   readonly #origins?: Set<string>;
@@ -117,7 +128,12 @@ export class RealtimeServer {
 
     const key = request.headers['sec-websocket-key'];
     const version = request.headers['sec-websocket-version'];
-    if (request.method !== 'GET' || (request.headers.upgrade ?? '').toLowerCase() !== 'websocket' || typeof key !== 'string' || version !== '13') {
+    if (
+      request.method !== 'GET' ||
+      (request.headers.upgrade ?? '').toLowerCase() !== 'websocket' ||
+      typeof key !== 'string' ||
+      version !== '13'
+    ) {
       socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
       return;
     }
@@ -138,32 +154,32 @@ export class RealtimeServer {
     Promise.resolve()
       .then(() => (this.#authorize ? this.#authorize(request) : true))
       .then(
-      (allowed) => {
-        if (!allowed) {
+        (allowed) => {
+          if (!allowed) {
+            socket.end('HTTP/1.1 403 Forbidden\r\n\r\n');
+            return;
+          }
+          // WebSocket traffic is many small frames — disable Nagle so a burst
+          // (fan-out, resume replay) is not held back by delayed-ACK waits.
+          (socket as Socket).setNoDelay(true);
+          socket.write(upgradeResponse(key));
+          const session = new Session(socket, this.#hub, this.#options);
+          this.#sessions.add(session);
+          socket.on('data', (chunk) => session.onData(chunk));
+          socket.on('close', () => {
+            session.dispose();
+            this.#sessions.delete(session);
+          });
+          socket.on('error', () => {
+            session.dispose();
+            this.#sessions.delete(session);
+          });
+          if (head.length > 0) session.onData(head);
+        },
+        () => {
           socket.end('HTTP/1.1 403 Forbidden\r\n\r\n');
-          return;
-        }
-        // WebSocket traffic is many small frames — disable Nagle so a burst
-        // (fan-out, resume replay) is not held back by delayed-ACK waits.
-        (socket as Socket).setNoDelay(true);
-        socket.write(upgradeResponse(key));
-        const session = new Session(socket, this.#hub, this.#options);
-        this.#sessions.add(session);
-        socket.on('data', (chunk) => session.onData(chunk));
-        socket.on('close', () => {
-          session.dispose();
-          this.#sessions.delete(session);
-        });
-        socket.on('error', () => {
-          session.dispose();
-          this.#sessions.delete(session);
-        });
-        if (head.length > 0) session.onData(head);
-      },
-      () => {
-        socket.end('HTTP/1.1 403 Forbidden\r\n\r\n');
-      },
-    );
+        },
+      );
   }
 
   /**
@@ -193,7 +209,10 @@ class Session {
   readonly #hub: SubscriptionHub;
   readonly #options: SessionOptions;
   readonly #decoder: FrameDecoder;
-  readonly #clientSubs = new Map<string, { sub: { unsubscribe(): void }; onEvent: (seq: number, event: unknown) => void }>();
+  readonly #clientSubs = new Map<
+    string,
+    { sub: { unsubscribe(): void }; onEvent: (seq: number, event: unknown) => void }
+  >();
   readonly #heartbeat: NodeJS.Timeout;
   readonly #retention = new Map<string, NodeJS.Timeout>();
   #fragment?: { opcode: number; chunks: Buffer[]; total: number; count: number };
@@ -216,9 +235,11 @@ class Session {
       frames = this.#decoder.push(chunk);
     } catch (error) {
       // A declared length beyond the limit is a 1009; anything else is a 1002.
-      const code =
-        error instanceof FrameTooLargeError ? CloseCode.TooBig : CloseCode.ProtocolError;
-      this.#terminate(code, error instanceof FrameTooLargeError ? 'frame too large' : 'invalid frame');
+      const code = error instanceof FrameTooLargeError ? CloseCode.TooBig : CloseCode.ProtocolError;
+      this.#terminate(
+        code,
+        error instanceof FrameTooLargeError ? 'frame too large' : 'invalid frame',
+      );
       return;
     }
     for (const frame of frames) this.#onFrame(frame);
@@ -314,7 +335,12 @@ class Session {
             this.#terminate(CloseCode.TooBig, 'message too large');
             return;
           }
-          this.#fragment = { opcode: frame.opcode, chunks: [frame.payload], total: frame.payload.length, count: 1 };
+          this.#fragment = {
+            opcode: frame.opcode,
+            chunks: [frame.payload],
+            total: frame.payload.length,
+            count: 1,
+          };
           return;
         }
         this.#handleMessage(frame.opcode, frame.payload);
@@ -360,7 +386,14 @@ class Session {
           ? decodeMsgpack(new Uint8Array(payload))
           : JSON.parse(payload.toString('utf8'));
     } catch {
-      this.#send(this.#encode({ error: { code: ErrorCode.INVALID_QUERY, message: 'Message is not valid JSON/MessagePack' } }));
+      this.#send(
+        this.#encode({
+          error: {
+            code: ErrorCode.INVALID_QUERY,
+            message: 'Message is not valid JSON/MessagePack',
+          },
+        }),
+      );
       return;
     }
     try {
@@ -382,9 +415,13 @@ class Session {
         throw new OrbitError(ErrorCode.INVALID_QUERY, "'id' is required for subscribe");
       }
       if (this.#clientSubs.has(clientId)) {
-        throw new OrbitError(ErrorCode.SUBSCRIPTION_FAILED, `A subscription '${clientId}' already exists`);
+        throw new OrbitError(
+          ErrorCode.SUBSCRIPTION_FAILED,
+          `A subscription '${clientId}' already exists`,
+        );
       }
-      const onEvent = (seq: number, event: unknown) => this.#send(this.#encode({ id: clientId, seq, event }));
+      const onEvent = (seq: number, event: unknown) =>
+        this.#send(this.#encode({ id: clientId, seq, event }));
       const sub = this.#hub.subscribe(message.subscribe, clientId, onEvent);
       this.#clientSubs.set(clientId, { sub, onEvent });
       this.#cancelRelease(clientId);
@@ -408,14 +445,17 @@ class Session {
       const entry = this.#clientSubs.get(clientId);
       if (entry) {
         // Same live session — just replay.
-        const after = typeof message.after === 'number' && Number.isFinite(message.after) ? message.after : 0;
+        const after =
+          typeof message.after === 'number' && Number.isFinite(message.after) ? message.after : 0;
         this.#hub.resume(clientId, after, entry.onEvent);
         this.#send(this.#encode({ resumed: clientId, after }));
         return;
       }
       // Reconnect: re-attach a retained subscription and replay the gap.
-      const onEvent = (seq: number, event: unknown) => this.#send(this.#encode({ id: clientId, seq, event }));
-      const after = typeof message.after === 'number' && Number.isFinite(message.after) ? message.after : 0;
+      const onEvent = (seq: number, event: unknown) =>
+        this.#send(this.#encode({ id: clientId, seq, event }));
+      const after =
+        typeof message.after === 'number' && Number.isFinite(message.after) ? message.after : 0;
       const sub = this.#hub.resume(clientId, after, onEvent);
       if (!sub) {
         throw new OrbitError(
@@ -429,7 +469,10 @@ class Session {
       return;
     }
 
-    throw new OrbitError(ErrorCode.INVALID_QUERY, "Message must contain 'subscribe', 'unsubscribe' or 'resume'");
+    throw new OrbitError(
+      ErrorCode.INVALID_QUERY,
+      "Message must contain 'subscribe', 'unsubscribe' or 'resume'",
+    );
   }
 
   #tickHeartbeat(): void {
@@ -472,6 +515,9 @@ class Session {
 }
 
 /** Create a realtime server for an Orbit engine. */
-export function createRealtimeServer(orbit: Orbit, options?: RealtimeServerOptions): RealtimeServer {
+export function createRealtimeServer(
+  orbit: Orbit,
+  options?: RealtimeServerOptions,
+): RealtimeServer {
   return new RealtimeServer(orbit, options);
 }

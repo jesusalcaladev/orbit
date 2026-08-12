@@ -5,7 +5,13 @@ import { parseOQS } from '../src/parser.js';
 describe('parseOQS — roots & filters', () => {
   it('parses a bare entity', () => {
     const node = parseOQS('user');
-    expect(node).toEqual({ entity: 'user', filters: {}, fields: [], relations: {}, origin: 'client' });
+    expect(node).toEqual({
+      entity: 'user',
+      filters: {},
+      fields: [],
+      relations: {},
+      origin: 'client',
+    });
   });
 
   it('parses a single quoted filter', () => {
@@ -98,19 +104,27 @@ describe('parseOQS — fields & relations', () => {
 
 describe('parseOQS — errors', () => {
   it('rejects an empty query', () => {
-    expect(() => parseOQS('')).toThrowError(expect.objectContaining({ code: ErrorCode.INVALID_QUERY }));
+    expect(() => parseOQS('')).toThrowError(
+      expect.objectContaining({ code: ErrorCode.INVALID_QUERY }),
+    );
   });
 
   it('rejects whitespace-only queries', () => {
-    expect(() => parseOQS('   ')).toThrowError(expect.objectContaining({ code: ErrorCode.INVALID_QUERY }));
+    expect(() => parseOQS('   ')).toThrowError(
+      expect.objectContaining({ code: ErrorCode.INVALID_QUERY }),
+    );
   });
 
   it('rejects trailing garbage', () => {
-    expect(() => parseOQS('user extra')).toThrowError(expect.objectContaining({ code: ErrorCode.INVALID_QUERY }));
+    expect(() => parseOQS('user extra')).toThrowError(
+      expect.objectContaining({ code: ErrorCode.INVALID_QUERY }),
+    );
   });
 
   it('rejects an unterminated string literal', () => {
-    expect(() => parseOQS('user(id="123)')).toThrowError(expect.objectContaining({ code: ErrorCode.INVALID_QUERY }));
+    expect(() => parseOQS('user(id="123)')).toThrowError(
+      expect.objectContaining({ code: ErrorCode.INVALID_QUERY }),
+    );
   });
 
   it('rejects an unterminated brace block', () => {
@@ -120,19 +134,27 @@ describe('parseOQS — errors', () => {
   });
 
   it('rejects an unterminated argument list', () => {
-    expect(() => parseOQS('user(id="1"')).toThrowError(expect.objectContaining({ code: ErrorCode.INVALID_QUERY }));
+    expect(() => parseOQS('user(id="1"')).toThrowError(
+      expect.objectContaining({ code: ErrorCode.INVALID_QUERY }),
+    );
   });
 
   it('rejects a missing "="', () => {
-    expect(() => parseOQS('user(id "1")')).toThrowError(expect.objectContaining({ code: ErrorCode.INVALID_QUERY }));
+    expect(() => parseOQS('user(id "1")')).toThrowError(
+      expect.objectContaining({ code: ErrorCode.INVALID_QUERY }),
+    );
   });
 
   it('rejects a missing value', () => {
-    expect(() => parseOQS('user(id=)')).toThrowError(expect.objectContaining({ code: ErrorCode.INVALID_QUERY }));
+    expect(() => parseOQS('user(id=)')).toThrowError(
+      expect.objectContaining({ code: ErrorCode.INVALID_QUERY }),
+    );
   });
 
   it('rejects an identifier starting with a digit', () => {
-    expect(() => parseOQS('1user')).toThrowError(expect.objectContaining({ code: ErrorCode.INVALID_QUERY }));
+    expect(() => parseOQS('1user')).toThrowError(
+      expect.objectContaining({ code: ErrorCode.INVALID_QUERY }),
+    );
   });
 
   it('includes position details in the error', () => {

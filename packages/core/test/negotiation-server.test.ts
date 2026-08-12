@@ -3,7 +3,10 @@ import { createOrbit, decodeMsgpack, encodeMsgpack, memoryAdapter } from '../src
 import type { OrbitStreamEvent } from '../src/index.js';
 import { ErrorCode } from '../src/errors.js';
 
-const users = [{ id: '1', name: 'Ana' }, { id: '2', name: 'Bruno' }];
+const users = [
+  { id: '1', name: 'Ana' },
+  { id: '2', name: 'Bruno' },
+];
 const posts = [
   { id: 'p1', authorId: '1', title: 'First' },
   { id: 'p2', authorId: '1', title: 'Second' },
@@ -73,7 +76,10 @@ describe('handler — Accept negotiation', () => {
   it('serves MessagePack when Accept: application/x-msgpack', async () => {
     const orbit = makeOrbit();
     const response = await orbit.handler(
-      request({ query: 'user(id="1") { name, posts { title } }' }, { headers: { accept: 'application/x-msgpack' } }),
+      request(
+        { query: 'user(id="1") { name, posts { title } }' },
+        { headers: { accept: 'application/x-msgpack' } },
+      ),
     );
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toBe('application/x-msgpack');
@@ -87,12 +93,18 @@ describe('handler — Accept negotiation', () => {
   it('respects q-values between json and msgpack', async () => {
     const orbit = makeOrbit();
     const msgpack = await orbit.handler(
-      request({ query: 'user(id="1") { name }' }, { headers: { accept: 'application/json;q=0.5, application/x-msgpack;q=0.8' } }),
+      request(
+        { query: 'user(id="1") { name }' },
+        { headers: { accept: 'application/json;q=0.5, application/x-msgpack;q=0.8' } },
+      ),
     );
     expect(msgpack.headers.get('content-type')).toBe('application/x-msgpack');
 
     const json = await orbit.handler(
-      request({ query: 'user(id="1") { name }' }, { headers: { accept: 'application/x-msgpack;q=0.5, application/json;q=0.9' } }),
+      request(
+        { query: 'user(id="1") { name }' },
+        { headers: { accept: 'application/x-msgpack;q=0.5, application/json;q=0.9' } },
+      ),
     );
     expect(json.headers.get('content-type')).toContain('application/json');
   });
@@ -118,14 +130,19 @@ describe('handler — gzip', () => {
       request({ query: 'user { name }' }, { headers: { 'accept-encoding': 'gzip' } }),
     );
     expect(response.headers.get('content-encoding')).toBe('gzip');
-    const inflated = JSON.parse(new TextDecoder().decode(await gunzip(new Uint8Array(await response.arrayBuffer()))));
+    const inflated = JSON.parse(
+      new TextDecoder().decode(await gunzip(new Uint8Array(await response.arrayBuffer()))),
+    );
     expect(inflated.data).toEqual([{ name: 'Ana' }, { name: 'Bruno' }]);
   });
 
   it('compresses msgpack payloads too', async () => {
     const orbit = makeOrbit();
     const response = await orbit.handler(
-      request({ query: 'user(id="1") { name }' }, { headers: { accept: 'application/x-msgpack', 'accept-encoding': 'gzip' } }),
+      request(
+        { query: 'user(id="1") { name }' },
+        { headers: { accept: 'application/x-msgpack', 'accept-encoding': 'gzip' } },
+      ),
     );
     expect(response.headers.get('content-encoding')).toBe('gzip');
     const inflated = decodeMsgpack(await gunzip(new Uint8Array(await response.arrayBuffer()))) as {
@@ -160,7 +177,10 @@ describe('handler — SSE streaming', () => {
   it('streams the graph level by level as text/event-stream', async () => {
     const orbit = makeOrbit();
     const response = await orbit.handler(
-      request({ query: 'user(id="1") { name, posts { title } }' }, { headers: { accept: 'text/event-stream' } }),
+      request(
+        { query: 'user(id="1") { name, posts { title } }' },
+        { headers: { accept: 'text/event-stream' } },
+      ),
     );
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toContain('text/event-stream');
@@ -177,7 +197,10 @@ describe('handler — SSE streaming', () => {
       while ((sep = buffer.indexOf('\n\n')) !== -1) {
         const frame = buffer.slice(0, sep);
         buffer = buffer.slice(sep + 2);
-        const data = frame.split('\n').find((l) => l.startsWith('data: '))?.slice(6);
+        const data = frame
+          .split('\n')
+          .find((l) => l.startsWith('data: '))
+          ?.slice(6);
         if (data) events.push(JSON.parse(data));
       }
     }
@@ -233,7 +256,9 @@ describe('handler — SSE streaming', () => {
       ),
     );
     expect(response.headers.get('content-encoding')).toBe('gzip');
-    const inflated = new TextDecoder().decode(await gunzip(new Uint8Array(await response.arrayBuffer())));
+    const inflated = new TextDecoder().decode(
+      await gunzip(new Uint8Array(await response.arrayBuffer())),
+    );
     expect(inflated).toBe('Ana\nBruno');
   });
 });

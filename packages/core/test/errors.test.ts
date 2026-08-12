@@ -28,7 +28,9 @@ describe('OrbitError', () => {
   });
 
   it('serializes to the wire shape', () => {
-    const error = new OrbitError(ErrorCode.INVALID_QUERY, 'bad query', { details: { position: 3 } });
+    const error = new OrbitError(ErrorCode.INVALID_QUERY, 'bad query', {
+      details: { position: 3 },
+    });
     expect(error.toJSON()).toEqual({
       error: { code: 'ORBIT_INVALID_QUERY', message: 'bad query', details: { position: 3 } },
     });

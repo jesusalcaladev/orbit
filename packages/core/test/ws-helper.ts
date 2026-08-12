@@ -181,7 +181,11 @@ export class RawWsClient {
    * Resolve with the next frame matching `predicate` (checked against frames
    * that already arrived too). Rejects after `timeoutMs`.
    */
-  awaitFrame(predicate: (frame: ServerFrame) => boolean, label: string, timeoutMs = 3000): Promise<ServerFrame> {
+  awaitFrame(
+    predicate: (frame: ServerFrame) => boolean,
+    label: string,
+    timeoutMs = 3000,
+  ): Promise<ServerFrame> {
     const existing = this.frames.find(predicate);
     if (existing) return Promise.resolve(existing);
     return new Promise((resolve, reject) => {
@@ -203,7 +207,10 @@ export class RawWsClient {
   waitForClose(timeoutMs = 3000): Promise<void> {
     if (this.#closed) return Promise.resolve();
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`Timed out (${timeoutMs} ms) waiting for socket close`)), timeoutMs);
+      const timer = setTimeout(
+        () => reject(new Error(`Timed out (${timeoutMs} ms) waiting for socket close`)),
+        timeoutMs,
+      );
       this.socket.once('close', () => {
         clearTimeout(timer);
         resolve();

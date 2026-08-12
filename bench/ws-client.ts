@@ -24,9 +24,14 @@ export class BenchWsClient {
   #closed = false;
   #resolveReady: () => void = () => {};
   #rejectReady: (error: Error) => void = () => {};
-  #waiters: Array<{ count: number; resolve: () => void; reject: (e: Error) => void; timer: NodeJS.Timeout }> = [];
+  #waiters: Array<{
+    count: number;
+    resolve: () => void;
+    reject: (e: Error) => void;
+    timer: NodeJS.Timeout;
+  }> = [];
 
-  constructor(port: number, path = '/realtime', host = '127.0.0.1') {
+  constructor(port: number, host = '127.0.0.1') {
     this.socket = connect({ port, host });
     this.socket.on('data', (chunk) => this.#onData(chunk));
     this.socket.on('error', () => {});

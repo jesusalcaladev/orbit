@@ -71,7 +71,10 @@ export class SubscriptionHub {
     const existing = this.#subscribers.get(clientId);
     if (existing !== undefined) {
       if (existing.onEvent !== undefined) {
-        throw new OrbitError(ErrorCode.SUBSCRIPTION_FAILED, `A subscription '${clientId}' already exists`);
+        throw new OrbitError(
+          ErrorCode.SUBSCRIPTION_FAILED,
+          `A subscription '${clientId}' already exists`,
+        );
       }
       if (existing.key !== key) {
         throw new OrbitError(
@@ -86,9 +89,13 @@ export class SubscriptionHub {
 
     const adapter = this.#orbit.adapters.get(node.entity);
     if (!adapter) {
-      throw new OrbitError(ErrorCode.ENTITY_UNREGISTERED, `No adapter is registered for entity '${node.entity}'`, {
-        details: { entity: node.entity },
-      });
+      throw new OrbitError(
+        ErrorCode.ENTITY_UNREGISTERED,
+        `No adapter is registered for entity '${node.entity}'`,
+        {
+          details: { entity: node.entity },
+        },
+      );
     }
     if (typeof adapter.subscribe !== 'function') {
       throw new OrbitError(

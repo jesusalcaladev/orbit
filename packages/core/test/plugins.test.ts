@@ -24,7 +24,10 @@ const noopPlugin: OrbitPlugin = { name: 'noop', hooks: {} };
 describe('PluginRegistry', () => {
   it('registers plugins in order', () => {
     const registry = new PluginRegistry();
-    registry.register([{ name: 'a', hooks: {} }, { name: 'b', hooks: {} }]);
+    registry.register([
+      { name: 'a', hooks: {} },
+      { name: 'b', hooks: {} },
+    ]);
     expect(registry.list.map((p) => p.name)).toEqual(['a', 'b']);
   });
 
@@ -65,7 +68,13 @@ describe('hook lifecycle', () => {
     const swap: OrbitPlugin = {
       name: 'swap',
       hooks: {
-        onAfterParse: () => ({ entity: 'user', filters: { id: '1' }, fields: ['name'], relations: {}, origin: 'client' as const }),
+        onAfterParse: () => ({
+          entity: 'user',
+          filters: { id: '1' },
+          fields: ['name'],
+          relations: {},
+          origin: 'client' as const,
+        }),
       },
     };
     const orbit = makeOrbit([swap]);

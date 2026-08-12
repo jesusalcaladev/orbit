@@ -28,10 +28,7 @@ export function validateEnvelope(value: unknown): OrbitEnvelope {
     );
   }
   if (typeof query === 'string' && typeof action === 'string') {
-    throw new OrbitError(
-      ErrorCode.INVALID_QUERY,
-      "Envelope cannot contain both 'query' and 'do'",
-    );
+    throw new OrbitError(ErrorCode.INVALID_QUERY, "Envelope cannot contain both 'query' and 'do'");
   }
 
   const envelope: OrbitEnvelope = {};
@@ -80,9 +77,13 @@ function parseEnvelopeJson(parse: () => unknown): OrbitEnvelope {
  */
 export function readEnvelopeBytes(bytes: Uint8Array, maxBytes: number): OrbitEnvelope {
   if (bytes.byteLength > maxBytes) {
-    throw new OrbitError(ErrorCode.PAYLOAD_TOO_LARGE, 'Request payload exceeds the configured limit', {
-      details: { maxBytes, received: bytes.byteLength },
-    });
+    throw new OrbitError(
+      ErrorCode.PAYLOAD_TOO_LARGE,
+      'Request payload exceeds the configured limit',
+      {
+        details: { maxBytes, received: bytes.byteLength },
+      },
+    );
   }
   return parseEnvelopeJson(() => JSON.parse(decoder.decode(bytes)));
 }
@@ -94,9 +95,13 @@ export function readEnvelopeBytes(bytes: Uint8Array, maxBytes: number): OrbitEnv
 export function readEnvelope(body: string, maxBytes: number): OrbitEnvelope {
   const size = byteLength(body);
   if (size > maxBytes) {
-    throw new OrbitError(ErrorCode.PAYLOAD_TOO_LARGE, 'Request payload exceeds the configured limit', {
-      details: { maxBytes, received: size },
-    });
+    throw new OrbitError(
+      ErrorCode.PAYLOAD_TOO_LARGE,
+      'Request payload exceeds the configured limit',
+      {
+        details: { maxBytes, received: size },
+      },
+    );
   }
   return parseEnvelopeJson(() => JSON.parse(body));
 }
@@ -107,9 +112,13 @@ export function readEnvelope(body: string, maxBytes: number): OrbitEnvelope {
  */
 export function readMsgpackEnvelope(bytes: Uint8Array, maxBytes: number): OrbitEnvelope {
   if (bytes.byteLength > maxBytes) {
-    throw new OrbitError(ErrorCode.PAYLOAD_TOO_LARGE, 'Request payload exceeds the configured limit', {
-      details: { maxBytes, received: bytes.byteLength },
-    });
+    throw new OrbitError(
+      ErrorCode.PAYLOAD_TOO_LARGE,
+      'Request payload exceeds the configured limit',
+      {
+        details: { maxBytes, received: bytes.byteLength },
+      },
+    );
   }
 
   let parsed: unknown;

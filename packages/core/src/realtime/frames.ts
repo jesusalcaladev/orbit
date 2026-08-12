@@ -39,7 +39,9 @@ export const CloseCode = {
  * (RFC 6455 §4.2.2): SHA-1 of `key + GUID`, base64-encoded.
  */
 export function computeAcceptKey(secWebSocketKey: string): string {
-  return createHash('sha1').update(secWebSocketKey + WS_GUID).digest('base64');
+  return createHash('sha1')
+    .update(secWebSocketKey + WS_GUID)
+    .digest('base64');
 }
 
 /** The raw HTTP 101 response for a valid Upgrade request. */

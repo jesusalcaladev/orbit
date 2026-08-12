@@ -42,7 +42,9 @@ describe('fnv1a', () => {
 describe('isSerializedPayload', () => {
   it('detects string and Uint8Array bodies', () => {
     expect(isSerializedPayload({ body: 'x', contentType: 'text/plain' })).toBe(true);
-    expect(isSerializedPayload({ body: new Uint8Array([1]), contentType: 'application/octet-stream' })).toBe(true);
+    expect(
+      isSerializedPayload({ body: new Uint8Array([1]), contentType: 'application/octet-stream' }),
+    ).toBe(true);
   });
 
   it('rejects malformed payloads', () => {

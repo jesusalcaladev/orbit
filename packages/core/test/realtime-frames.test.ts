@@ -11,7 +11,11 @@ import {
 } from '../src/realtime/frames.js';
 
 /** Build a masked client frame (as a real browser/undici client would send). */
-function clientFrame(opcode: number, payload: string | Buffer, mask = Buffer.from([1, 2, 3, 4])): Buffer {
+function clientFrame(
+  opcode: number,
+  payload: string | Buffer,
+  mask = Buffer.from([1, 2, 3, 4]),
+): Buffer {
   const data = typeof payload === 'string' ? Buffer.from(payload) : payload;
   let header: Buffer;
   if (data.length < 126) {
@@ -86,7 +90,10 @@ describe('FrameDecoder', () => {
   });
 
   it('decodes frames split across arbitrary chunk boundaries', () => {
-    const raw = Buffer.concat([clientFrame(Opcode.Text, 'first'), clientFrame(Opcode.Text, 'second')]);
+    const raw = Buffer.concat([
+      clientFrame(Opcode.Text, 'first'),
+      clientFrame(Opcode.Text, 'second'),
+    ]);
     const decoder = new FrameDecoder();
     const frames: ReturnType<FrameDecoder['push']>[number][] = [];
     for (let i = 0; i < raw.length; i += 1) {

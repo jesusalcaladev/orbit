@@ -28,7 +28,9 @@ function csvPlugin(): OrbitPlugin {
         const fields = node.fields;
         const lines = [
           fields.join(','),
-          ...rows.map((row) => fields.map((f) => String((row as Record<string, unknown>)[f] ?? '')).join(',')),
+          ...rows.map((row) =>
+            fields.map((f) => String((row as Record<string, unknown>)[f] ?? '')).join(','),
+          ),
         ];
         const payload: SerializedPayload = {
           body: lines.join('\n'),

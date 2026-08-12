@@ -3,7 +3,10 @@ import { memoryAdapter } from '../src/index.js';
 import { createOrbit } from '../src/engine.js';
 import { ErrorCode, OrbitError } from '../src/errors.js';
 
-const users = [{ id: '1', name: 'Ana' }, { id: '2', name: 'Bruno' }];
+const users = [
+  { id: '1', name: 'Ana' },
+  { id: '2', name: 'Bruno' },
+];
 const posts = [
   { id: 'p1', authorId: '1', title: 'First' },
   { id: 'p2', authorId: '1', title: 'Second' },
@@ -104,9 +107,9 @@ describe('orbit.stream', () => {
 
   it('rejects mutations', async () => {
     const orbit = makeOrbit();
-    await expect(
-      collect(orbit.stream({ do: 'user.update', args: {} })),
-    ).rejects.toMatchObject({ code: ErrorCode.INVALID_QUERY });
+    await expect(collect(orbit.stream({ do: 'user.update', args: {} }))).rejects.toMatchObject({
+      code: ErrorCode.INVALID_QUERY,
+    });
   });
 
   it('normalizes errors through onError hooks', async () => {

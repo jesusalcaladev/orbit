@@ -69,14 +69,20 @@ describe('contract: error codes & wire shape', () => {
       details: { entity: 'user' },
     });
     expect(error.toJSON()).toEqual({
-      error: { code: 'ORBIT_ENTITY_UNREGISTERED', message: 'No adapter', details: { entity: 'user' } },
+      error: {
+        code: 'ORBIT_ENTITY_UNREGISTERED',
+        message: 'No adapter',
+        details: { entity: 'user' },
+      },
     });
   });
 });
 
 describe('contract: envelope rules (spec §3)', () => {
   it('requires exactly one of query/do', () => {
-    expect(() => validateEnvelope({})).toThrowError(expect.objectContaining({ code: ErrorCode.INVALID_QUERY }));
+    expect(() => validateEnvelope({})).toThrowError(
+      expect.objectContaining({ code: ErrorCode.INVALID_QUERY }),
+    );
     expect(() => validateEnvelope({ query: 'a', do: 'b' })).toThrowError(
       expect.objectContaining({ code: ErrorCode.INVALID_QUERY }),
     );

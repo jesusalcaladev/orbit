@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createCachePlugin, createMemoryCacheStore, memoryAdapter, parseCacheSpec } from '../src/index.js';
+import {
+  createCachePlugin,
+  createMemoryCacheStore,
+  memoryAdapter,
+  parseCacheSpec,
+} from '../src/index.js';
 import { createOrbit } from '../src/engine.js';
 import { ErrorCode } from '../src/errors.js';
 
@@ -31,7 +36,9 @@ describe('parseCacheSpec', () => {
 
   it('rejects malformed specs', () => {
     for (const bad of ['ttl=', 'ttl=abc', 'foo=1', 'ttl=-5', '{nope}', '{', 'ttl=1,']) {
-      expect(() => parseCacheSpec(bad)).toThrowError(expect.objectContaining({ code: ErrorCode.INVALID_QUERY }));
+      expect(() => parseCacheSpec(bad)).toThrowError(
+        expect.objectContaining({ code: ErrorCode.INVALID_QUERY }),
+      );
     }
   });
 });
@@ -106,7 +113,13 @@ describe('cache plugin', () => {
     await orbit.execute(baseEnvelope());
     expect(resolve).toHaveBeenCalledTimes(1);
 
-    const node = { entity: 'user', filters: { id: '1' }, fields: ['name'], relations: {}, origin: 'client' as const };
+    const node = {
+      entity: 'user',
+      filters: { id: '1' },
+      fields: ['name'],
+      relations: {},
+      origin: 'client' as const,
+    };
     cache.invalidate(cache.keyFor(node));
     await orbit.execute(baseEnvelope());
     expect(resolve).toHaveBeenCalledTimes(2);
@@ -125,9 +138,27 @@ describe('cache plugin', () => {
 
   it('keys differ when the selection changes', () => {
     const cache = createCachePlugin({ store: createMemoryCacheStore() });
-    const keyA = cache.keyFor({ entity: 'user', filters: { id: '1' }, fields: ['name'], relations: {}, origin: 'client' });
-    const keyB = cache.keyFor({ entity: 'user', filters: { id: '1' }, fields: ['name', 'email'], relations: {}, origin: 'client' });
-    const keyC = cache.keyFor({ entity: 'user', filters: { id: '2' }, fields: ['name'], relations: {}, origin: 'client' });
+    const keyA = cache.keyFor({
+      entity: 'user',
+      filters: { id: '1' },
+      fields: ['name'],
+      relations: {},
+      origin: 'client',
+    });
+    const keyB = cache.keyFor({
+      entity: 'user',
+      filters: { id: '1' },
+      fields: ['name', 'email'],
+      relations: {},
+      origin: 'client',
+    });
+    const keyC = cache.keyFor({
+      entity: 'user',
+      filters: { id: '2' },
+      fields: ['name'],
+      relations: {},
+      origin: 'client',
+    });
     expect(keyA).not.toBe(keyB);
     expect(keyA).not.toBe(keyC);
     expect(keyA).toBe(keyA);

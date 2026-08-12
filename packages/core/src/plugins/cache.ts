@@ -79,7 +79,9 @@ export function parseCacheSpec(raw: string): CacheSpec {
   if (input === '') return {};
 
   const fail = () =>
-    new OrbitError(ErrorCode.INVALID_QUERY, `Invalid cache spec '${raw}'`, { details: { cache: raw } });
+    new OrbitError(ErrorCode.INVALID_QUERY, `Invalid cache spec '${raw}'`, {
+      details: { cache: raw },
+    });
 
   if (input.startsWith('{')) {
     let parsed: unknown;

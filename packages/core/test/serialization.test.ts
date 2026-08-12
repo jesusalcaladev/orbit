@@ -6,7 +6,9 @@ const users = [{ id: '1', name: 'Ana' }];
 
 function makeOrbit(plugins: OrbitConfig['plugins'] = []) {
   return createOrbit({
-    adapters: memoryAdapter([{ entity: 'user', resolve: ({ id }) => users.find((u) => u.id === id) }]),
+    adapters: memoryAdapter([
+      { entity: 'user', resolve: ({ id }) => users.find((u) => u.id === id) },
+    ]),
     plugins,
   });
 }

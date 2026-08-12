@@ -52,7 +52,10 @@ export async function main(): Promise<void> {
     while ((sep = buffer.indexOf('\n\n')) !== -1) {
       const frame = buffer.slice(0, sep);
       buffer = buffer.slice(sep + 2);
-      const data = frame.split('\n').find((l) => l.startsWith('data: '))?.slice(6);
+      const data = frame
+        .split('\n')
+        .find((l) => l.startsWith('data: '))
+        ?.slice(6);
       if (data) console.log('frame:', data);
     }
   }

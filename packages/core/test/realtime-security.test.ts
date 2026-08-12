@@ -45,7 +45,9 @@ function createWorld() {
   const adapter: DataAdapter = {
     entity: 'post',
     resolve: () => null,
-    mutate: (_action: string, args: MutationArgs) => ({ id: (args.payload as { id: string } | undefined)?.id }),
+    mutate: (_action: string, args: MutationArgs) => ({
+      id: (args.payload as { id: string } | undefined)?.id,
+    }),
     subscribe: (_filters, handler) => {
       handlers.add(handler);
       return () => handlers.delete(handler);
@@ -147,7 +149,9 @@ describe('RealtimeServer — handshake & access gates', () => {
     evil.dispose();
 
     const friend = new RawWsClient(port);
-    const friendHandshake = await friend.connect({ headers: { Origin: 'https://app.example.com' } });
+    const friendHandshake = await friend.connect({
+      headers: { Origin: 'https://app.example.com' },
+    });
     expect(friendHandshake.status).toBe(101);
     friend.dispose();
   });
@@ -204,7 +208,11 @@ describe('RealtimeServer — frame protocol violations (close codes)', () => {
   }
 
   /** Connect, then expect a close frame with `code` (and the socket to die). */
-  async function expectCloseAfter(act: (client: RawWsClient) => void, code: number, options?: RealtimeServerOptions) {
+  async function expectCloseAfter(
+    act: (client: RawWsClient) => void,
+    code: number,
+    options?: RealtimeServerOptions,
+  ) {
     await start(options);
     const client = new RawWsClient(port);
     await client.connect();
@@ -225,7 +233,9 @@ describe('RealtimeServer — frame protocol violations (close codes)', () => {
     // before the declared 1 GB payload is even looked at — so it is a 1002,
     // not a 1009 (the size guard never gets a chance to matter).
     await expectCloseAfter((client) => {
-      client.sendRaw(buildClientFrame(Buffer.alloc(0), { masked: false, declaredLength: 1024 * 1024 * 1024 }));
+      client.sendRaw(
+        buildClientFrame(Buffer.alloc(0), { masked: false, declaredLength: 1024 * 1024 * 1024 }),
+      );
     }, CloseCode.ProtocolError);
   });
 
@@ -423,7 +433,11 @@ describe('RealtimeServer — message-level validation (error frames, connection 
     // The connection must remain usable (a later valid subscribe gets an ack —
     // matched by payload, since the error frame is also a text frame).
     client.sendText(JSON.stringify({ subscribe: 'post { id }', id: 'still-alive' }));
-    const ack = await client.awaitFrame(textContaining('"ack":"still-alive"'), 'ack after error', 4000);
+    const ack = await client.awaitFrame(
+      textContaining('"ack":"still-alive"'),
+      'ack after error',
+      4000,
+    );
     expect(ack.payload.toString('utf8')).toContain('"ack":"still-alive"');
     client.close();
     await client.waitForClose();
@@ -438,7 +452,10 @@ describe('RealtimeServer — message-level validation (error frames, connection 
   });
 
   it('rejects a message with no recognized action', async () => {
-    await expectErrorAndSurvives((client) => client.sendText('{"hello": 1}'), ErrorCode.INVALID_QUERY);
+    await expectErrorAndSurvives(
+      (client) => client.sendText('{"hello": 1}'),
+      ErrorCode.INVALID_QUERY,
+    );
   });
 
   it('rejects a subscribe without an id', async () => {

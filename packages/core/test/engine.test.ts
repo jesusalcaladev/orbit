@@ -44,7 +44,8 @@ function blogAdapters(): DataAdapter[] {
       },
       mutate: (action, { filter, payload }) => {
         const user = users.find((u) => u.id === filter?.id);
-        if (!user) throw new OrbitError(ErrorCode.FILTER_INVALID, `No user with id '${filter?.id}'`);
+        if (!user)
+          throw new OrbitError(ErrorCode.FILTER_INVALID, `No user with id '${filter?.id}'`);
         if (action === 'update' && payload) Object.assign(user, payload);
         return { id: user.id, invalidates: [`cache:user:${user.id}`] };
       },
@@ -144,7 +145,7 @@ describe('resolution', () => {
         },
         {
           entity: 'b',
-          resolve: (filters, ctx) => {
+          resolve: (_filters, ctx) => {
             seen(ctx.parent);
             return [];
           },
@@ -236,7 +237,9 @@ describe('errors', () => {
   it('rejects a missing query', async () => {
     const orbit = makeOrbit();
     await expect(orbit.execute({})).rejects.toMatchObject({ code: ErrorCode.INVALID_QUERY });
-    await expect(orbit.execute({ query: 42 as never })).rejects.toMatchObject({ code: ErrorCode.INVALID_QUERY });
+    await expect(orbit.execute({ query: 42 as never })).rejects.toMatchObject({
+      code: ErrorCode.INVALID_QUERY,
+    });
   });
 
   it('rejects envelopes with both query and do', async () => {
@@ -373,8 +376,12 @@ describe('mutations', () => {
 
   it('rejects malformed mutation actions', async () => {
     const orbit = makeOrbit();
-    await expect(orbit.execute({ do: 'update' })).rejects.toMatchObject({ code: ErrorCode.INVALID_QUERY });
-    await expect(orbit.execute({ do: 'user.' })).rejects.toMatchObject({ code: ErrorCode.INVALID_QUERY });
+    await expect(orbit.execute({ do: 'update' })).rejects.toMatchObject({
+      code: ErrorCode.INVALID_QUERY,
+    });
+    await expect(orbit.execute({ do: 'user.' })).rejects.toMatchObject({
+      code: ErrorCode.INVALID_QUERY,
+    });
   });
 
   it('rejects mutations on unregistered entities', async () => {

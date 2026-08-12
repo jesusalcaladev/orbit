@@ -36,7 +36,11 @@ export interface DataAdapter {
   batch?(requests: BatchRequest[], ctx: OrbitContext): Promise<unknown[]>;
 
   /** Optional mutation handler, invoked by the `do` envelope. */
-  mutate?(action: string, args: MutationArgs, ctx: OrbitContext): MutationResult | Promise<MutationResult>;
+  mutate?(
+    action: string,
+    args: MutationArgs,
+    ctx: OrbitContext,
+  ): MutationResult | Promise<MutationResult>;
 
   /**
    * Optional realtime hook: register a listener for changes on this entity.

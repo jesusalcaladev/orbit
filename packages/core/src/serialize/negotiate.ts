@@ -39,7 +39,12 @@ export function negotiateFormat(header: string | null | undefined): OrbitFormat 
   // headers mentioning a binary/streaming format or a wildcard need the full
   // q-value machinery — anything else resolves to JSON either way.
   const lower = header?.toLowerCase() ?? '';
-  if (lower.length > 0 && !lower.includes('msgpack') && !lower.includes('event-stream') && !lower.includes('*')) {
+  if (
+    lower.length > 0 &&
+    !lower.includes('msgpack') &&
+    !lower.includes('event-stream') &&
+    !lower.includes('*')
+  ) {
     return 'json';
   }
 
@@ -58,7 +63,9 @@ export function negotiateFormat(header: string | null | undefined): OrbitFormat 
     { format: 'msgpack' as const, entry: pick('application/x-msgpack'), rank: 3 },
     { format: 'sse' as const, entry: pick('text/event-stream') ?? textWildcard, rank: 2 },
     { format: 'json' as const, entry: pick('application/json') ?? jsonWildcard, rank: 1 },
-  ].filter((c): c is { format: OrbitFormat; entry: AcceptEntry; rank: number } => c.entry !== undefined);
+  ].filter(
+    (c): c is { format: OrbitFormat; entry: AcceptEntry; rank: number } => c.entry !== undefined,
+  );
 
   if (candidates.length === 0) return 'json';
 

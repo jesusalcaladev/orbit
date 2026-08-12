@@ -13,8 +13,15 @@
  */
 import { createServer } from 'node:http';
 import { pathToFileURL } from 'node:url';
-import { createOrbit, createRealtimeServer, memoryAdapter } from '@orbit/core';
-import type { DataAdapter, Filters, MutationArgs, MutationResult, OrbitContext, SubscriptionEvent } from '@orbit/core';
+import { createOrbit, createRealtimeServer } from '@orbit/core';
+import type {
+  DataAdapter,
+  Filters,
+  MutationArgs,
+  MutationResult,
+  OrbitContext,
+  SubscriptionEvent,
+} from '@orbit/core';
 
 interface Post {
   id: string;
@@ -88,7 +95,9 @@ export async function main(): Promise<void> {
         const message = JSON.parse(String(event.data)) as Record<string, unknown>;
         messages.push(message);
         if (message.id !== undefined) {
-          console.log(`    event:      ${String(message.seq)} · ${String((message.event as SubscriptionEvent).type)} ${String((message.event as SubscriptionEvent).id)}`);
+          console.log(
+            `    event:      ${String(message.seq)} · ${String((message.event as SubscriptionEvent).type)} ${String((message.event as SubscriptionEvent).id)}`,
+          );
         }
       };
       ws.onopen = () => resolve(ws);
@@ -135,7 +144,9 @@ export async function main(): Promise<void> {
   // standalone, flush the output and exit explicitly. When imported by
   // run-all, just print — the harness exits once every example is done.
   if (isEntry) {
-    process.stdout.write('    done (realtime transport: zero-dependency RFC 6455)\n', () => process.exit(0));
+    process.stdout.write('    done (realtime transport: zero-dependency RFC 6455)\n', () =>
+      process.exit(0),
+    );
   } else {
     console.log('    done (realtime transport: zero-dependency RFC 6455)');
   }

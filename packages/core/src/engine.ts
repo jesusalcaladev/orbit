@@ -2,7 +2,6 @@ import { AdapterRegistry } from './adapters/registry.js';
 import type { DataAdapter } from './adapters/types.js';
 import {
   DEFAULT_MAX_PAYLOAD_BYTES,
-  readEnvelope,
   readEnvelopeBytes,
   readMsgpackEnvelope,
   validateEnvelope,
@@ -12,10 +11,15 @@ import { DEFAULT_MAX_DEPTH, parseOQS } from './parser.js';
 import { PluginRegistry } from './plugins/registry.js';
 import { isShortCircuit } from './plugins/types.js';
 import type { OrbitPlugin } from './plugins/types.js';
-import { MSGPACK_CONTENT_TYPE, SSE_CONTENT_TYPE, negotiateFormat, wantsGzip } from './serialize/negotiate.js';
+import {
+  MSGPACK_CONTENT_TYPE,
+  SSE_CONTENT_TYPE,
+  negotiateFormat,
+  wantsGzip,
+} from './serialize/negotiate.js';
 import type { OrbitFormat } from './serialize/negotiate.js';
 import { encodeMsgpack } from './serialize/msgpack.js';
-import { createCachePlugin } from "./plugins/cache.js";
+import { createCachePlugin } from './plugins/cache.js';
 import type {
   BatchRequest,
   Filters,
@@ -170,7 +174,10 @@ export class Orbit {
     const valid = validateEnvelope(envelope);
     const fullCtx: OrbitContext = { ...ctx, envelope: valid, orbit: this };
     if (valid.do !== undefined) {
-      throw new OrbitError(ErrorCode.INVALID_QUERY, "Streaming supports queries only (no 'do' actions)");
+      throw new OrbitError(
+        ErrorCode.INVALID_QUERY,
+        "Streaming supports queries only (no 'do' actions)",
+      );
     }
     try {
       const gen = this.#queryStages(valid, fullCtx);
@@ -209,9 +216,13 @@ export class Orbit {
       // Cheap pre-check before buffering: reject oversized bodies early.
       const declared = Number(request.headers.get('content-length') ?? 0);
       if (Number.isFinite(declared) && declared > this.#options.maxPayloadBytes) {
-        throw new OrbitError(ErrorCode.PAYLOAD_TOO_LARGE, 'Request payload exceeds the configured limit', {
-          details: { maxBytes: this.#options.maxPayloadBytes, received: declared },
-        });
+        throw new OrbitError(
+          ErrorCode.PAYLOAD_TOO_LARGE,
+          'Request payload exceeds the configured limit',
+          {
+            details: { maxBytes: this.#options.maxPayloadBytes, received: declared },
+          },
+        );
       }
 
       const raw = new Uint8Array(await request.arrayBuffer());
@@ -342,9 +353,13 @@ export class Orbit {
 
     const adapter = this.#options.adapters.get(entity);
     if (!adapter) {
-      throw new OrbitError(ErrorCode.ENTITY_UNREGISTERED, `No adapter is registered for entity '${entity}'`, {
-        details: { entity },
-      });
+      throw new OrbitError(
+        ErrorCode.ENTITY_UNREGISTERED,
+        `No adapter is registered for entity '${entity}'`,
+        {
+          details: { entity },
+        },
+      );
     }
     if (typeof adapter.mutate !== 'function') {
       throw new OrbitError(
@@ -372,7 +387,11 @@ export class Orbit {
     // header opts into caching.
     if (typeof envelope.return === 'string') {
       const subEnvelope: OrbitEnvelope = { query: envelope.return };
-      const result = await this.#consumeQuery(subEnvelope, { ...ctx, envelope: subEnvelope }, 'mutate');
+      const result = await this.#consumeQuery(
+        subEnvelope,
+        { ...ctx, envelope: subEnvelope },
+        'mutate',
+      );
       return { ...result, ...(invalidates ? { invalidates } : {}) };
     }
 
@@ -427,9 +446,13 @@ export class Orbit {
     for (const [entity, group] of groups) {
       const adapter = this.#options.adapters.get(entity);
       if (!adapter) {
-        throw new OrbitError(ErrorCode.ENTITY_UNREGISTERED, `No adapter is registered for entity '${entity}'`, {
-          details: { entity },
-        });
+        throw new OrbitError(
+          ErrorCode.ENTITY_UNREGISTERED,
+          `No adapter is registered for entity '${entity}'`,
+          {
+            details: { entity },
+          },
+        );
       }
 
       const requests: Array<{ pending: Pending; filters: Filters; ctx: OrbitContext }> = [];
@@ -536,7 +559,11 @@ export class Orbit {
     return out;
   }
 
-  async #applyBeforeSerialize(data: unknown, node: QueryNode, ctx: OrbitContext): Promise<SerializeOutcome> {
+  async #applyBeforeSerialize(
+    data: unknown,
+    node: QueryNode,
+    ctx: OrbitContext,
+  ): Promise<SerializeOutcome> {
     let current = data;
     for (const plugin of this.#options.plugins.list) {
       const result = await plugin.hooks.onBeforeSerialize?.({
@@ -594,10 +621,17 @@ export class Orbit {
         headers: { 'content-type': JSON_CONTENT_TYPE, 'content-encoding': 'gzip' },
       });
     }
-    return new Response(body, { status: result.status, headers: { 'content-type': JSON_CONTENT_TYPE } });
+    return new Response(body, {
+      status: result.status,
+      headers: { 'content-type': JSON_CONTENT_TYPE },
+    });
   }
 
-  async #errorResponse(orbitError: OrbitError, format: OrbitFormat, gzip: boolean): Promise<Response> {
+  async #errorResponse(
+    orbitError: OrbitError,
+    format: OrbitFormat,
+    gzip: boolean,
+  ): Promise<Response> {
     const payload = orbitError.toJSON();
     if (format === 'sse') {
       return new Response(`data: ${JSON.stringify(payload)}\n\n`, {
@@ -670,7 +704,10 @@ export class Orbit {
       },
     });
 
-    const headers: Record<string, string> = { 'content-type': SSE_CONTENT_TYPE, 'cache-control': 'no-cache' };
+    const headers: Record<string, string> = {
+      'content-type': SSE_CONTENT_TYPE,
+      'cache-control': 'no-cache',
+    };
     if (gzip) {
       headers['content-encoding'] = 'gzip';
       stream = stream.pipeThrough(new CompressionStream('gzip'));

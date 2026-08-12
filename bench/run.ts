@@ -59,7 +59,11 @@ async function measure(fn: () => Promise<unknown> | unknown, samples: number): P
  * measurement reflects completed work (unawaited loops pipeline microtasks
  * and inflate the number). Warm-up first, then measure `samples` ops.
  */
-async function measureThroughput(fn: () => Promise<unknown>, samples: number, warmup = 300): Promise<number> {
+async function measureThroughput(
+  fn: () => Promise<unknown>,
+  samples: number,
+  warmup = 300,
+): Promise<number> {
   for (let i = 0; i < warmup; i += 1) await fn();
   const start = now();
   for (let i = 0; i < samples; i += 1) await fn();
@@ -130,10 +134,26 @@ interface Counting {
 
 /** Lazy 5-level graph: user → posts(10) → comments(100) → likes(1000) → likedBy(1000). */
 function deepNestAdapters(count: Counting): DataAdapter[] {
-  const posts = Array.from({ length: 10 }, (_, i) => ({ id: `p${i + 1}`, title: `Post ${i + 1}`, authorId: '1' }));
-  const comments = Array.from({ length: 100 }, (_, i) => ({ id: `c${i + 1}`, text: `Comment ${i + 1}`, postId: `p${(i % 10) + 1}` }));
-  const likes = Array.from({ length: 1000 }, (_, i) => ({ id: `l${i + 1}`, emoji: '❤️', commentId: `c${(i % 100) + 1}` }));
-  const likedBy = Array.from({ length: 1000 }, (_, i) => ({ id: String(i + 1), name: `Liker ${i + 1}`, likeId: `l${i + 1}` }));
+  const posts = Array.from({ length: 10 }, (_, i) => ({
+    id: `p${i + 1}`,
+    title: `Post ${i + 1}`,
+    authorId: '1',
+  }));
+  const comments = Array.from({ length: 100 }, (_, i) => ({
+    id: `c${i + 1}`,
+    text: `Comment ${i + 1}`,
+    postId: `p${(i % 10) + 1}`,
+  }));
+  const likes = Array.from({ length: 1000 }, (_, i) => ({
+    id: `l${i + 1}`,
+    emoji: '❤️',
+    commentId: `c${(i % 100) + 1}`,
+  }));
+  const likedBy = Array.from({ length: 1000 }, (_, i) => ({
+    id: String(i + 1),
+    name: `Liker ${i + 1}`,
+    likeId: `l${i + 1}`,
+  }));
 
   const adapter = (entity: string, by: (parentId: string) => unknown[]): DataAdapter => ({
     entity,
@@ -168,7 +188,8 @@ async function benchB2(): Promise<{ orbitQueries: number; competitionQueries: nu
   const count: Counting = { queries: 0 };
   const orbit = createOrbit({ adapters: deepNestAdapters(count) });
   await orbit.execute({
-    query: 'user(id="1") { name, posts { title, comments { text, likes { emoji, likedBy { name } } } } }',
+    query:
+      'user(id="1") { name, posts { title, comments { text, likes { emoji, likedBy { name } } } } }',
   });
   return { orbitQueries: count.queries, competitionQueries: 1111 };
 }
@@ -295,13 +316,27 @@ async function benchB4(): Promise<{
 
   const kb = (b: Uint8Array<ArrayBuffer> | Uint8Array<ArrayBufferLike>) => b.byteLength / 1024;
 
-  console.log('    feed sizes — json:', kb(json as Uint8Array<ArrayBuffer>).toFixed(1), 'KB',
-    '| json+gzip:', kb(gzipJson).toFixed(1), 'KB',
-    '| msgpack:', kb(msgpack).toFixed(1), 'KB',
-    '| msgpack+gzip:', kb(gzipMsgpack).toFixed(1), 'KB');
+  console.log(
+    '    feed sizes — json:',
+    kb(json as Uint8Array<ArrayBuffer>).toFixed(1),
+    'KB',
+    '| json+gzip:',
+    kb(gzipJson).toFixed(1),
+    'KB',
+    '| msgpack:',
+    kb(msgpack).toFixed(1),
+    'KB',
+    '| msgpack+gzip:',
+    kb(gzipMsgpack).toFixed(1),
+    'KB',
+  );
 
   // The protocol's wire format: msgpack + optional gzip.
-  return { orbitJsonKb: kb(json as Uint8Array<ArrayBuffer>), orbitKb: kb(gzipMsgpack), competitionKb: 450 };
+  return {
+    orbitJsonKb: kb(json as Uint8Array<ArrayBuffer>),
+    orbitKb: kb(gzipMsgpack),
+    competitionKb: 450,
+  };
 }
 
 async function gzip(bytes: Uint8Array): Promise<Uint8Array<ArrayBuffer>> {
@@ -635,12 +670,21 @@ async function main(): Promise<void> {
     const r = await benchB1();
     const met = r.orbitMs < 3;
     results.push({
-      id: 'B1', label: 'Simple query · P99 latency', metric: 'P99 latency', unit: 'ms',
-      lowerIsBetter: true, orbitValue: r.orbitMs, orbitLabel: `${r.orbitMs.toFixed(2)} ms`,
-      competitionValue: r.competitionMs, competitionLabel: `${r.competitionMs} ms (REST)`,
-      goal: '< 3 ms', goalMet: met,
+      id: 'B1',
+      label: 'Simple query · P99 latency',
+      metric: 'P99 latency',
+      unit: 'ms',
+      lowerIsBetter: true,
+      orbitValue: r.orbitMs,
+      orbitLabel: `${r.orbitMs.toFixed(2)} ms`,
+      competitionValue: r.competitionMs,
+      competitionLabel: `${r.competitionMs} ms (REST)`,
+      goal: '< 3 ms',
+      goalMet: met,
     });
-    console.log(`B1 · Simple query P99 latency        ${ok(met)} orbit ${r.orbitMs.toFixed(2)} ms  vs  REST ${r.competitionMs} ms  (goal < 3 ms)`);
+    console.log(
+      `B1 · Simple query P99 latency        ${ok(met)} orbit ${r.orbitMs.toFixed(2)} ms  vs  REST ${r.competitionMs} ms  (goal < 3 ms)`,
+    );
   }
 
   // B2
@@ -650,12 +694,21 @@ async function main(): Promise<void> {
     // graph (each level is a different entity), so the honest goal is ≤ 5.
     const met = r.orbitQueries <= 5;
     results.push({
-      id: 'B2', label: 'Deep nest (5 levels) · DB round-trips', metric: 'DB queries', unit: 'round-trips',
-      lowerIsBetter: true, orbitValue: r.orbitQueries, orbitLabel: `${r.orbitQueries} queries`,
-      competitionValue: r.competitionQueries, competitionLabel: `${r.competitionQueries} queries (GraphQL)`,
-      goal: '≤ 5 (1 batch/level)', goalMet: met,
+      id: 'B2',
+      label: 'Deep nest (5 levels) · DB round-trips',
+      metric: 'DB queries',
+      unit: 'round-trips',
+      lowerIsBetter: true,
+      orbitValue: r.orbitQueries,
+      orbitLabel: `${r.orbitQueries} queries`,
+      competitionValue: r.competitionQueries,
+      competitionLabel: `${r.competitionQueries} queries (GraphQL)`,
+      goal: '≤ 5 (1 batch/level)',
+      goalMet: met,
     });
-    console.log(`B2 · Deep nest DB round-trips       ${ok(met)} orbit ${r.orbitQueries}  vs  GraphQL ${r.competitionQueries}  (goal ≤ 5)`);
+    console.log(
+      `B2 · Deep nest DB round-trips       ${ok(met)} orbit ${r.orbitQueries}  vs  GraphQL ${r.competitionQueries}  (goal ≤ 5)`,
+    );
   }
 
   // B3
@@ -666,10 +719,17 @@ async function main(): Promise<void> {
     // and full fetch-path numbers are printed above and documented.
     const met = r.orbitRps >= 30_000;
     results.push({
-      id: 'B3', label: 'Throughput', metric: 'Requests/sec (core)', unit: 'RPS',
-      lowerIsBetter: false, orbitValue: r.orbitRps, orbitLabel: `${r.orbitRps.toLocaleString('en-US')} RPS`,
-      competitionValue: r.competitionRps, competitionLabel: `${r.competitionRps.toLocaleString('en-US')} RPS (GraphQL)`,
-      goal: '~30k RPS (core)', goalMet: met,
+      id: 'B3',
+      label: 'Throughput',
+      metric: 'Requests/sec (core)',
+      unit: 'RPS',
+      lowerIsBetter: false,
+      orbitValue: r.orbitRps,
+      orbitLabel: `${r.orbitRps.toLocaleString('en-US')} RPS`,
+      competitionValue: r.competitionRps,
+      competitionLabel: `${r.competitionRps.toLocaleString('en-US')} RPS (GraphQL)`,
+      goal: '~30k RPS (core)',
+      goalMet: met,
     });
     console.log(
       `B3 · Throughput                      ${ok(met)} orbit core ${r.orbitRps.toLocaleString('en-US')} RPS  (server ${r.serverRps.toLocaleString('en-US')} · fetch ${r.wireRps.toLocaleString('en-US')})  vs  GraphQL ${r.competitionRps.toLocaleString('en-US')}  (goal ~30k)`,
@@ -681,12 +741,21 @@ async function main(): Promise<void> {
     const r = await benchB4();
     const met = r.orbitKb <= 120;
     results.push({
-      id: 'B4', label: 'Payload · 20-post feed', metric: 'KB transmitted', unit: 'KB',
-      lowerIsBetter: true, orbitValue: r.orbitKb, orbitLabel: `${r.orbitKb.toFixed(0)} KB`,
-      competitionValue: r.competitionKb, competitionLabel: `${r.competitionKb} KB (GraphQL JSON)`,
-      goal: '~120 KB', goalMet: met,
+      id: 'B4',
+      label: 'Payload · 20-post feed',
+      metric: 'KB transmitted',
+      unit: 'KB',
+      lowerIsBetter: true,
+      orbitValue: r.orbitKb,
+      orbitLabel: `${r.orbitKb.toFixed(0)} KB`,
+      competitionValue: r.competitionKb,
+      competitionLabel: `${r.competitionKb} KB (GraphQL JSON)`,
+      goal: '~120 KB',
+      goalMet: met,
     });
-    console.log(`B4 · Payload size                    ${ok(met)} orbit ${r.orbitKb.toFixed(0)} KB  vs  GraphQL JSON ${r.competitionKb} KB  (goal ~120 KB)`);
+    console.log(
+      `B4 · Payload size                    ${ok(met)} orbit ${r.orbitKb.toFixed(0)} KB  vs  GraphQL JSON ${r.competitionKb} KB  (goal ~120 KB)`,
+    );
   }
 
   // B5
@@ -694,12 +763,21 @@ async function main(): Promise<void> {
     const r = await benchB5();
     const met = r.orbitTtfbMs < 50;
     results.push({
-      id: 'B5', label: 'TTFB · streaming', metric: 'Time to first byte', unit: 'ms',
-      lowerIsBetter: true, orbitValue: r.orbitTtfbMs, orbitLabel: `${r.orbitTtfbMs.toFixed(0)} ms`,
-      competitionValue: r.competitionMs, competitionLabel: `${r.competitionMs} ms (REST, waits for all)`,
-      goal: '< 50 ms', goalMet: met,
+      id: 'B5',
+      label: 'TTFB · streaming',
+      metric: 'Time to first byte',
+      unit: 'ms',
+      lowerIsBetter: true,
+      orbitValue: r.orbitTtfbMs,
+      orbitLabel: `${r.orbitTtfbMs.toFixed(0)} ms`,
+      competitionValue: r.competitionMs,
+      competitionLabel: `${r.competitionMs} ms (REST, waits for all)`,
+      goal: '< 50 ms',
+      goalMet: met,
     });
-    console.log(`B5 · TTFB streaming                  ${ok(met)} orbit ${r.orbitTtfbMs.toFixed(0)} ms  vs  REST ${r.competitionMs} ms  (goal < 50 ms)`);
+    console.log(
+      `B5 · TTFB streaming                  ${ok(met)} orbit ${r.orbitTtfbMs.toFixed(0)} ms  vs  REST ${r.competitionMs} ms  (goal < 50 ms)`,
+    );
   }
 
   // B6
@@ -707,12 +785,21 @@ async function main(): Promise<void> {
     const r = await benchB6();
     const met = r.orbitMs < 200;
     results.push({
-      id: 'B6', label: 'Reconnect · warm cache replay', metric: 'Replay latency', unit: 'ms',
-      lowerIsBetter: true, orbitValue: r.orbitMs, orbitLabel: `${r.orbitMs.toFixed(1)} ms`,
-      competitionValue: r.competitionMs, competitionLabel: `${r.competitionMs} ms (Apollo refetch)`,
-      goal: '< 200 ms', goalMet: met,
+      id: 'B6',
+      label: 'Reconnect · warm cache replay',
+      metric: 'Replay latency',
+      unit: 'ms',
+      lowerIsBetter: true,
+      orbitValue: r.orbitMs,
+      orbitLabel: `${r.orbitMs.toFixed(1)} ms`,
+      competitionValue: r.competitionMs,
+      competitionLabel: `${r.competitionMs} ms (Apollo refetch)`,
+      goal: '< 200 ms',
+      goalMet: met,
     });
-    console.log(`B6 · Reconnect warm replay           ${ok(met)} orbit ${r.orbitMs.toFixed(1)} ms  vs  Apollo refetch ${r.competitionMs} ms  (goal < 200 ms)`);
+    console.log(
+      `B6 · Reconnect warm replay           ${ok(met)} orbit ${r.orbitMs.toFixed(1)} ms  vs  Apollo refetch ${r.competitionMs} ms  (goal < 200 ms)`,
+    );
   }
 
   // B7
@@ -721,12 +808,20 @@ async function main(): Promise<void> {
     const fanOutMs = r.fanOutUs / 1000;
     const met = fanOutMs < 200;
     results.push({
-      id: 'B7', label: 'Realtime HTTP · WS fan-out', metric: 'Fan-out latency', unit: 'ms',
-      lowerIsBetter: true, orbitValue: fanOutMs, orbitLabel: `${fanOutMs.toFixed(2)} ms`,
-      competitionValue: r.competitionMs, competitionLabel: `${r.competitionMs} ms (spec goal)`,
-      goal: '< 200 ms', goalMet: met,
+      id: 'B7',
+      label: 'Realtime HTTP · WS fan-out',
+      metric: 'Fan-out latency',
+      unit: 'ms',
+      lowerIsBetter: true,
+      orbitValue: fanOutMs,
+      orbitLabel: `${fanOutMs.toFixed(2)} ms`,
+      competitionValue: r.competitionMs,
+      competitionLabel: `${r.competitionMs} ms (spec goal)`,
+      goal: '< 200 ms',
+      goalMet: met,
     });
-    const resumeLabel = r.resumeMs < 1 ? `${(r.resumeMs * 1000).toFixed(0)} µs` : `${r.resumeMs.toFixed(2)} ms`;
+    const resumeLabel =
+      r.resumeMs < 1 ? `${(r.resumeMs * 1000).toFixed(0)} µs` : `${r.resumeMs.toFixed(2)} ms`;
     console.log(
       `B7 · Realtime HTTP WS fan-out        ${ok(met)} orbit ${r.fanOutUs.toFixed(0)} µs  (${r.subsPerSec.toFixed(0)} subs/s · resume ${resumeLabel})  vs  goal < 200 ms`,
     );

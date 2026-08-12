@@ -17,12 +17,7 @@
  */
 import { createServer } from 'node:http';
 import { pathToFileURL } from 'node:url';
-import {
-  createOrbit,
-  createRealtimeServer,
-  encodeMsgpack,
-  memoryAdapter,
-} from '@orbit/core';
+import { createOrbit, createRealtimeServer, memoryAdapter } from '@orbit/core';
 import type { DataAdapter, SubscriptionEvent } from '@orbit/core';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -42,10 +37,26 @@ const users = Array.from({ length: 100 }, (_, i) => ({
 
 /** Lazy 5-level graph: user → posts(10) → comments(100) → likes(1000) → likedBy(1000). */
 function deepNestAdapters(count: { queries: number }): DataAdapter[] {
-  const posts = Array.from({ length: 10 }, (_, i) => ({ id: `p${i + 1}`, title: `Post ${i + 1}`, authorId: '1' }));
-  const comments = Array.from({ length: 100 }, (_, i) => ({ id: `c${i + 1}`, text: `Comment ${i + 1}`, postId: `p${(i % 10) + 1}` }));
-  const likes = Array.from({ length: 1000 }, (_, i) => ({ id: `l${i + 1}`, emoji: '❤️', commentId: `c${(i % 100) + 1}` }));
-  const likedBy = Array.from({ length: 1000 }, (_, i) => ({ id: String(i + 1), name: `Liker ${i + 1}`, likeId: `l${i + 1}` }));
+  const posts = Array.from({ length: 10 }, (_, i) => ({
+    id: `p${i + 1}`,
+    title: `Post ${i + 1}`,
+    authorId: '1',
+  }));
+  const comments = Array.from({ length: 100 }, (_, i) => ({
+    id: `c${i + 1}`,
+    text: `Comment ${i + 1}`,
+    postId: `p${(i % 10) + 1}`,
+  }));
+  const likes = Array.from({ length: 1000 }, (_, i) => ({
+    id: `l${i + 1}`,
+    emoji: '❤️',
+    commentId: `c${(i % 100) + 1}`,
+  }));
+  const likedBy = Array.from({ length: 1000 }, (_, i) => ({
+    id: String(i + 1),
+    name: `Liker ${i + 1}`,
+    likeId: `l${i + 1}`,
+  }));
 
   const adapter = (entity: string, by: (parentId: string) => unknown[]): DataAdapter => ({
     entity,
@@ -79,7 +90,11 @@ function deepNestAdapters(count: { queries: number }): DataAdapter[] {
 // Measurement helpers (same honest methodology as the benchmark suite)
 // ---------------------------------------------------------------------------
 
-async function measureThroughput(fn: () => Promise<unknown>, samples: number, warmup = 300): Promise<number> {
+async function measureThroughput(
+  fn: () => Promise<unknown>,
+  samples: number,
+  warmup = 300,
+): Promise<number> {
   for (let i = 0; i < warmup; i += 1) await fn();
   const start = performance.now();
   for (let i = 0; i < samples; i += 1) await fn();
@@ -101,12 +116,18 @@ export async function main(): Promise<void> {
 
   // 1. Engine core
   const orbit = createOrbit({
-    adapters: memoryAdapter([{ entity: 'user', resolve: ({ id }) => users.find((u) => u.id === id) }]),
+    adapters: memoryAdapter([
+      { entity: 'user', resolve: ({ id }) => users.find((u) => u.id === id) },
+    ]),
   });
   const envelope = { query: 'user(id="1") { name, email }' };
   await orbit.execute(envelope);
   const coreRps = Math.round(await measureThroughput(() => orbit.execute(envelope), 100_000, 1000));
-  row('engine core', `${(1_000_000 / coreRps).toFixed(2)} µs/op · ${coreRps.toLocaleString('en-US')} RPS`, '(100k sequential-await ops)');
+  row(
+    'engine core',
+    `${(1_000_000 / coreRps).toFixed(2)} µs/op · ${coreRps.toLocaleString('en-US')} RPS`,
+    '(100k sequential-await ops)',
+  );
 
   // 2. Full HTTP path (fresh Request + Response per op, like a real client)
   const body = JSON.stringify(envelope);
@@ -126,14 +147,19 @@ export async function main(): Promise<void> {
     total += performance.now() - start;
   }
   const wireRps = Math.round(wireSamples / (total / 1000));
-  row('full HTTP handler', `${(total / wireSamples * 1000).toFixed(1)} µs/op · ${wireRps.toLocaleString('en-US')} RPS`, '(fetch-compatible path)');
+  row(
+    'full HTTP handler',
+    `${((total / wireSamples) * 1000).toFixed(1)} µs/op · ${wireRps.toLocaleString('en-US')} RPS`,
+    '(fetch-compatible path)',
+  );
 
   // 3. Deep 5-level graph — DB round-trips
   const count = { queries: 0 };
   const deepOrbit = createOrbit({ adapters: deepNestAdapters(count) });
   const t0 = performance.now();
   const result = await deepOrbit.execute({
-    query: 'user(id="1") { name, posts { title, comments { text, likes { emoji, likedBy { name } } } } }',
+    query:
+      'user(id="1") { name, posts { title, comments { text, likes { emoji, likedBy { name } } } } }',
   });
   const deepMs = performance.now() - t0;
   const nodeCount = (result.data as { posts: unknown[] }).posts?.length ?? 0;
@@ -170,7 +196,6 @@ export async function main(): Promise<void> {
     comments: Array.from({ length: 4 }, (_, j) => ({ id: `c${i}-${j}`, text: `Comment ${j + 1}` })),
   }));
   const jsonBytes = new TextEncoder().encode(JSON.stringify(feed)).byteLength;
-  const mpBytes = encodeMsgpack(feed).byteLength;
   const gzip = new Blob([JSON.stringify(feed)]).stream().pipeThrough(new CompressionStream('gzip'));
   const reader = gzip.getReader();
   let gzipTotal = 0;
@@ -261,7 +286,11 @@ export async function main(): Promise<void> {
   const t2 = performance.now();
   await resumed;
   const resumeMs = performance.now() - t2; // already milliseconds
-  row('realtime resume', `${resumeMs.toFixed(2)} ms`, `(reconnecting client replays ${K} missed patches, not the whole graph)`);
+  row(
+    'realtime resume',
+    `${resumeMs.toFixed(2)} ms`,
+    `(reconnecting client replays ${K} missed patches, not the whole graph)`,
+  );
 
   // Close every client socket first so the server finishes the close
   // handshakes, then terminate the transport (close frame + socket end) and
