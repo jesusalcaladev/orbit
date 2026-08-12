@@ -22,6 +22,22 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
   rate limiting, auth, HTTP-layer hygiene).
 
 ### Changed
+- **Public API surface frozen (spec §13)** — every export of `src/index.ts`
+  (runtime values AND type names) is now pinned exact-set by
+  `test/api-surface.test.ts`: renaming, removing or silently adding an export
+  fails CI. The contract is now two-tier — protocol shapes pinned by
+  `test/contract.test.ts`, the import surface pinned by the new test.
+
+### Added
+- **B9 · Deep-nest warm replay vs DataLoader** — the same 5-level graph from
+  B2 through graphql-js + DataLoader (devDependency of the bench harness
+  only): batchers collapse the 1,112 resolver calls to **5 DB batches per
+  request** (the same per-level floor as Orbit's contract), but fresh loaders
+  per request (the correct production setup) mean every request still pays
+  all 5 batches — measured **56 ms P99**. Orbit with the cache plugin replays
+  the warm request from memory at **0 DB calls, 0.09 ms P99** (~600×). The
+  honest takeaway: DataLoader closes the cold N+1 gap (B2); contract-level
+  caching is what makes repeat requests free.
 - **Benchmarks are now real head-to-heads against graphql-js** — B1–B4's
   competition figures were previously reference values quoted from the spec
   table ("GraphQL 8 ms / 15k RPS / 450 KB / 1111 queries"); they are now
@@ -64,7 +80,7 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
   body, handler, serialization — not the in-process core numbers of B3.
 - **GitHub Actions CI** (`.github/workflows/ci.yml`) — a 12-job matrix
   (ubuntu/macos/windows × Node 18/20/22/24) running typecheck, Biome and the
-  test suite, plus a `bench` job that runs B1–B8 on ubuntu/Node 22 and
+  test suite, plus a `bench` job that runs B1–B9 on ubuntu/Node 22 and
   uploads `bench/results/*` as an artifact with a summary. CI badge in the
   README.
 - **B7 · Realtime HTTP benchmark** — real WebSocket connections over `node:http` (raw RFC 6455 client, `bench/ws-client.ts`): 972 subs/s, fan-out to 200 sockets in **8.0 ms** (write path 5.2 ms), resume replay of 500 patches in **3.8 ms** — 25–52× inside the < 200 ms goal. New 7th row in the results table and chart.
