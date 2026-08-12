@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Orbit — interactive demos</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="logo">🔮 <span>Orbit</span></div>
+      <p class="tagline">
+        One round-trip for the whole graph — <strong>zero runtime dependencies</strong>.
+        Interactive demos running on the real engine.
+      </p>
+    </header>
+
+    <main class="grid">
+      <a class="card" href="/01-chat/" style="--accent: #6ee7b7">
+        <span class="num">01</span>
+        <h2>Chat · realtime</h2>
+        <p>
+          WebSocket chat on Orbit's zero-dependency transport. Send a message, watch it
+          broadcast to every tab, and see the round-trip latency per message.
+        </p>
+        <span class="tags"><i>realtime</i><i>websocket</i><i>mutations</i></span>
+      </a>
+
+      <a class="card" href="/02-file-image/" style="--accent: #fbbf24">
+        <span class="num">02</span>
+        <h2>File &amp; image upload</h2>
+        <p>
+          Native multipart uploads: the envelope rides in one FormData field and files
+          land as real <code>File</code> objects in <code>ctx.files</code>. Drag, drop, preview.
+        </p>
+        <span class="tags"><i>multipart</i><i>upload</i><i>ctx.files</i></span>
+      </a>
+
+      <a class="card" href="/03-mini-post/" style="--accent: #a78bfa">
+        <span class="num">03</span>
+        <h2>Mini-post feed</h2>
+        <p>
+          A tiny social feed: authors, posts and likes — nested relations resolved
+          through the adapter contract, batched per level.
+        </p>
+        <span class="tags"><i>relations</i><i>batching</i><i>mutations</i></span>
+      </a>
+
+      <a class="card" href="/04-mini-auth/" style="--accent: #f87171">
+        <span class="num">04</span>
+        <h2>Mini-auth</h2>
+        <p>
+          Register, log in, get a token, and prove it: a plugin gates protected queries
+          through the hook pipeline. Passwords hashed with scrypt.
+        </p>
+        <span class="tags"><i>auth</i><i>plugins</i><i>hooks</i></span>
+      </a>
+
+      <a class="card" href="/05-orbit-vs-graphql/" style="--accent: #38bdf8">
+        <span class="num">05</span>
+        <h2>Orbit vs GraphQL · A/B lab</h2>
+        <p>
+          The same chat, the same message bus, two protocols. Race them: simultaneous
+          sends, live round-trip latencies, p50/p95/p99, payload bytes — measured in
+          your browser, on the wire.
+        </p>
+        <span class="tags"><i>benchmark</i><i>graphql</i><i>realtime</i></span>
+      </a>
+    </main>
+
+    <footer>
+      <p>
+        The console examples (01–09) run headless — <code>npm run examples</code>.
+        Full documentation: <a href="https://github.com/jesusalcaladev/orbit">github.com/jesusalcaladev/orbit</a>
+      </p>
+    </footer>
+  </body>
+</html>

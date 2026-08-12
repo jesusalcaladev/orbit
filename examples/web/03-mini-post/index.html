@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>03 · Mini-post feed — Orbit</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="demo">
+      <div class="demo-head">
+        <a class="back" href="/">← demos</a>
+        <h1>Mini-post feed</h1>
+        <span class="pill orbit">relations</span>
+      </div>
+      <p class="demo-sub">
+        One query fetches the whole feed — <code>posts { id, text, likes, author { name } }</code> —
+        the <code>author</code> relation resolves through the adapter contract, batched per level.
+      </p>
+
+      <div class="panel">
+        <div class="row">
+          <label>
+            <span>Your name</span>
+            <input id="name" type="text" value="Ada" maxlength="24" />
+          </label>
+          <label style="flex: 1; min-width: 220px">
+            <span>Post text</span>
+            <input id="text" type="text" placeholder="What is happening?" autocomplete="off" />
+          </label>
+          <button id="post" style="align-self: flex-end">Post</button>
+        </div>
+      </div>
+
+      <div class="stats">
+        <div class="stat">
+          <div class="k">Feed round-trip</div>
+          <div class="v" id="last">—</div>
+        </div>
+        <div class="stat">
+          <div class="k">Posts</div>
+          <div class="v" id="count">0</div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div id="feed" class="feed"></div>
+      </div>
+    </div>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

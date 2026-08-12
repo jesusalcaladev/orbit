@@ -1,0 +1,34 @@
+.col {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.probe {
+  flex: 1;
+  min-width: 240px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.probe-k {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+
+pre {
+  margin: 0;
+  font: 12.5px var(--mono);
+  color: var(--accent-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+pre.err {
+  color: var(--danger);
+}

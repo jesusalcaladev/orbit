@@ -1,0 +1,78 @@
+.feed {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 480px;
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.msg {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  animation: pop 0.22s ease;
+}
+
+.msg.mine {
+  flex-direction: row-reverse;
+}
+
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font: 700 14px system-ui, sans-serif;
+  color: #0b0e14;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.bubble {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 12px 12px 12px 4px;
+  padding: 8px 12px;
+  max-width: 70%;
+}
+
+.msg.mine .bubble {
+  border-radius: 12px 12px 4px 12px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel-2));
+}
+
+.bubble .who {
+  font: 700 12px system-ui, sans-serif;
+  color: var(--text-dim);
+  margin-bottom: 2px;
+}
+
+.msg.mine .bubble .who {
+  text-align: right;
+}
+
+.bubble .when {
+  font: 500 10.5px var(--mono);
+  color: var(--text-dim);
+  margin-top: 3px;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.bubble .when .rt {
+  color: var(--accent);
+}

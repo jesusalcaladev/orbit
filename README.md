@@ -222,7 +222,8 @@ pnpm run test:coverage # ~94% stmts / ~88% branch / ~96% lines (see packages/cor
 pnpm run typecheck   # strict TypeScript (builds all packages, then checks examples/bench)
 pnpm run build       # ESM + .d.ts → dist/ in every package
 pnpm run example     # zero-dep demo server on localhost:3000
-pnpm run examples    # all nine runnable examples
+pnpm run examples    # all nine headless examples
+pnpm run web         # interactive demos on localhost:4321 — chat, uploads, posts, auth + the Orbit-vs-GraphQL A/B lab (see docs/examples.md)
 pnpm run bench       # B1–B9 benchmarks + chart (docs/benchmarks.md)
 pnpm run size        # core package weight vs graphql-js (docs/benchmarks.md)
 ```

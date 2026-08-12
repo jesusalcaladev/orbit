@@ -2,5 +2,6 @@ node_modules/
 dist/
 coverage/
 bench/results/
+examples/web/uploads/
 *.log
 .DS_Store

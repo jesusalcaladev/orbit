@@ -5,6 +5,28 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
 ## [Unreleased]
 
 ### Added
+- **Interactive web demos** (`npm run web`, `examples/web/`) — one server
+  mounts the real engine AND a real graphql-js competition on a shared world,
+  then serves five vanilla HTML/CSS/JS demos from an index page
+  (http://localhost:4321):
+  - `01-chat` — realtime chat over the zero-dependency WebSocket with
+    per-message round-trip latency;
+  - `02-file-image` — native multipart uploads (envelope + files in
+    `ctx.files`) with drag & drop and a gallery;
+  - `03-mini-post` — a feed with nested relations
+    (`posts { author { name } }`) and like/unlike mutations;
+  - `04-mini-auth` — register/login with scrypt-hashed passwords, the
+    `x-orbit-token` header stamped into `ctx.state.caller` by a plugin, and
+    a protected query denied with `ORBIT_PERMISSION_DENIED`;
+  - `05-orbit-vs-graphql` — the A/B lab: the same chat over both protocols
+    on one server, simultaneous sends and batched rounds, end-to-end
+    round-trip latencies (send → mutation → shared bus → subscription →
+    tab), p50/p95/p99/max, payload bytes and a comparative chart.
+  The GraphQL side runs `graphql-js` + `ws` + `graphql-ws` as devDependencies
+  of the example harness only — `@orbit/core` stays zero-dependency.
+  Documented in `docs/examples.md`.
+
+### Added
 - **Native file uploads** — the handler now accepts `multipart/form-data`
   requests: the `envelope` field carries the JSON envelope, every other
   field whose value is a `File` lands in `ctx.files` (keyed by field name)

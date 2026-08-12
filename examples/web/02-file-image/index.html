@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>02 · File &amp; image upload — Orbit</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="demo">
+      <div class="demo-head">
+        <a class="back" href="/">← demos</a>
+        <h1>File &amp; image upload</h1>
+        <span class="pill orbit">multipart/form-data</span>
+      </div>
+      <p class="demo-sub">
+        The whole request is one <code>multipart/form-data</code> body: the JSON envelope rides
+        in the <code>envelope</code> field, the file lands as a real <code>File</code> in
+        <code>ctx.files</code> inside <code>mutate</code>. Drag &amp; drop or pick an image.
+      </p>
+
+      <div class="panel">
+        <div id="drop" class="drop">
+          <input id="file" type="file" accept="image/*" multiple hidden />
+          <div class="drop-inner">
+            <div class="drop-icon">⬆</div>
+            <div><strong>Drop images here</strong> or <span class="link">browse</span></div>
+            <div class="drop-hint">served back from <code>/uploads/*</code></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="stats">
+        <div class="stat">
+          <div class="k">Last upload</div>
+          <div class="v" id="last">—</div>
+        </div>
+        <div class="stat">
+          <div class="k">Images</div>
+          <div class="v" id="count">0</div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Gallery</h2>
+        <div id="gallery" class="gallery"></div>
+      </div>
+    </div>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

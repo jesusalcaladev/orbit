@@ -21,6 +21,33 @@ node examples/run-all.ts   # run all nine, back to back
 | [`08-realtime.ts`](../examples/08-realtime.ts) | The WebSocket realtime transport end-to-end: subscribe to a live feed, mutations stream events, and a real disconnect → reconnect → `resume` replays the missed patches. |
 | [`09-speed.ts`](../examples/09-speed.ts) | **The speed showcase** — every number measured live on this machine: engine core µs/op + RPS, the full fetch handler, the 5-level deep graph (5 DB round-trips vs GraphQL's 1,111), the 20-post feed at a fraction of the JSON bytes, and a realtime fan-out to 50 live sockets. |
 
+## The web demos — interactive HTML/CSS/JS
+
+The interactive showcase runs one server that mounts the real engine **and** a
+real graphql-js competition, then serves the demos over HTTP:
+
+```bash
+npm run web    # builds, then serves http://localhost:4321
+```
+
+Open the index and pick a demo — every one is vanilla HTML/CSS/JS in the
+browser talking to the protocol:
+
+| Demo | What it shows |
+| :--- | :--- |
+| [`01-chat`](../examples/web/01-chat/) | Realtime chat over Orbit's zero-dependency WebSocket: a `do: chat.send` mutation in every tab, one shared adapter `subscribe` hook, per-message round-trip latency. Open two tabs and talk. |
+| [`02-file-image`](../examples/web/02-file-image/) | Native multipart uploads: one `FormData` body carries the JSON `envelope` field + the file, which lands as a real `File` in `ctx.files` inside `mutate`. Drag & drop, previews served from `/uploads/*`. |
+| [`03-mini-post`](../examples/web/03-mini-post/) | A feed with **nested relations** (`posts { author { name } }`) resolved through the adapter contract and batched per level, plus like/unlike mutations. |
+| [`04-mini-auth`](../examples/web/04-mini-auth/) | Register/log in (scrypt-hashed passwords), the plugin reads `x-orbit-token` into `ctx.state.caller`, and a protected query is denied with `ORBIT_PERMISSION_DENIED` without the token. |
+| [`05-orbit-vs-graphql`](../examples/web/05-orbit-vs-graphql/) | **The A/B lab**: the same chat, the same message bus, two protocols on one server. Send simultaneously to both, or run batches — end-to-end round-trips (send → mutation → shared bus → subscription → your tab) measured live, p50/p95/p99/max, payload bytes, and a comparative chart. |
+
+**How the A/B is wired** — `examples/web/server.ts` creates one shared world;
+Orbit serves `/orbit` (handler) + `/realtime` (its WebSocket), graphql-js
+serves `/graphql` (HTTP) + `/graphql-ws` (subscriptions via `ws` +
+`graphql-ws`, devDependencies of the example harness only — `@orbit/core`
+stays zero-dependency). Both sides emit onto the same in-memory bus, so the
+race is honest.
+
 ## The demo server
 
 [`standalone-server.ts`](../examples/standalone-server.ts) is a complete zero-dependency endpoint on `node:http` — the fetch-compatible `handler` dropped into a raw server:

@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>04 · Mini-auth — Orbit</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="demo">
+      <div class="demo-head">
+        <a class="back" href="/">← demos</a>
+        <h1>Mini-auth</h1>
+        <span class="pill orbit">plugin · hooks</span>
+      </div>
+      <p class="demo-sub">
+        A plugin reads the <code>x-orbit-token</code> header and stamps
+        <code>ctx.state.caller</code>; the <code>user(me="true")</code> query refuses to resolve
+        without it. Passwords are scrypt-hashed. Try the seeded users <code>ada</code> /
+        <code>grace</code> with password <code>orbit</code>.
+      </p>
+
+      <div id="auth" class="row" style="margin-bottom: 16px">
+        <input id="username" type="text" placeholder="username" autocomplete="username" />
+        <input id="password" type="password" placeholder="password" autocomplete="current-password" />
+        <button id="login">Log in</button>
+        <button id="register" class="ghost">Register</button>
+      </div>
+
+      <div class="stats">
+        <div class="stat">
+          <div class="k">Session</div>
+          <div class="v" id="session" style="font-size: 12px">—</div>
+        </div>
+        <div class="stat">
+          <div class="k">Protected query</div>
+          <div class="v" id="me">—</div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>What the pipeline saw</h2>
+        <p class="demo-sub" style="margin-bottom: 8px">
+          The same <code>user(me="true") { name }</code> query — once with the token, once without.
+        </p>
+        <div class="col">
+          <div class="probe">
+            <div class="probe-k">With token</div>
+            <pre id="with-token">…</pre>
+          </div>
+          <div class="probe">
+            <div class="probe-k">Without token</div>
+            <pre id="without-token">…</pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

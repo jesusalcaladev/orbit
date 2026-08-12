@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>05 · Orbit vs GraphQL — A/B lab</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="demo">
+      <div class="demo-head">
+        <a class="back" href="/">← demos</a>
+        <h1>Orbit vs GraphQL · A/B lab</h1>
+        <span class="pill orbit">Orbit</span>
+        <span class="pill gql">graphql-js</span>
+      </div>
+      <p class="demo-sub">
+        The same chat, the same in-memory message bus, two protocols on one server. A message sent
+        to both travels the full round-trip — <code>mutation → adapter → shared bus → subscription →
+        your tab</code> — measured end to end in your browser. <code>Rounds</code> sends the batches
+        <strong>simultaneously</strong> to both sides.
+      </p>
+
+      <div class="panel">
+        <div class="row">
+          <input id="name" type="text" value="Ada" maxlength="24" style="max-width: 130px" />
+          <input id="text" type="text" placeholder="Message to both protocols…" autocomplete="off" style="flex: 1; min-width: 200px" />
+          <button id="race">Send to both</button>
+        </div>
+        <div class="row" style="margin-top: 12px">
+          <label style="flex-direction: row; align-items: center; gap: 8px">
+            <span>Rounds</span>
+            <input id="rounds" type="text" value="40" inputmode="numeric" style="width: 70px" />
+          </label>
+          <button id="bench" class="blue">Benchmark — simultaneous batches</button>
+          <button id="clear" class="ghost">Clear feed</button>
+        </div>
+      </div>
+
+      <div class="stats">
+        <div class="stat">
+          <div class="k">Winner (avg round-trip)</div>
+          <div class="v" id="winner">—</div>
+        </div>
+        <div class="stat">
+          <div class="k">Orbit payload</div>
+          <div class="v" id="orbit-payload">—</div>
+        </div>
+        <div class="stat">
+          <div class="k">GraphQL payload</div>
+          <div class="v" id="gql-payload">—</div>
+        </div>
+        <div class="stat">
+          <div class="k">Progress</div>
+          <div class="v" id="progress" style="font-size: 13px">idle</div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Latency — end-to-end round-trip (send → subscription event)</h2>
+        <table class="scores" id="scores"></table>
+        <div id="chart" class="chart"></div>
+      </div>
+
+      <div class="duo">
+        <div class="side">
+          <div class="side-head"><span class="pill orbit">Orbit</span> <span id="orbit-status">connecting…</span></div>
+          <div id="orbit-feed" class="feed"></div>
+        </div>
+        <div class="side">
+          <div class="side-head"><span class="pill gql">graphql-js</span> <span id="gql-status">connecting…</span></div>
+          <div id="gql-feed" class="feed"></div>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

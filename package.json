@@ -22,6 +22,7 @@
     "lint": "biome check .",
     "example": "pnpm run build && node examples/standalone-server.ts",
     "examples": "pnpm run build && node examples/run-all.ts",
+    "web": "pnpm run build && node examples/web/server.ts",
     "bench": "pnpm run build && node bench/run.ts",
     "size": "pnpm run build && node bench/size.ts"
   },
@@ -36,10 +37,13 @@
     "@commitlint/config-conventional": "^21.2.0",
     "@orbit/core": "workspace:*",
     "@types/node": "^24.0.0",
+    "@types/ws": "^8.18.1",
     "dataloader": "^2.2.3",
     "graphql": "^17.0.2",
+    "graphql-ws": "^6.2.1",
     "husky": "^9.1.7",
     "lint-staged": "^17.3.0",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "ws": "^8.21.3"
   }
 }
