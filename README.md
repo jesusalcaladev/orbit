@@ -64,11 +64,13 @@ That's why the core has **zero runtime dependencies**: a contract layer should b
 - **Declarative caching.** TTL and stale-while-revalidate via a cache spec string, enforced by the built-in zero-dependency cache plugin.
 - **Mutations.** `do: "user.update"` with `filter`/`payload` args, plus an optional `return` sub-graph and `invalidates` for cache invalidation.
 - **Standard errors.** One `OrbitError` type, predictable codes, correct HTTP statuses, and an `onError` hook to translate anything.
+- **Native file uploads.** The handler accepts `multipart/form-data` — the `envelope` field carries the JSON envelope, uploaded files arrive as real `File` objects in `ctx.files` inside `mutate`. Whole-body size enforcement (413) and a JSON/MessagePack-safe envelope.
 - **Wire format negotiation.** `Accept` decides the response — JSON, **MessagePack** (zero-dep codec), or **SSE streaming** (the graph arrives level by level, first byte in ~7 ms). `Accept-Encoding: gzip` compresses both JSON and msgpack. Errors speak the same format.
 - **Streaming.** `orbit.stream()` yields the root as soon as its adapter answers; relations follow. Clients render before the database finishes the deep joins.
 - **Realtime subscriptions.** A zero-dependency WebSocket transport (`createRealtimeServer`) streams adapter `subscribe` events to clients with per-subscription sequence numbers, retention across disconnects, and patch replay on `resume` — 100 clients share one adapter hook.
 - **Frozen contracts.** The `DataAdapter` interface (resolve/batch/mutate/subscribe) and the envelope are canonicalized in [`spec.md`](./spec.md) — realtime is designed into the adapter contract, with the WebSocket transport on the roadmap.
 - **Framework-agnostic handler.** Works with `Request`/`Response` runtimes, or call `orbit.execute(envelope, ctx)` directly.
+- **Ecosystem packages.** `@orbit/rest` (fetch-based `DataAdapter`: queries → `GET`, mutations → `POST`/`PATCH`/`DELETE`) and `@orbit/cache` (the cache plugin's dedicated distribution home, where the Redis/KV stores slot in) ship alongside the frozen core — see [docs/ecosystem.md](./docs/ecosystem.md).
 - **Zero runtime dependencies.** `typescript` and `vitest` are dev-only. The whole protocol is a compact (~3 300 lines), typed ES2022 core — including the MessagePack codec and the WebSocket transport.
 
 ## Quick start
@@ -215,13 +217,14 @@ in as `packages/*`.
 
 ```bash
 pnpm install         # dev dependencies only (typescript, vitest)
-pnpm test            # 295 tests, Vitest (runs in packages/core)
+pnpm test            # 324 tests, Vitest (307 core + 13 rest + 4 cache)
 pnpm run test:coverage # ~94% stmts / ~88% branch / ~96% lines (see packages/core)
-pnpm run typecheck   # strict TypeScript (builds the core, then checks examples/bench)
-pnpm run build       # ESM + .d.ts → packages/core/dist
+pnpm run typecheck   # strict TypeScript (builds all packages, then checks examples/bench)
+pnpm run build       # ESM + .d.ts → dist/ in every package
 pnpm run example     # zero-dep demo server on localhost:3000
 pnpm run examples    # all nine runnable examples
 pnpm run bench       # B1–B9 benchmarks + chart (docs/benchmarks.md)
+pnpm run size        # core package weight vs graphql-js (docs/benchmarks.md)
 ```
 
 ## License

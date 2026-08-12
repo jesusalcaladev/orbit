@@ -4,8 +4,9 @@ Thanks for helping make Orbit better! Here's how to get started.
 
 ## Setup
 
-Orbit is a **pnpm monorepo** — the core package lives in `packages/core`, and
-new packages slot in as `packages/*`.
+Orbit is a **pnpm monorepo** — the frozen protocol core lives in
+`packages/core` (`@orbit/core`), the ecosystem packages slot in as
+`packages/*` (`@orbit/rest`, `@orbit/cache`, …).
 
 ```bash
 pnpm install
@@ -15,18 +16,18 @@ pnpm install
 
 | Command | What it does |
 | :--- | :--- |
-| `pnpm test` | Run the Vitest suite (270+ tests, in `packages/core`) |
-| `pnpm run test:watch` | Watch mode |
-| `pnpm run test:coverage` | Coverage report with thresholds (90% stmts / 90% funcs / 85% branch; currently 94% stmts) |
-| `pnpm run typecheck` | Strict TypeScript check (builds the core first, then checks examples/bench) |
-| `pnpm run build` | Emit ESM + `.d.ts` to `packages/core/dist` |
+| `pnpm test` | Run the full Vitest suite across every workspace (324 tests: 307 core + 13 rest + 4 cache) |
+| `pnpm run test:watch` | Watch mode (core) |
+| `pnpm run test:coverage` | Core coverage report with thresholds (90% stmts / 90% funcs / 85% branch; currently 94% stmts) |
+| `pnpm run typecheck` | Strict TypeScript check (builds all packages, then checks examples/bench) |
+| `pnpm run build` | Emit ESM + `.d.ts` to `dist/` in every package |
 | `pnpm run example` | Run the zero-dependency demo server |
 | `pnpm run examples` | Run all nine runnable examples |
-| `pnpm run bench` | Run the B1–B7 benchmarks and regenerate the chart |
+| `pnpm run bench` | Run the B1–B9 benchmarks and regenerate the chart |
 
 ## Running the benchmarks
 
-`npm run bench` builds `dist/`, measures all seven scenarios, and writes
+`npm run bench` builds `dist/`, measures all nine scenarios, and writes
 `bench/results/benchmarks.json` + `bench/results/chart.svg`. The chart in
 `docs/benchmarks.md` is a copy of that SVG — re-embed it when the numbers
 change so the docs stay honest.

@@ -89,6 +89,50 @@ const adapters = memoryAdapter([
 
 `memoryAdapter` also wires a default `batch` (one `resolve` per request), so relation-heavy demos exercise the batching path automatically.
 
+### `restAdapter` — any REST API behind the contract (`@orbit/rest`)
+
+The first ecosystem package: a fetch-based adapter that speaks the frozen
+`DataAdapter` contract to a plain REST API.
+
+```ts
+import { createOrbit } from '@orbit/core';
+import { restAdapter } from '@orbit/rest';
+
+const orbit = createOrbit({
+  adapters: [
+    restAdapter({
+      entity: 'user',
+      baseUrl: 'https://api.example.com/v1',
+      parentKey: 'authorId', // relation scoping: posts under a user → ?authorId=7
+    }),
+  ],
+});
+```
+
+| Orbit concept | REST translation |
+| :--- | :--- |
+| `user(id="42") { name }` | `GET /user/42` (an `id` filter becomes the path segment) |
+| `users(role="admin")` | `GET /users?role=admin` (other filters become query params) |
+| Relation under a parent | `parentKey` injects the parent id as a query param |
+| `do: user.create` / `.update` / `.delete` | `POST` / `PATCH` / `DELETE` (per-action overridable via `mutations`) |
+| Response body shape | `unwrap` extracts the payload (e.g. `({ data }) => data`) |
+
+Behavior notes:
+
+- Upstream `404` resolves to **`null`** ("no record"); every other failure
+  becomes an `OrbitError` that **preserves the upstream status** on the wire
+  (a `429` is answered `429`, not flattened to `400`). Mutation failures use
+  `ORBIT_MUTATION_FAILED`; a `400`/`422` on reads maps to
+  `ORBIT_FILTER_INVALID`.
+- No `batch`: REST round-trips cannot be merged, so a deep graph is one
+  parallel request per sibling (the engine's per-level `Promise.all`). The
+  N+1 fix is why DB adapters implement `batch`; over REST it's a documented
+  limitation.
+- `fetchFn`, `headers` (static or a function, e.g. for auth tokens) are
+  injectable for tests and signed requests.
+
+See [`docs/ecosystem.md`](./ecosystem.md) for the package's roadmap context.
+
 ## Writing your own in 5 minutes
 
 1. Pick an entity name.

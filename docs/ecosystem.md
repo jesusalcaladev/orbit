@@ -22,13 +22,13 @@ packages/
   adapters/  @orbit/postgres        ⬜ DataAdapter over `pg`
              @orbit/mongo           ⬜ DataAdapter over `mongodb`
              @orbit/sqlite          ⬜ DataAdapter over `node:sqlite` (optional)
-             @orbit/rest            ⬜ fetch-based DataAdapter (old fetchAdapter)
+             @orbit/rest            ✅ shipped — fetch-based DataAdapter
   caches/    @orbit/redis           ⬜ CacheStore over Redis
              @orbit/kv-cache        ⬜ CacheStore over Cloudflare KV
              @orbit/memcached       ⬜ CacheStore over Memcached (optional)
   plugins/   @orbit/auth            ⬜ OrbitPlugin — authn/authz hooks
              @orbit/logging         ⬜ OrbitPlugin — span timing / observability
-             @orbit/cache           🟡 split the core cache plugin out
+             @orbit/cache           ✅ shipped — distribution home (impl stays in frozen core)
   servers/   @orbit/hono            ⬜ handler wrapper for Hono
              @orbit/express         ⬜ handler wrapper for Express
              @orbit/cloudflare-workers ⬜ handler wrapper for Workers
@@ -105,11 +105,12 @@ export interface DataAdapter {
 }
 ```
 
-Database packages (`@orbit/postgres`, `@orbit/mongo`, `@orbit/sqlite`,
-`@orbit/rest`) translate **verbatim string filters** into their query
-language and implement `batch` (the N+1 fix: one query per level via
-`WHERE … IN` / `$in`). See [docs/adapters.md](./adapters.md) for the full
-contract.
+Database packages (`@orbit/postgres`, `@orbit/mongo`, `@orbit/sqlite`)
+translate **verbatim string filters** into their query language and
+implement `batch` (the N+1 fix: one query per level via `WHERE … IN` /
+`$in`). `@orbit/rest` is shipped: queries become `GET` calls (filters as
+query params, `/:id` when an `id` filter is present), mutations become
+`POST`/`PATCH`/`DELETE` — see [docs/adapters.md](./adapters.md).
 
 ### `OrbitPlugin` (frozen — spec §11)
 
@@ -133,15 +134,22 @@ Server wrappers (`@orbit/hono`, `@orbit/express`,
 
 ## Build order (from ROADMAP §9)
 
-1. **`@orbit/rest`** — the simplest adapter (fetch-based; the old
-   `fetchAdapter` was removed from core). Validates the scaffolding pattern
-   end to end.
-2. **`@orbit/cache` split** — move the core cache plugin into its own
-   package, keep a thin re-export in core for backwards compatibility
-   (additive, non-breaking).
+1. **`@orbit/rest`** ✅ — the simplest adapter (fetch-based; the old
+   `fetchAdapter` was removed from core). Validated the scaffolding pattern
+   end to end. `packages/rest` ships with its own tests (13) exercising the
+   real `DataAdapter` contract against a mocked fetch.
+2. **`@orbit/cache`** ✅ — the plugin's dedicated distribution package. The
+   implementation deliberately STAYS in the frozen core: the import surface
+   of `@orbit/core` is pinned by `api-surface.test.ts`, and moving the code
+   out would invert the dependency direction (`core → cache → core` cycle)
+   plus break the contract. `@orbit/cache` depends on the core one way and
+   re-exports the plugin + `CacheStore` contract — and is the home of the
+   Redis/KV/Memcached stores next. The code-level split is a deliberate
+   breaking change reserved for a future major.
 3. **`@orbit/auth`** — hooks already exist; an easy, dependency-free win.
 4. **`@orbit/redis`**, then **`@orbit/kv-cache`** — the two `CacheStore`
-   backends that make the B6/B9 cache story production-ready.
+   backends that make the B6/B9 cache story production-ready. They implement
+   the `CacheStore` contract re-exported by `@orbit/cache`.
 5. **`@orbit/postgres` + `@orbit/mongo`** — the flagship DB adapters.
 6. **Server wrappers** and — once the protocol is proven stable — the
    **clients**.

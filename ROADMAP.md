@@ -34,7 +34,7 @@
 
 **⬜ First-party plugin packages** (the "brains", shipped as `@orbit/<target>`):
 - [ ] **`@orbit/auth`** — hooks `onBeforeResolve`/`onBeforeExecute` with role checks. *Only a hand-written example exists today: `examples/03-auth-plugin.ts`.*
-- [ ] **`@orbit/cache`** — split the core cache plugin out of `@orbit/core` (it currently lives inline in `src/plugins/cache.ts`).
+- [x] **`@orbit/cache`** — shipped as a distribution package that re-exports the plugin from the frozen core (one-way dependency, no `core → cache` cycle). The code-level split is a deliberate breaking change reserved for a future major — see §9.
 - [ ] **`@orbit/redis`** — a `RedisCacheStore` implementing the `CacheStore` contract (contract is done and swappable; only the store impl is missing). Supports TTL/SWR and prefix invalidation.
 - [ ] **`@orbit/kv-cache`** — Cloudflare Workers KV `CacheStore`, same contract as `@orbit/redis` (see below). (`@orbit/cloudflare-workers` is the *server wrapper* package — see §7.)
 - [ ] **`@orbit/logging`** — observability/span-timing around hooks; will help with benchmark B3.
@@ -65,6 +65,7 @@
 | SSE streaming (level-by-level) | ✅ | `Orbit#stream` + `text/event-stream` handler |
 | gzip (`CompressionStream`) | ✅ | engine `gzipBytes` |
 | `Accept` / `Accept-Encoding` negotiation | ✅ | `src/serialize/negotiate.ts` |
+| **File uploads (multipart/form-data → `ctx.files`)** | ✅ | engine `#readMultipart`, `OrbitContext.files` — native, zero-dep, envelope contract untouched |
 
 **✅ Parsed-node naming DECIDED (frozen):** the node field is `origin` (no `_origin`); cache specs never live on the node (`_cacheSpec` rejected — caching is request context, read from `ctx.envelope.cache` / the `x-orbit-cache` header). Mutation `return` nodes are stamped `origin: 'mutate'`. Pinned in spec §11 + `test/contract.test.ts`.
 
@@ -133,8 +134,8 @@ Future structure (each as its own published package):
 @orbit/postgres             ⬜
 @orbit/mongo                ⬜
 @orbit/sqlite               ⬜ (optional)
-@orbit/rest                 ⬜ (new fetch-based adapter — the old `fetchAdapter` was removed from core)
-@orbit/cache                🟡 (core cache plugin done; split out)
+@orbit/rest                 ✅ fetch-based adapter (queries→GET, mutations→POST/PATCH/DELETE)
+@orbit/cache                ✅ distribution home; impl stays in frozen core (see §9 note)
 @orbit/redis                ⬜ (CacheStore for Redis — cache + optional feature store)
 @orbit/kv-cache             ⬜ (CacheStore for Cloudflare KV)
 @orbit/memcached            ⬜ (optional)
@@ -187,10 +188,12 @@ artifact on every push.
    compressed payload (gzip equalizes — the edge is
    round-trips/throughput/streaming, not B4). B3's goal is met — no engine
    change needed; the only remaining gap is the undici transport, documented.
-3. **Split packages in a monorepo** — write `@orbit/rest` as a new adapter
-   package (`fetchAdapter` was already removed from core; example 04 shows the
-   hand-written contract), split the cache plugin into `@orbit/cache`.
-   (`@orbit/core` keeps only the memory adapter as reference.)
+3. **Split packages in a monorepo** — DONE: `@orbit/rest` (fetch-based
+   adapter, shipped with 13 tests against the real `DataAdapter` contract) and
+   `@orbit/cache` (distribution home of the cache plugin — re-exports from the
+   frozen core to keep the dependency direction one-way; Redis/KV stores
+   implement the re-exported `CacheStore` contract). (`@orbit/core` keeps only
+   the memory adapter as reference.)
 4. **Ship `@orbit/auth`** (easy — hooks already exist).
 5. **Ship `@orbit/redis`** (Redis `CacheStore`), then **`@orbit/kv-cache`**
    (Cloudflare KV).
@@ -211,11 +214,11 @@ artifact on every push.
 | Monorepo (pnpm workspaces) | ✅ (`packages/core`; more packages slot in) |
 | Plugin system (all 7 hooks + registry) | ✅ |
 | OQS + mutations | ✅ |
-| Envelope / serialization / SSE / gzip | ✅ |
+| Envelope / serialization / SSE / gzip / **file uploads** | ✅ |
 | Errors | ✅ |
-| Caching core (TTL/SWR/invalidate) | ✅ (in core; → `@orbit/cache`) |
+| Caching core (TTL/SWR/invalidate) | ✅ (in core; `@orbit/cache` distribution package shipped) |
 | In-memory adapter | ✅ (keep in `@orbit/core`) |
-| REST/fetch adapter | ⬜ (`@orbit/rest` new — `fetchAdapter` removed from core) |
+| REST/fetch adapter | ✅ (`@orbit/rest` — queries→GET, mutations→POST/PATCH/DELETE) |
 | Benchmarks | ✅ (B1–B9 goals met) |
 | Auth plugin | ⬜ (`@orbit/auth`) |
 | Redis cache store | ⬜ (`@orbit/redis`) |

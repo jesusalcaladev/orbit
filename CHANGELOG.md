@@ -4,6 +4,39 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
 
 ## [Unreleased]
 
+### Added
+- **Native file uploads** — the handler now accepts `multipart/form-data`
+  requests: the `envelope` field carries the JSON envelope, every other
+  field whose value is a `File` lands in `ctx.files` (keyed by field name)
+  for adapters and plugins — `{ do: 'user.uploadAvatar', args: {...} }`
+  receives the avatar as a real `File` in `mutate`. The whole body counts
+  against `maxPayloadBytes` (413), a missing envelope is a 400, and the
+  JSON/MessagePack paths are untouched. 12 tests in `test/upload.test.ts`;
+  documented in `docs/server.md` and spec §7.
+- **Core weight measurement** — `bench/size.ts` (`npm run size`):
+  `@orbit/core` ships **103.5 KB raw / 26.4 KB gzipped** vs graphql-js
+  **1 383 KB / 137.4 KB** — **13.4× smaller raw, 5.2× smaller gzipped**,
+  zero runtime dependencies. Documented in `docs/benchmarks.md`.
+- **`@orbit/rest`** — first ecosystem package (the old `fetchAdapter` is
+  back, as it should be: an adapter, not core logic). A fetch-based
+  `DataAdapter`: queries become `GET` calls (filters as query params,
+  `/:id` path when an `id` filter is present), relations inject the
+  parent id via `parentKey`, mutations map to `POST`/`PATCH`/`DELETE`
+  (customizable per action), upstream 404 → `null`, other failures →
+  precise `OrbitError`s. 13 tests in `packages/rest/test/`.
+- **`@orbit/cache`** — the cache plugin's dedicated distribution package.
+  The implementation deliberately STAYS inside the frozen `@orbit/core`
+  (its export surface is pinned by `api-surface.test.ts`; moving the code
+  would invert the dependency direction into a `core → cache → core`
+  cycle). The package depends on the core one-way, re-exports the plugin
+  and the `CacheStore` contract, and is the home of the Redis/KV/Memcached
+  stores next. The code-level split is a deliberate breaking change
+  reserved for a future major. 4 tests in `packages/cache/test/`.
+- **Monorepo build wiring** — `pnpm build` / `pnpm test` / `pnpm typecheck`
+  now fan out to every workspace (`pnpm -r`); each package is
+  self-sufficient (own `vitest.config.ts`, dev deps). Total suite:
+  **324 tests** (307 core + 13 rest + 4 cache).
+
 ### Docs
 - **New `docs/ecosystem.md`** — the blueprint for the first-party
   `@orbit/*` package ecosystem: every planned package (adapters, caches,

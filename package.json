@@ -13,16 +13,17 @@
   },
   "scripts": {
     "prepare": "husky",
-    "build": "pnpm --filter @orbit/core run build",
-    "typecheck": "pnpm run build && pnpm --filter @orbit/core run typecheck && tsc -p tsconfig.json",
-    "test": "pnpm --filter @orbit/core run test",
+    "build": "pnpm -r run build",
+    "typecheck": "pnpm run build && pnpm -r run typecheck && tsc -p tsconfig.json",
+    "test": "pnpm -r run test",
     "test:watch": "pnpm --filter @orbit/core run test:watch",
     "test:coverage": "pnpm --filter @orbit/core run test:coverage",
     "format": "biome check --write .",
     "lint": "biome check .",
     "example": "pnpm run build && node examples/standalone-server.ts",
     "examples": "pnpm run build && node examples/run-all.ts",
-    "bench": "pnpm run build && node bench/run.ts"
+    "bench": "pnpm run build && node bench/run.ts",
+    "size": "pnpm run build && node bench/size.ts"
   },
   "lint-staged": {
     "*.{ts,js,json}": [

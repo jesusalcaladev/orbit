@@ -1,0 +1,42 @@
+{
+  "name": "@orbit/rest",
+  "version": "0.0.1",
+  "description": "REST adapter for @orbit/core — serve any REST API behind the Orbit contract. Zero third-party runtime dependencies.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "keywords": [
+    "orbit",
+    "rest",
+    "adapter",
+    "data-layer",
+    "zero-dependency"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@orbit/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}
