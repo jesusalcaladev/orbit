@@ -1,10 +1,11 @@
 /**
- * Orbit benchmark suite — scenarios B1–B6 from the protocol spec.
+ * Orbit benchmark suite — scenarios B1–B7 from the protocol spec.
  *
  * Every measurement runs against the real `@orbit/core` engine (dist build)
- * on this machine. The competition figures are the reference values from the
- * spec table (REST / GraphQL / Apollo), so the comparison is apples-to-apples
- * on the same machine where they are labeled as such.
+ * on this machine. The competition is now MEASURED, not assumed: the
+ * GraphQL scenarios (bench/graphql.ts) run the same fixtures through
+ * graphql-js (a devDependency of the bench harness only — the core keeps its
+ * zero-runtime-dependency contract) on the same hardware.
  *
  * Run:  npm run bench   (builds first)
  *
@@ -24,6 +25,9 @@ import {
   memoryAdapter,
 } from '@orbit/core';
 import type { DataAdapter, SubscriptionEvent } from '@orbit/core';
+import { buildDeepNest, buildFeed, users } from './fixtures.ts';
+import { graphqlB1, graphqlB2, graphqlB3, graphqlB4 } from './graphql.ts';
+import { gzip, measure, measureThroughput, now, pct } from './measure.ts';
 import { renderChart } from './svg.ts';
 import type { ChartRow } from './svg.ts';
 import { BenchWsClient } from './ws-client.ts';
@@ -34,41 +38,6 @@ import { BenchWsClient } from './ws-client.ts';
 
 const benchDir = join(dirname(fileURLToPath(import.meta.url)), 'results');
 mkdirSync(benchDir, { recursive: true });
-
-function now(): number {
-  return performance.now();
-}
-
-function pct(sorted: number[], p: number): number {
-  const i = Math.min(sorted.length - 1, Math.floor((p / 100) * sorted.length));
-  return sorted[i]!;
-}
-
-async function measure(fn: () => Promise<unknown> | unknown, samples: number): Promise<number[]> {
-  const times: number[] = [];
-  for (let i = 0; i < samples; i += 1) {
-    const start = now();
-    await fn();
-    times.push(now() - start);
-  }
-  return times.sort((a, b) => a - b);
-}
-
-/**
- * Honest throughput: every op is awaited before the next starts, so the
- * measurement reflects completed work (unawaited loops pipeline microtasks
- * and inflate the number). Warm-up first, then measure `samples` ops.
- */
-async function measureThroughput(
-  fn: () => Promise<unknown>,
-  samples: number,
-  warmup = 300,
-): Promise<number> {
-  for (let i = 0; i < warmup; i += 1) await fn();
-  const start = now();
-  for (let i = 0; i < samples; i += 1) await fn();
-  return samples / ((now() - start) / 1000);
-}
 
 /**
  * Measure the handler's SERVER-side work only: each fresh Request is built
@@ -94,20 +63,15 @@ async function measureServerWork(
 }
 
 // ---------------------------------------------------------------------------
-// Shared fixtures
+// B1 — Simple query latency (P99), measured vs graphql-js
 // ---------------------------------------------------------------------------
 
-const users = Array.from({ length: 100 }, (_, i) => ({
-  id: String(i + 1),
-  name: `User ${i + 1}`,
-  email: `user${i + 1}@orbit.dev`,
-}));
-
-// ---------------------------------------------------------------------------
-// B1 — Simple query latency (P99)
-// ---------------------------------------------------------------------------
-
-async function benchB1(): Promise<{ orbitMs: number; competitionMs: number }> {
+async function benchB1(): Promise<{
+  orbitMs: number;
+  graphqlMs: number;
+  graphqlCachedMs: number;
+  competitionMs: number;
+}> {
   const orbit = createOrbit({
     adapters: memoryAdapter([
       { entity: 'user', resolve: ({ id }) => users.find((u) => u.id === id) },
@@ -118,10 +82,18 @@ async function benchB1(): Promise<{ orbitMs: number; competitionMs: number }> {
   await orbit.execute({ query: 'user(id="1") { name, email }' });
 
   const times = await measure(() => orbit.execute({ query: 'user(id="1") { name, email }' }), 2000);
-  const p99 = pct(times, 99);
+  const orbitP99 = pct(times, 99);
 
-  // Reference: REST 5ms, GraphQL 8ms — use the faster of the two.
-  return { orbitMs: p99, competitionMs: 5 };
+  // The same query, same data, through graphql-js on this machine — naive
+  // (full pipeline per op) and cached-document (the parse-LRU equivalent).
+  const { ms: graphqlMs, cachedMs: graphqlCachedMs } = await graphqlB1();
+  console.log(
+    `    graphql-js: naive ${graphqlMs.toFixed(2)} ms P99 · cached-document ${graphqlCachedMs.toFixed(3)} ms P99`,
+  );
+
+  // Competition label: the FAIR number is the cached-document one (Orbit's
+  // parse LRU also skips re-parsing) — same apples-to-apples as B3.
+  return { orbitMs: orbitP99, graphqlMs, graphqlCachedMs, competitionMs: graphqlCachedMs };
 }
 
 // ---------------------------------------------------------------------------
@@ -134,26 +106,7 @@ interface Counting {
 
 /** Lazy 5-level graph: user → posts(10) → comments(100) → likes(1000) → likedBy(1000). */
 function deepNestAdapters(count: Counting): DataAdapter[] {
-  const posts = Array.from({ length: 10 }, (_, i) => ({
-    id: `p${i + 1}`,
-    title: `Post ${i + 1}`,
-    authorId: '1',
-  }));
-  const comments = Array.from({ length: 100 }, (_, i) => ({
-    id: `c${i + 1}`,
-    text: `Comment ${i + 1}`,
-    postId: `p${(i % 10) + 1}`,
-  }));
-  const likes = Array.from({ length: 1000 }, (_, i) => ({
-    id: `l${i + 1}`,
-    emoji: '❤️',
-    commentId: `c${(i % 100) + 1}`,
-  }));
-  const likedBy = Array.from({ length: 1000 }, (_, i) => ({
-    id: String(i + 1),
-    name: `Liker ${i + 1}`,
-    likeId: `l${i + 1}`,
-  }));
+  const { posts, comments, likes, likedBy } = buildDeepNest();
 
   const adapter = (entity: string, by: (parentId: string) => unknown[]): DataAdapter => ({
     entity,
@@ -184,14 +137,26 @@ function deepNestAdapters(count: Counting): DataAdapter[] {
   ];
 }
 
-async function benchB2(): Promise<{ orbitQueries: number; competitionQueries: number }> {
+async function benchB2(): Promise<{
+  orbitQueries: number;
+  graphqlQueries: number;
+  competitionQueries: number;
+}> {
   const count: Counting = { queries: 0 };
   const orbit = createOrbit({ adapters: deepNestAdapters(count) });
   await orbit.execute({
     query:
       'user(id="1") { name, posts { title, comments { text, likes { emoji, likedBy { name } } } } }',
   });
-  return { orbitQueries: count.queries, competitionQueries: 1111 };
+
+  // The same 5-level graph through graphql-js: resolver invocations ARE the
+  // round-trips of a naive server (each resolver = one data access).
+  const { resolverCalls } = await graphqlB2();
+  return {
+    orbitQueries: count.queries,
+    graphqlQueries: resolverCalls,
+    competitionQueries: resolverCalls,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -211,6 +176,7 @@ async function benchB3(): Promise<{
   orbitRps: number;
   serverRps: number;
   wireRps: number;
+  graphqlRps: number;
   competitionRps: number;
 }> {
   const orbit = createOrbit({
@@ -230,91 +196,48 @@ async function benchB3(): Promise<{
   const core = Math.round(await measureThroughput(() => orbit.execute(envelope), 30000));
   const server = Math.round(await measureServerWork(make, (r) => orbit.handler(r), 8000));
   const wire = Math.round(await measureThroughput(() => orbit.handler(make()), 4000, 1000));
+
+  // The same query through graphql-js: naive (full pipeline every op) and
+  // cached-document (pre-parsed+validated, the production-server equivalent
+  // of Orbit's parse LRU).
+  const { rpsNaive, rpsCached } = await graphqlB3();
   console.log(
     `    core ${core.toLocaleString('en-US')} RPS · server-side ${server.toLocaleString('en-US')} RPS · fetch path ${wire.toLocaleString('en-US')} RPS (undici client cost included)`,
   );
-  return { orbitRps: core, serverRps: server, wireRps: wire, competitionRps: 15_000 };
+  console.log(
+    `    graphql-js: naive ${rpsNaive.toLocaleString('en-US')} RPS (full pipeline/op) · cached-document ${rpsCached.toLocaleString('en-US')} RPS`,
+  );
+  return {
+    orbitRps: core,
+    serverRps: server,
+    wireRps: wire,
+    graphqlRps: rpsCached,
+    competitionRps: rpsCached,
+  };
 }
 
 // ---------------------------------------------------------------------------
 // B4 — Payload size (20-post feed)
 // ---------------------------------------------------------------------------
 
-/** Deterministic pseudo-random generator so feed content stays realistic (no huge repeated runs). */
-function makeRng(seed: number): () => number {
-  let state = seed >>> 0;
-  return () => {
-    state = (state * 1664525 + 1013904223) >>> 0;
-    return state / 4294967296;
-  };
-}
-
-const SENTENCES = [
-  'Orbit treats the query string as intent, never as schema.',
-  'The core knows nothing of databases, only of moving data through hooks.',
-  'Batching turns a thousand round-trips into a single call.',
-  'Adapters translate verbatim filters into whatever your source speaks.',
-  'Plugins are the nervous system; the core is the skeleton.',
-  'MessagePack shrinks the wire without a single dependency.',
-  'Stale-while-revalidate keeps reads fast and writes safe.',
-  'A contract layer should stay thin enough to disappear.',
-  'Streaming delivers the first byte before the last query finishes.',
-  'Projection keeps the payload exactly as wide as the client asked.',
-  'Error codes travel unmodified from adapter to client.',
-  'No magic ORM, no clever query planner, no lock-in.',
-  'The envelope is the only schema the protocol owns.',
-  'Resolution order follows the shape of the tree, level by level.',
-];
-
-/**
- * 20 realistic posts whose JSON weighs in around the GraphQL reference (≈450 KB).
- * Content is varied (no giant repeated runs) so compression numbers are honest.
- */
-function buildFeed(): unknown {
-  const rng = makeRng(42);
-  const posts = Array.from({ length: 20 }, (_, i) => {
-    const paragraphs = Array.from({ length: 112 }, (_, p) => {
-      const a = SENTENCES[Math.floor(rng() * SENTENCES.length)]!;
-      const b = SENTENCES[Math.floor(rng() * SENTENCES.length)]!;
-      const c = SENTENCES[Math.floor(rng() * SENTENCES.length)]!;
-      return `${a} ${b} ${c} (paragraph ${i + 1}.${p + 1})`;
-    });
-    return {
-      id: `post-${i + 1}`,
-      title: `The future of data layers — part ${i + 1}`,
-      author: {
-        id: String((i % 5) + 1),
-        name: `Author ${(i % 5) + 1}`,
-        avatar: `https://cdn.example/avatars/a${(i % 5) + 1}.png`,
-        bio: SENTENCES[i % SENTENCES.length],
-      },
-      body: paragraphs.join(' '),
-      tags: ['orbit', 'graphql', 'zero-dependency', 'typescript', `topic-${(i % 3) + 1}`],
-      views: 1200 + i * 137,
-      likes: 89 + i * 3,
-      comments: Array.from({ length: 4 }, (_, j) => ({
-        id: `c${i}-${j}`,
-        text: `Great read — comment ${j + 1} on post ${i + 1}.`,
-        by: { id: `u${j + 1}`, name: `Reader ${j + 1}` },
-      })),
-      createdAt: `2026-08-0${(i % 9) + 1}T10:00:00Z`,
-    };
-  });
-  return { data: { feed: posts } };
-}
-
 async function benchB4(): Promise<{
   orbitJsonKb: number;
   orbitKb: number;
+  graphqlJsonKb: number;
+  graphqlGzipKb: number;
   competitionKb: number;
 }> {
-  const payload = buildFeed();
+  const feed = buildFeed();
+  const payload = { data: { feed } };
   const json = new TextEncoder().encode(JSON.stringify(payload));
   const msgpack = encodeMsgpack(payload);
   const gzipJson = await gzip(json);
   const gzipMsgpack = await gzip(msgpack);
 
   const kb = (b: Uint8Array<ArrayBuffer> | Uint8Array<ArrayBufferLike>) => b.byteLength / 1024;
+
+  // The same feed through a real graphql-js response.
+  const { jsonKb: graphqlJsonKb, gzipKb: graphqlGzipKb } = await graphqlB4();
 
   console.log(
     '    feed sizes — json:',
@@ -329,33 +252,22 @@ async function benchB4(): Promise<{
     '| msgpack+gzip:',
     kb(gzipMsgpack).toFixed(1),
     'KB',
+    '| graphql-js json:',
+    graphqlJsonKb.toFixed(1),
+    'KB',
+    '| graphql-js json+gzip:',
+    graphqlGzipKb.toFixed(1),
+    'KB',
   );
 
   // The protocol's wire format: msgpack + optional gzip.
   return {
     orbitJsonKb: kb(json as Uint8Array<ArrayBuffer>),
     orbitKb: kb(gzipMsgpack),
-    competitionKb: 450,
+    graphqlJsonKb,
+    graphqlGzipKb,
+    competitionKb: graphqlJsonKb,
   };
-}
-
-async function gzip(bytes: Uint8Array): Promise<Uint8Array<ArrayBuffer>> {
-  const source = new Blob([bytes as BlobPart]).stream().pipeThrough(new CompressionStream('gzip'));
-  const reader = source.getReader();
-  const chunks: Uint8Array[] = [];
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(value as Uint8Array<ArrayBuffer>);
-  }
-  const total = chunks.reduce((sum, c) => sum + c.length, 0);
-  const out = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    out.set(chunk, offset);
-    offset += chunk.length;
-  }
-  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -678,12 +590,12 @@ async function main(): Promise<void> {
       orbitValue: r.orbitMs,
       orbitLabel: `${r.orbitMs.toFixed(2)} ms`,
       competitionValue: r.competitionMs,
-      competitionLabel: `${r.competitionMs} ms (REST)`,
+      competitionLabel: `${r.competitionMs.toFixed(3)} ms (graphql-js, cached doc, measured)`,
       goal: '< 3 ms',
       goalMet: met,
     });
     console.log(
-      `B1 · Simple query P99 latency        ${ok(met)} orbit ${r.orbitMs.toFixed(2)} ms  vs  REST ${r.competitionMs} ms  (goal < 3 ms)`,
+      `B1 · Simple query P99 latency        ${ok(met)} orbit ${r.orbitMs.toFixed(2)} ms  vs  graphql-js cached-doc ${r.graphqlCachedMs.toFixed(3)} ms / naive ${r.graphqlMs.toFixed(2)} ms  (measured; goal < 3 ms)`,
     );
   }
 
@@ -702,12 +614,12 @@ async function main(): Promise<void> {
       orbitValue: r.orbitQueries,
       orbitLabel: `${r.orbitQueries} queries`,
       competitionValue: r.competitionQueries,
-      competitionLabel: `${r.competitionQueries} queries (GraphQL)`,
+      competitionLabel: `${r.competitionQueries} resolver calls (graphql-js, measured)`,
       goal: '≤ 5 (1 batch/level)',
       goalMet: met,
     });
     console.log(
-      `B2 · Deep nest DB round-trips       ${ok(met)} orbit ${r.orbitQueries}  vs  GraphQL ${r.competitionQueries}  (goal ≤ 5)`,
+      `B2 · Deep nest DB round-trips       ${ok(met)} orbit ${r.orbitQueries}  vs  graphql-js ${r.graphqlQueries} resolver calls  (measured; goal ≤ 5)`,
     );
   }
 
@@ -727,12 +639,12 @@ async function main(): Promise<void> {
       orbitValue: r.orbitRps,
       orbitLabel: `${r.orbitRps.toLocaleString('en-US')} RPS`,
       competitionValue: r.competitionRps,
-      competitionLabel: `${r.competitionRps.toLocaleString('en-US')} RPS (GraphQL)`,
+      competitionLabel: `${r.competitionRps.toLocaleString('en-US')} RPS (graphql-js, cached doc, measured)`,
       goal: '~30k RPS (core)',
       goalMet: met,
     });
     console.log(
-      `B3 · Throughput                      ${ok(met)} orbit core ${r.orbitRps.toLocaleString('en-US')} RPS  (server ${r.serverRps.toLocaleString('en-US')} · fetch ${r.wireRps.toLocaleString('en-US')})  vs  GraphQL ${r.competitionRps.toLocaleString('en-US')}  (goal ~30k)`,
+      `B3 · Throughput                      ${ok(met)} orbit core ${r.orbitRps.toLocaleString('en-US')} RPS  (server ${r.serverRps.toLocaleString('en-US')} · fetch ${r.wireRps.toLocaleString('en-US')})  vs  graphql-js ${r.graphqlRps.toLocaleString('en-US')}  (measured; goal ~30k)`,
     );
   }
 
@@ -749,12 +661,12 @@ async function main(): Promise<void> {
       orbitValue: r.orbitKb,
       orbitLabel: `${r.orbitKb.toFixed(0)} KB`,
       competitionValue: r.competitionKb,
-      competitionLabel: `${r.competitionKb} KB (GraphQL JSON)`,
+      competitionLabel: `${r.competitionKb.toFixed(0)} KB (graphql-js JSON, measured)`,
       goal: '~120 KB',
       goalMet: met,
     });
     console.log(
-      `B4 · Payload size                    ${ok(met)} orbit ${r.orbitKb.toFixed(0)} KB  vs  GraphQL JSON ${r.competitionKb} KB  (goal ~120 KB)`,
+      `B4 · Payload size                    ${ok(met)} orbit ${r.orbitKb.toFixed(0)} KB  vs  graphql-js JSON ${r.graphqlJsonKb.toFixed(0)} KB (${r.graphqlGzipKb.toFixed(1)} KB gzipped)  (goal ~120 KB)`,
     );
   }
 

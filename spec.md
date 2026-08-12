@@ -427,13 +427,18 @@ Measured on real hardware by `npm run bench` (see `docs/benchmarks.md`).
 
 | ID | Scenario | Key metric | Competition | Orbit goal |
 | --- | --- | --- | --- | --- |
-| B1 | Simple query (user by id) | P99 latency | REST 5 ms, GraphQL 8 ms | < 3 ms (binary + RAM cache) |
-| B2 | Deep nest (5 levels) | DB round-trips | GraphQL: 1111 queries | ≤ 5 (1 batch/level) |
-| B3 | Throughput | RPS (engine core) | JSON/GraphQL ~15k | ~30k — core ✅ (~125k measured); full wire path is undici-bound (~13k) |
-| B4 | 20-post feed payload | KB transmitted | GraphQL JSON: 450 KB | ~120 KB (msgpack + compression) |
-| B5 | TTFB in streaming | Time to first byte | REST 400 ms (waits for all) | < 50 ms (user first, posts later) |
-| B6 | Mobile reconnect | Sync time | Apollo refetch: 2 s | < 200 ms (patch replay) |
-| B7 | Realtime HTTP (WebSocket fan-out) | Fan-out latency (200 sockets) | spec goal 200 ms | < 200 ms — ✅ 8.0 ms (write path 5.2 ms) · resume 500 patches 3.8 ms |
+| B1 | Simple query (user by id) | P99 latency | REST 5 ms (ref), graphql-js 0.092 ms cached-doc / 1.75 ms naive (measured) | < 3 ms — ✅ 0.05 ms |
+| B2 | Deep nest (5 levels) | DB round-trips | graphql-js: 1112 resolver calls (measured) | ≤ 5 (1 batch/level) — ✅ 5 |
+| B3 | Throughput | RPS (engine core) | graphql-js 33,669 cached-doc / 2,107 naive (measured) | ~30k — ✅ 107,777 core; full wire path is undici-bound (~11.2k) |
+| B4 | 20-post feed payload | KB transmitted | graphql-js JSON: 446 KB (measured; 19.1 KB gzipped) | ~120 KB (msgpack + compression) — ✅ 19 KB |
+| B5 | TTFB in streaming | Time to first byte | REST 400 ms (ref, waits for all) | < 50 ms (user first, posts later) — ✅ 6 ms |
+| B6 | Mobile reconnect | Sync time | Apollo refetch: 2 s (ref) | < 200 ms (patch replay) — ✅ 0.1 ms warm · 320 µs resume |
+| B7 | Realtime HTTP (WebSocket fan-out) | Fan-out latency (200 sockets) | spec goal 200 ms | < 200 ms — ✅ 8.3 ms (write path 5.7 ms) · resume 500 patches 3.6 ms |
+
+> Competition column note: graphql-js numbers are MEASURED on the benchmark
+> machine (graphql is a devDependency of the bench harness only — the core
+> stays zero-dependency). REST and Apollo figures are labeled `(ref)` because
+> no zero-dependency equivalent exists to install.
 
 ---
 

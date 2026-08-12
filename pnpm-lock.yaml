@@ -23,6 +23,9 @@ importers:
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.3
+      graphql:
+        specifier: ^17.0.2
+        version: 17.0.2
       husky:
         specifier: ^9.1.7
         version: 9.1.7
@@ -636,6 +639,10 @@ packages:
   global-directory@5.0.0:
     resolution: {integrity: sha512-1pgFdhK3J2LeM+dVf2Pd424yHx2ou338lC0ErNP2hPx4j8eW1Sp0XqSjNxtk6Tc4Kr5wlWtSvz8cn2yb7/SG/w==}
     engines: {node: '>=20'}
+
+  graphql@17.0.2:
+    resolution: {integrity: sha512-FRWbddMxfkjiB7z+aQDWIR+E34xo9I8c9mtK2RPv8PmMzKRvrdsreHL/Ui/TmwHJfhHChEtsFPyMHKI+xuarQQ==}
+    engines: {node: ^22.0.0 || ^24.0.0 || ^25.0.0 || >=26.0.0}
 
   has-flag@4.0.0:
     resolution: {integrity: sha512-EykJT/Q1KjTWctppgIAgfSO0tKVuZUjhgMr17kqTumMl6Afv3EISleU7qZUzoXDFTAHTDC4NOoG/ZxU3EvlMPQ==}
@@ -1479,6 +1486,8 @@ snapshots:
   global-directory@5.0.0:
     dependencies:
       ini: 6.0.0
+
+  graphql@17.0.2: {}
 
   has-flag@4.0.0: {}
 

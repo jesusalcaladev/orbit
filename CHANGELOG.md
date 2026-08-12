@@ -4,6 +4,31 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
 
 ## [Unreleased]
 
+### Changed
+- **Benchmarks are now real head-to-heads against graphql-js** — B1–B4's
+  competition figures were previously reference values quoted from the spec
+  table ("GraphQL 8 ms / 15k RPS / 450 KB / 1111 queries"); they are now
+  MEASURED on this machine. `graphql` (v17) is a devDependency of the bench
+  harness only (`bench/graphql.ts` resolves the same fixtures through parse +
+  validate + execute); `@orbit/core` keeps its zero-runtime-dependency
+  contract. Bench fixtures and timing helpers extracted to
+  `bench/fixtures.ts` / `bench/measure.ts` (shared by both sides).
+- **The honest, measured picture** — every comparison reports BOTH the naive
+  GraphQL number (full `graphql()` pipeline per op: parse + validate +
+  execute) and the cached-document number (the production-server equivalent of
+  Orbit's parse LRU):
+  - B1 P99 latency: 0.05–0.09 ms vs naive 1.65–1.75 ms (~24–35×) /
+    cached-doc 0.092–0.098 ms (~1.4–1.8× — near-parity once both cache the
+    parse).
+  - B2 deep-nest round-trips: 5 vs 1,112 resolver calls (measured N+1).
+  - B3 throughput: ~98–116k RPS vs naive ~1.4–2.1k / cached-doc ~30–34k
+    (~3.2–3.4×).
+  - B4 payload: 19 KB (msgpack+gzip) vs 446 KB uncompressed GraphQL JSON —
+    gzip equalizes both protocols at 19.1 KB; MessagePack alone trims ~1% on
+    text-heavy payloads, so the protocol's edge is round-trips, throughput
+    and streaming (B2/B3/B5), not compressed size.
+  Spec §12 and `docs/benchmarks.md` updated with the measured methodology.
+
 ### Fixed
 - **Mutation `return` re-queries now run the full hook pipeline** — `onBeforeParse`, `onAfterParse` and `onBeforeResolve` did not previously run on the post-mutation re-query, so authorization gates (e.g. the `onBeforeResolve` role check in example 03) could be bypassed with `{ do, return }`. The sub-query is now executed exactly like a client query (spec §5: "hooks included"); plugins see the sub-envelope `{ query }`, and no envelope-level `cache` spec applies, so the re-query is fresh unless the client explicitly sends the `x-orbit-cache` header. Regression test in `test/engine.test.ts`.
 - **`RealtimeServer.close()` now terminates sessions' sockets** — it sent a close frame and released hub state but never closed the upgraded TCP sockets, so a following `http.Server.close()` waited forever and the process hung (reproduced in examples 08/09). Every close path now `destroy()`s the socket after writing the close frame (Node keeps upgraded sockets half-open after `end()`); examples 08/09 exit cleanly. Regression test in `test/realtime.test.ts`.

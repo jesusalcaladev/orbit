@@ -147,19 +147,23 @@ The core is a single `@orbit/core` package. The SPEC's distribution model is
 
 ---
 
-## 8. Performance & quality (SPEC §11) — 🔴 One known gap
+## 8. Performance & quality (SPEC §11) — ✅ Measured against real GraphQL
 
 | Benchmark | Status |
 | :--- | :--- |
-| B1 latency (P99) | ✅ Good |
-| B2 deep-nest DB round-trips | ✅ Good |
-| B3 throughput (engine core vs goal ~30k) | ✅ Core exceeds the goal (~103–125k RPS measured); the full fetch path is undici-bound (~13k), documented in `docs/benchmarks.md` |
-| B4 payload size | ✅ Good |
-| B5 streaming TTFB | ✅ Good |
+| B1 latency (P99) | ✅ 0.05–0.09 ms vs graphql-js 0.092–0.098 ms cached-doc / 1.65–1.75 ms naive (measured) — near-parity once both cache the parse; naive servers pay ~24–35× |
+| B2 deep-nest DB round-trips | ✅ 5 vs graphql-js 1112 resolver calls (measured) |
+| B3 throughput (engine core vs goal ~30k) | ✅ ~98–116k RPS core — ~3.2–3.4× graphql-js cached-doc (~30–34k), ~55–75× naive (~1.4–2.1k); full fetch path is undici-bound (~11.2–13.3k), documented in `docs/benchmarks.md` |
+| B4 payload size | ✅ 19 KB (msgpack+gzip) vs graphql-js JSON 446 KB (measured) — gzip equalizes at 19.1 KB; the protocol's edge is round-trips/throughput/streaming, not B4 |
+| B5 streaming TTFB | ✅ 5–6 ms |
 | B6 reconnect/warm-cache replay | ✅ Excellent |
-| B7 realtime fan-out (200 sockets) | ✅ Excellent — 8.0 ms fan-out, 3.8 ms resume replay |
+| B7 realtime fan-out (200 sockets) | ✅ Excellent — 8.0–9.1 ms fan-out, 3.8–8.4 ms resume replay |
 
-**TODO:** re-run `npm run bench` on the target machine to refresh the B1–B7 numbers — the engine core already exceeds B3's goal; the remaining wire-path cost is undici-bound and documented in `docs/benchmarks.md`.
+**Benchmarks are now real head-to-heads:** `graphql` (v17) is a devDependency of
+**the bench harness only** (`bench/graphql.ts` — the core keeps its
+zero-runtime-dependency contract) and runs the same fixtures on the same
+machine. Competition numbers in `docs/benchmarks.md` are measured, not quoted
+from the spec. Run `npm run bench` to refresh B1–B7 on any machine.
 
 ---
 
@@ -169,7 +173,14 @@ The core is a single `@orbit/core` package. The SPEC's distribution model is
    shape and hook signatures pinned in spec §3/§6/§9/§11 + `test/contract.test.ts`.
    Decisions: `origin` (no `_origin`), no `_cacheSpec` on the node, no
    `delete`/`create` methods, `subscribe` in the contract.
-2. **Attack benchmark B3** — the one weak spot in an otherwise strong core.
+2. ✅ **Benchmarks are real** — graphql-js v17 measured head-to-head on this
+   machine (B1–B4). Honest per-metric picture: ~24–35× vs naive GraphQL and
+   ~1.4–1.8× vs cached-document GraphQL on single-query latency (near-parity
+   once both cache the parse); ~222× on deep-nest round-trips (5 vs 1112
+   resolver calls); ~3.2–3.4× on throughput vs cached-doc; parity on
+   compressed payload (gzip equalizes — the edge is
+   round-trips/throughput/streaming, not B4). B3's goal is met — no engine
+   change needed; the only remaining gap is the undici transport, documented.
 3. **Split packages in a monorepo** — write `@orbit/rest` as a new adapter
    package (`fetchAdapter` was already removed from core; example 04 shows the
    hand-written contract), split the cache plugin into `@orbit/cache`.
