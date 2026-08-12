@@ -33,7 +33,7 @@ import type {
   QueryNode,
   SerializedPayload,
 } from './types.js';
-import { isRecord } from './utils.js';
+import { isRecord, setOwn } from './utils.js';
 export const JSON_CONTENT_TYPE = 'application/json; charset=utf-8';
 /** A fetch-compatible handler function for Orbit queries. Takes a Request and returns a Promise<Response>. */
 export type OrbitHandler = (request: Request) => Promise<Response>;
@@ -523,7 +523,11 @@ export class Orbit {
                 node: relation,
                 parent: { entity, data: parentData },
                 set: (value) => {
-                  if (value !== undefined) item[name] = value;
+                  if (value !== undefined) {
+                    // Own property: a relation named `__proto__` must not
+                    // rewrite the item's prototype (see utils#setOwn).
+                    setOwn(item, name, value);
+                  }
                 },
               });
             }
@@ -532,7 +536,10 @@ export class Orbit {
               node: relation,
               parent: { entity, data: result },
               set: (value) => {
-                if (value !== undefined) projected[name] = value;
+                if (value !== undefined) {
+                  // Own property: same protection as the array branch above.
+                  setOwn(projected, name, value);
+                }
               },
             });
           }
@@ -554,7 +561,16 @@ export class Orbit {
     if (node.fields.length === 0 && Object.keys(node.relations).length === 0) return data;
     const out: Record<string, unknown> = {};
     for (const field of node.fields) {
-      if (field in data) out[field] = data[field];
+      if (field in data) {
+        // Fast path: only `__proto__` carries the prototype-setter trap, so
+        // only it needs defineProperty. Plain assignment stays the hot path
+        // (projection runs per node, per level, per record).
+        if (field === '__proto__') {
+          setOwn(out, field, data[field]);
+        } else {
+          out[field] = data[field];
+        }
+      }
     }
     return out;
   }

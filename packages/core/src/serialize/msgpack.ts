@@ -11,6 +11,8 @@
  * to `number` — send `string` values if you need lossless 64-bit round-trips.
  */
 
+import { setOwn } from '../utils.js';
+
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
@@ -192,7 +194,9 @@ export function decodeMsgpack(bytes: Uint8Array): unknown {
     const out: Record<string, unknown> = {};
     for (let i = 0; i < len; i += 1) {
       const key = readValue();
-      out[String(key)] = readValue();
+      // Own property: a map key of `__proto__` from the wire must stay data,
+      // not rewrite the decoded object's prototype (see utils#setOwn).
+      setOwn(out, String(key), readValue());
     }
     return out;
   };

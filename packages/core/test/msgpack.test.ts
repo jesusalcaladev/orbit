@@ -136,6 +136,23 @@ describe('decodeMsgpack — envelope payloads', () => {
   });
 });
 
+describe('decodeMsgpack — prototype-pollution safety', () => {
+  it('keeps a __proto__ map key as an own property', () => {
+    // fixmap(1): key "__proto__" (str 9), value "x" (str 1)
+    const bytes = new Uint8Array([
+      0x81,
+      0xa9,
+      ...new TextEncoder().encode('__proto__'),
+      0xa1,
+      0x78,
+    ]);
+    const decoded = decodeMsgpack(bytes) as Record<string, unknown>;
+    expect(Object.hasOwn(decoded, '__proto__')).toBe(true);
+    expect(Object.getOwnPropertyDescriptor(decoded, '__proto__')?.value).toBe('x');
+    expect(Object.getPrototypeOf(decoded)).toBe(Object.prototype);
+  });
+});
+
 describe('readMsgpackEnvelope', () => {
   it('reads and validates msgpack envelopes with size limits', () => {
     const envelope = readMsgpackEnvelope(encodeMsgpack({ query: 'user(id="1") { name }' }), 10_000);

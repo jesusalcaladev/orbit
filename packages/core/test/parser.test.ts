@@ -102,6 +102,32 @@ describe('parseOQS — fields & relations', () => {
   });
 });
 
+describe('parseOQS — prototype-pollution safety', () => {
+  it('keeps a __proto__ filter as an own verbatim key (no prototype rewrite)', () => {
+    const node = parseOQS('user(__proto__="x")');
+    // Own key on the node, not a rewrite of the filters map's prototype.
+    expect(Object.hasOwn(node.filters, '__proto__')).toBe(true);
+    expect(Object.getOwnPropertyDescriptor(node.filters, '__proto__')?.value).toBe('x');
+    expect(Object.getPrototypeOf(node.filters)).toBe(Object.prototype);
+  });
+
+  it('keeps a __proto__ relation as an own key (no prototype rewrite)', () => {
+    const node = parseOQS('user { __proto__ { name } }');
+    expect(Object.hasOwn(node.relations, '__proto__')).toBe(true);
+    expect(Object.getOwnPropertyDescriptor(node.relations, '__proto__')?.value).toEqual(
+      expect.objectContaining({ entity: '__proto__' }),
+    );
+    // The relation map's prototype chain is untouched.
+    expect(Object.getPrototypeOf(node.relations)).toBe(Object.prototype);
+  });
+
+  it('keeps a constructor filter verbatim', () => {
+    const node = parseOQS('user(constructor="x")');
+    expect(Object.hasOwn(node.filters, 'constructor')).toBe(true);
+    expect(node.filters.constructor).toBe('x');
+  });
+});
+
 describe('parseOQS — errors', () => {
   it('rejects an empty query', () => {
     expect(() => parseOQS('')).toThrowError(

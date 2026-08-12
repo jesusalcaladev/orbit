@@ -157,6 +157,55 @@ describe('resolution', () => {
   });
 });
 
+describe('prototype-pollution safety', () => {
+  it('projects a __proto__ field without rewriting the result prototype', async () => {
+    const record = { id: '1', name: 'Ana', email: 'ana@orbit.dev' };
+    const orbit = createOrbit({
+      adapters: memoryAdapter([
+        {
+          entity: 'user',
+          resolve: ({ id }) => (id === '1' ? record : null),
+        },
+      ]),
+    });
+    const result = await orbit.execute({ query: 'user(id="1") { __proto__ }' });
+    const data = result.data as Record<string, unknown>;
+    // `__proto__` is requested as a field; the projected object must keep a
+    // normal prototype and carry the field as an OWN key.
+    expect(Object.getPrototypeOf(data)).toBe(Object.prototype);
+    expect(Object.hasOwn(data, '__proto__')).toBe(true);
+    // The projected value mirrors the source record's own property: the
+    // record inherits `__proto__` from Object.prototype, so the projected
+    // own key holds exactly that value.
+    expect(Object.getOwnPropertyDescriptor(data, '__proto__')?.value).toBe(
+      Object.getPrototypeOf(record),
+    );
+  });
+
+  it('resolves a __proto__ relation without rewriting the parent prototype', async () => {
+    const orbit = createOrbit({
+      adapters: memoryAdapter([
+        {
+          entity: 'user',
+          resolve: () => ({ id: '1', name: 'Ana' }),
+        },
+        {
+          entity: '__proto__',
+          resolve: () => ({ name: 'polluted?' }),
+        },
+      ]),
+    });
+    const result = await orbit.execute({ query: 'user { name, __proto__ { name } }' });
+    const data = result.data as Record<string, unknown>;
+    expect(Object.getPrototypeOf(data)).toBe(Object.prototype);
+    // The relation lands as an OWN key named `__proto__` — not a rewrite of
+    // the result object's prototype.
+    expect(Object.hasOwn(data, '__proto__')).toBe(true);
+    expect(Object.getOwnPropertyDescriptor(data, '__proto__')?.value).toBeDefined();
+    expect(Object.getPrototypeOf(data)).toBe(Object.prototype);
+  });
+});
+
 describe('batching (N+1 mitigation)', () => {
   it('groups sibling requests into a single batch call', async () => {
     const batch = vi.fn(async (requests: { filters: Filters }[]) =>

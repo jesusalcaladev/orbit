@@ -1,6 +1,6 @@
 import { ErrorCode, OrbitError } from '../errors.js';
 import type { OrbitContext, OrbitEngineLike, QueryNode } from '../types.js';
-import { fnv1a, isRecord } from '../utils.js';
+import { fnv1a64, isRecord } from '../utils.js';
 import type { OrbitPlugin } from './types.js';
 
 /** Parsed cache spec: seconds of hard freshness (`ttl`) and/or SWR window (`stale`). */
@@ -124,7 +124,9 @@ function treeKey(node: QueryNode): string {
 }
 
 function cacheKeyFor(node: QueryNode): string {
-  return `orbit:${fnv1a(treeKey(node))}`;
+  // 64-bit key: a 32-bit hash would collide at ~65k entries (feasible
+  // intentional cache-poisoning), 64-bit raises the bound to ~4e9 (see utils).
+  return `orbit:${fnv1a64(treeKey(node))}`;
 }
 
 export interface CachePluginOptions {

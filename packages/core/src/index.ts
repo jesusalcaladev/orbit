@@ -110,4 +110,4 @@ export {
 export type { Frame } from './realtime/frames.js';
 
 // Utils
-export { isRecord, isSerializedPayload, byteLength, fnv1a } from './utils.js';
+export { isRecord, isSerializedPayload, byteLength, fnv1a, fnv1a64 } from './utils.js';

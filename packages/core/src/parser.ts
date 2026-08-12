@@ -1,5 +1,6 @@
 import { ErrorCode, OrbitError } from './errors.js';
 import type { Filters, NodeOrigin, QueryNode } from './types.js';
+import { setOwn } from './utils.js';
 
 /** Default maximum relation nesting depth, per the protocol spec (> 10 fails). */
 export const DEFAULT_MAX_DEPTH = 10;
@@ -131,7 +132,9 @@ class Parser {
               { details: { depth: childDepth, maxDepth: this.maxDepth, node: name } },
             );
           }
-          relations[name] = this.parseNode(childDepth, name);
+          // Own property, not `relations[name] = …`: a relation named
+          // `__proto__` must not rewrite the map's prototype (see utils#setOwn).
+          setOwn(relations, name, this.parseNode(childDepth, name));
         } else {
           fields.push(name);
         }
@@ -164,13 +167,16 @@ class Parser {
       }
       this.pos += 1;
       this.skipWs();
-      filters[key] = this.readValue();
+      const value = this.readValue();
+      // Own property: a filter key of `__proto__` must stay a verbatim filter,
+      // not a prototype rewrite (see utils#setOwn).
+      setOwn(filters, key, value);
       this.skipWs();
       if (this.peek() === ',') {
         this.pos += 1;
         this.skipWs();
       } else if (this.peek() !== ')') {
-        this.fail(`Expected ',' or ')' after '${key}="${filters[key]}"'`);
+        this.fail(`Expected ',' or ')' after '${key}="${value}"'`);
       }
     }
     this.pos += 1; // consume ')'
