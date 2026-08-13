@@ -214,6 +214,31 @@ export async function runBookDemo(base: string, host: string): Promise<void> {
   console.log(
     `  ${'realtime'.padEnd(16)} ${String(rt.status).padEnd(4)} ack → event ${JSON.stringify(frame.event).slice(0, 90)}`,
   );
+
+  // 11 · Query/do envelopes work over the SAME socket (spec §10): the reply
+  // mirrors the HTTP payload — status, data, correlation id and all.
+  ws.send(JSON.stringify({ query: 'books { id, title }', id: 'ws-q' }));
+  const qReply = await waitForFrame(ws, (m) => m.id === 'ws-q' && m.data !== undefined);
+  const booksInFrame = (qReply.data as unknown[] | undefined)?.length ?? 0;
+  console.log(
+    `  ${'ws query'.padEnd(16)} ${String(qReply.status ?? '?').padEnd(4)} ${booksInFrame} books in one frame`,
+  );
+
+  // 12 · The same auth policy applies over the socket: without the
+  // framework's x-api-key → caller identity, the engine denies the mutation
+  // with ORBIT_PERMISSION_DENIED — defense in depth travels with the pipeline.
+  ws.send(
+    JSON.stringify({
+      do: 'reviews.add',
+      args: { payload: { bookId: 'b1', rating: 3, text: 'Sin clave' } },
+      id: 'ws-m',
+    }),
+  );
+  const mReply = await waitForFrame(ws, (m) => m.id === 'ws-m' && m.error !== undefined);
+  const wsErr = mReply.error as { code?: string } | undefined;
+  console.log(
+    `  ${'ws mutation'.padEnd(16)} ${String(mReply.status ?? '?').padEnd(4)} no auth → ${wsErr?.code ?? '?'}`,
+  );
   ws.close();
 
   console.log(`  ✔ ${host}: every protocol feature works over the wire`);
