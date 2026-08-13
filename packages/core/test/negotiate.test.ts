@@ -38,6 +38,19 @@ describe('negotiateFormat', () => {
   it('prefers the most specific format on ties', () => {
     expect(negotiateFormat('application/json, application/x-msgpack')).toBe('msgpack');
     expect(negotiateFormat('text/event-stream, application/json')).toBe('sse');
+    // msgpack (rank 3) beats SSE (rank 2) when both are explicit at q=1.
+    expect(negotiateFormat('text/event-stream, application/x-msgpack')).toBe('msgpack');
+  });
+
+  it('an explicit format beats a wildcard at equal q', () => {
+    expect(negotiateFormat('text/event-stream, */*')).toBe('sse');
+    expect(negotiateFormat('application/x-msgpack, text/*')).toBe('msgpack');
+    expect(negotiateFormat('application/x-msgpack, application/*')).toBe('msgpack');
+  });
+
+  it('a higher-q wildcard beats an explicit format at lower q', () => {
+    expect(negotiateFormat('application/x-msgpack;q=0.5, */*;q=1')).toBe('json');
+    expect(negotiateFormat('text/event-stream;q=0.2, application/json;q=0.9')).toBe('json');
   });
 
   it('is case- and space-insensitive', () => {
