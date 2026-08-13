@@ -214,7 +214,11 @@ export class Orbit {
   async handler(request: Request, ctx: OrbitContext = {}): Promise<Response> {
     const base: OrbitContext = { ...ctx, request, headers: request.headers };
     const format = negotiateFormat(request.headers.get('accept'));
-    const gzip = wantsGzip(request.headers.get('accept-encoding'));
+    // Spec §7: gzip applies "when the runtime provides CompressionStream".
+    // Check the capability, not just the header — an engine on a runtime
+    // without CompressionStream must degrade to plain responses, not 500.
+    const gzip =
+      typeof CompressionStream !== 'undefined' && wantsGzip(request.headers.get('accept-encoding'));
     try {
       // Cheap pre-check before buffering: reject oversized bodies early.
       const declared = Number(request.headers.get('content-length') ?? 0);

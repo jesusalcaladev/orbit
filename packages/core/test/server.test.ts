@@ -139,6 +139,29 @@ describe('handler', () => {
     expect(await response.text()).toBe('name:Ana');
   });
 
+  it('degrades to plain responses when CompressionStream is unavailable (spec §7)', async () => {
+    const orbit = makeOrbit();
+    // Spec §7 conditions gzip on "when the runtime provides CompressionStream"
+    // — the handler must feature-check, not trust the header alone (a runtime
+    // without it would otherwise 500 inside `new CompressionStream('gzip')`).
+    const key = 'CompressionStream' as keyof typeof globalThis;
+    const original = globalThis[key];
+    try {
+      (globalThis as { CompressionStream?: unknown }).CompressionStream = undefined;
+      const request = new Request('http://localhost/orbit', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'accept-encoding': 'gzip' },
+        body: JSON.stringify({ query: 'user(id="1") { name }' }),
+      });
+      const response = await orbit.handler(request);
+      expect(response.status).toBe(200);
+      expect(response.headers.get('content-encoding')).toBeNull();
+      expect(await response.json()).toEqual({ data: { name: 'Ana' } });
+    } finally {
+      globalThis[key] = original;
+    }
+  });
+
   it('passes request headers through to plugins', async () => {
     const orbit = makeOrbit({
       plugins: [
