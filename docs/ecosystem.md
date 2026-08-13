@@ -31,7 +31,7 @@ packages/
              @orbit/cache           ✅ shipped — distribution home (impl stays in frozen core)
   servers/   @orbit/hono            ✅ shipped — thin handler wrapper for Hono
              @orbit/express         ✅ shipped — thin handler wrapper for Express
-             @orbit/cloudflare-workers ⬜ handler wrapper for Workers
+             @orbit/cloudflare-workers ✅ shipped — fetch handler + Workers-native realtime
   clients/   @orbit/client          ⬜ core frontend client (deferred)
              @orbit/client-react    ⬜ cache-aware React bindings (deferred)
 ```
@@ -137,8 +137,12 @@ standard error contract) with no re-serialization in the wrapper. Both also
 export `attachRealtime(server, orbit, options)`, which mounts the core
 WebSocket transport on the same http server (one call — the engine's
 subscription feed stays the single source of truth).
-`@orbit/cloudflare-workers` is still on the roadmap. See
-[docs/server.md](./server.md) for each host.
+`@orbit/cloudflare-workers` **is shipped** as a `fetch` handler
+(`createWorker` / `handleOrbit`): the original request goes straight to the
+engine, bindings ride the OrbitContext as `ctx.env`, and realtime uses the
+Workers-native `WebSocketPair` upgrade over the same runtime-agnostic
+`SubscriptionHub` — the frame contract matches the Node transport exactly
+(`docs/realtime.md`). See [docs/server.md](./server.md) for each host.
 
 ## Build order (from ROADMAP §9)
 
@@ -160,8 +164,9 @@ subscription feed stays the single source of truth).
    the `CacheStore` contract re-exported by `@orbit/cache`.
 5. **`@orbit/postgres` + `@orbit/mongo`** — the flagship DB adapters.
 6. **Server wrappers** ✅ (`@orbit/hono`, `@orbit/express` — thin raw
-   bridges, shipped with real end-to-end tests) and — once the protocol is
-   proven stable — the **clients**.
+   bridges, shipped with real end-to-end tests; `@orbit/cloudflare-workers`
+   — fetch handler + Workers-native realtime, also shipped with end-to-end
+   tests) and — once the protocol is proven stable — the **clients**.
 
 Each step is a separate conventional commit (`feat: add @orbit/redis`), its
 own `packages/<name>` workspace, tests, docs row, ROADMAP flip and CHANGELOG

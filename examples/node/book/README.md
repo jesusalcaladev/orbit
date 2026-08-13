@@ -1,7 +1,7 @@
 # The book API example
 
 A small but complete API — books, authors and reviews — served **identically**
-by two frameworks from one engine. It exists to show real-world Orbit usage:
+by three hosts from one engine. It exists to show real-world Orbit usage:
 layered architecture, authentication vs authorization, relations, mutations,
 caching and the full wire protocol.
 
@@ -22,6 +22,7 @@ book/
                             in+out, SSE streaming and caching.
 ../10-express.ts  interface — Express host (thin: transport + authn only).
 ../11-hono.ts     interface — Hono host (same engine, same API).
+../12-cloudflare-workers.ts  interface — the Workers fetch handler (same engine, same API).
 ```
 
 ## The security model (why it is split this way)
@@ -55,12 +56,15 @@ directly.
 ```sh
 pnpm run build && node examples/node/10-express.ts   # Express on :3100
 pnpm run build && node examples/node/11-hono.ts      # Hono on :3200
-# or both back-to-back:
+node examples/node/12-cloudflare-workers.ts          # Workers — no port, worker.fetch direct
+# or all back-to-back:
 node examples/node/run-all.ts
 ```
 
-The realtime endpoint lives on the **same http server**: `ws://localhost:3100/realtime`
-(Express) and `ws://localhost:3200/realtime` (Hono), mounted with
-`attachRealtime(server, orbit)`.
+The realtime endpoint lives on the **same http server** for the Node hosts:
+`ws://localhost:3100/realtime` (Express) and `ws://localhost:3200/realtime`
+(Hono), mounted with `attachRealtime(server, orbit)`. On Workers, realtime is
+the native `WebSocketPair` upgrade served by `createWorker` — the example
+drives the identical session contract in-process (no workerd in Node).
 
 > API keys: `admin-123` (admin) · `ana-456` (member).

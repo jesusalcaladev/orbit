@@ -102,7 +102,7 @@
 **⬜ Not yet:**
 - [ ] **Field-level TTL** (`field:price=ttl=60, field:name=ttl=3600`) — `parseCacheSpec` only parses `ttl`/`stale` today; field-scoped cache keys don't exist.
 - [ ] **Redis-backed store** → **`@orbit/redis`** (implements `CacheStore`).
-- [ ] **Cloudflare KV store** → **`@orbit/cloudflare-workers`** (implements `CacheStore` for Workers).
+- [ ] **Cloudflare KV store** → **`@orbit/kv-cache`** (implements `CacheStore` for Workers; distinct from the `@orbit/cloudflare-workers` *server wrapper*).
 - [ ] **Memcached store** → **`@orbit/memcached`** *(optional)*.
 
 ---
@@ -128,7 +128,7 @@ Future structure (each as its own published package):
 @orbit/core                 ✅ (exists — engine, hooks, OQS, envelope, memory adapter)
 @orbit/hono                 ✅ thin server wrapper — the Orbit handler on Hono
 @orbit/express              ✅ thin server wrapper — the Orbit handler on Express
-@orbit/cloudflare-workers   ⬜ workers handler wrapper (pairs with @orbit/kv-cache)
+@orbit/cloudflare-workers   ✅ thin fetch handler — the Orbit handler on Workers (incl. Workers-native realtime)
 @orbit/bun / @orbit/deno    ⬜ (if desired — handler already runs anywhere)
 @orbit/postgres             ⬜
 @orbit/mongo                ⬜
@@ -196,7 +196,7 @@ artifact on every push.
    `@orbit/hono` + `@orbit/express` — thin raw bridges that pass the
    framework's original request to the engine and pipe the response through
    untouched (full protocol fidelity, see `docs/server.md`), each with 11
-   real end-to-end tests and a layered book-API example (`examples/node/10-express.ts`, `examples/node/11-hono.ts`).
+   real end-to-end tests and a layered book-API example (`examples/node/10-express.ts`, `examples/node/11-hono.ts`). **`@orbit/cloudflare-workers`** ships the same book API behind a plain `fetch` handler with Workers bindings on the OrbitContext and Workers-native WebSocket realtime (`examples/node/12-cloudflare-workers.ts`).
 4. **Ship `@orbit/auth`** (easy — hooks already exist).
 5. **Ship `@orbit/redis`** (Redis `CacheStore`), then **`@orbit/kv-cache`**
    (Cloudflare KV).
@@ -227,5 +227,5 @@ artifact on every push.
 | Redis cache store | ⬜ (`@orbit/redis`) |
 | Cloudflare KV cache store | ⬜ (`@orbit/kv-cache`) |
 | Postgres / Mongo adapters | ⬜ (`@orbit/postgres`, `@orbit/mongo`) |
-| Server wrappers | 🟡 (`@orbit/hono` ✅, `@orbit/express` ✅ — thin raw bridges + realtime `attachRealtime`; `@orbit/cloudflare-workers` ⬜) |
+| Server wrappers | ✅ (`@orbit/hono`, `@orbit/express`, `@orbit/cloudflare-workers` — thin raw bridges / fetch handler + realtime on every host) |
 | Clients | ⬜ (`@orbit/client`, `@orbit/client-react`, defer) |

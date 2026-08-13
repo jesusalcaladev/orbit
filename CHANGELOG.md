@@ -5,6 +5,23 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
 ## [Unreleased]
 
 ### Added
+- **`@orbit/cloudflare-workers`** — run the full protocol on the edge from a
+  single `fetch` handler. `createWorker({ orbit, path, realtime, ctx,
+  onError, fallback })` returns the exact `{ fetch(request, env, ctx) }`
+  shape workerd expects; `handleOrbit` serves one request inside an existing
+  worker. The Workers bindings ride the OrbitContext as `ctx.env` (plus
+  `ctx.waitUntil` when the execution context provides one), so adapters can
+  use `ctx.env.DB` and schedule background work. Realtime uses the
+  Workers-native `WebSocketPair` upgrade over the core's runtime-agnostic
+  `SubscriptionHub` — same frame contract as the Node transport
+  (subscribe/ack, seq events, in-connection resume, `{ query }`/`{ do }`
+  envelopes), with two honest edge differences: no cross-connection resume
+  (Durable Objects = future work) and no app-level heartbeats (the platform
+  keeps connections alive). 21 tests in `packages/cloudflare-workers/test/`
+  exercise the full protocol through `worker.fetch` (JSON/msgpack/SSE/gzip/
+  uploads/errors/cache) and the realtime session over a fake socket.
+  Example `examples/node/12-cloudflare-workers.ts` serves the same book API
+  as Express/Hono. Documented in `docs/server.md`, `docs/ecosystem.md`.
 - **Interactive web demos** (`npm run web`, `examples/web/`) — one server
   mounts the real engine AND a real graphql-js competition on a shared world,
   then serves five vanilla HTML/CSS/JS demos from an index page

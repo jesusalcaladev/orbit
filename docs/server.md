@@ -100,13 +100,40 @@ server.close();
 
 ## Cloudflare Workers
 
+Zero Node APIs — the engine is a fetch handler, and realtime uses the
+Workers-native `WebSocketPair` upgrade:
+
 ```ts
-export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    return orbit.handler(request, { env, state: { ctx } });
-  },
-};
+import { createOrbit, memoryAdapter } from '@orbit/core';
+import { createWorker } from '@orbit/cloudflare-workers';
+
+const orbit = createOrbit({
+  adapters: memoryAdapter([
+    { entity: 'user', resolve: ({ id }) => users.find((u) => u.id === id) },
+  ]),
+});
+
+export default createWorker({
+  orbit,
+  path: '/api/orbit',
+  realtime: { path: '/realtime', authorize: (request, env) => request.headers.get('x-key') === env.API_KEY },
+  ctx: (request) => ({ state: { viewer: request.headers.get('x-user-id') } }),
+});
 ```
+
+`createWorker` returns the exact `{ fetch(request, env, ctx) }` shape workerd
+expects. The Workers bindings (`env`) ride on the OrbitContext as `ctx.env`,
+so adapters can use `ctx.env.DB` and schedule background work with
+`ctx.waitUntil`. `handleOrbit(request, orbit, { env, ctx })` is exported for
+existing workers that want the protocol on one route.
+
+The realtime transport shares the core's runtime-agnostic `SubscriptionHub`,
+so the frame contract is identical to the Node transport — subscribe/ack,
+`seq`-numbered events, `resume` within the connection, and `{ query }` /
+`{ do }` envelope requests on the same socket. Two honest edge differences:
+no cross-connection `resume` (that needs Durable Objects — future work) and
+no application-level heartbeats (the platform keeps connections alive). See
+`docs/realtime.md`.
 
 ## Bun
 

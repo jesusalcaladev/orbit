@@ -8,8 +8,9 @@ examples/
 │   ├── 01-hello.ts … 09-speed.ts     one protocol facet per file
 │   ├── 10-express.ts                  the book API on Express
 │   ├── 11-hono.ts                     the same book API on Hono
+│   ├── 12-cloudflare-workers.ts       the same book API on Cloudflare Workers
 │   ├── book/                          shared layered app (domain → engine → demo)
-│   ├── run-all.ts                     runs 01–11 back to back
+│   ├── run-all.ts                     runs 01–12 back to back
 │   └── standalone-server.ts           zero-dependency node:http endpoint
 └── web/                   interactive browser demos (one server, http://localhost:4321)
     ├── 01-chat/                       realtime chat over the WebSocket transport
@@ -25,7 +26,7 @@ examples/
 ```bash
 npm run build                    # once — examples import from dist/
 node examples/node/01-hello.ts   # any single example
-node examples/node/run-all.ts    # all eleven, back to back
+node examples/node/run-all.ts    # all twelve, back to back
 ```
 
 `npm run examples` builds and runs the whole harness. Each file is
@@ -45,6 +46,7 @@ frameworks, no build step.
 
 ## Reference architecture
 
-`examples/node/book/` is the layered book API that both `10-express.ts` and
-`11-hono.ts` serve — see `examples/node/book/README.md` for the layering,
-authn/authz split and the protocol walkthrough.
+`examples/node/book/` is the layered book API that `10-express.ts`,
+`11-hono.ts` and `12-cloudflare-workers.ts` serve — see
+`examples/node/book/README.md` for the layering, authn/authz split and the
+protocol walkthrough.

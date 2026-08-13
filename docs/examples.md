@@ -14,7 +14,7 @@ each one demonstrates one facet of the protocol and prints its results.
 
 ```bash
 npm run build                   # once (examples import from dist/)
-node examples/node/run-all.ts   # run all eleven, back to back
+node examples/node/run-all.ts   # run all twelve, back to back
 ```
 
 ## The node examples (`examples/node/`)
@@ -32,9 +32,10 @@ node examples/node/run-all.ts   # run all eleven, back to back
 | [`09-speed.ts`](../examples/node/09-speed.ts) | **The speed showcase** — every number measured live on this machine: engine core µs/op + RPS, the full fetch handler, the 5-level deep graph (5 DB round-trips vs GraphQL's 1,111), the 20-post feed at a fraction of the JSON bytes, and a realtime fan-out to 50 live sockets. |
 | [`10-express.ts`](../examples/node/10-express.ts) | **The book API on Express** — a layered, best-practice app: domain (`book/data.ts`) → application (`book/engine.ts`) → interface (this file). Relations, authn in the framework + authz in the engine, client-driven caching, realtime via `attachRealtime`. |
 | [`11-hono.ts`](../examples/node/11-hono.ts) | **The same book API on Hono** — identical engine, identical walkthrough, proving the engine is framework-agnostic. |
+| [`12-cloudflare-workers.ts`](../examples/node/12-cloudflare-workers.ts) | **The same book API on Cloudflare Workers** — the engine behind one `fetch` handler, driven through `worker.fetch` with bindings in every context, plus the Workers-native realtime session. |
 
 The book API is the reference architecture example: `examples/node/book/`
-holds the shared, framework-agnostic layers that both hosts serve (see
+holds the shared, framework-agnostic layers that all three hosts serve (see
 `examples/node/book/README.md`).
 
 ## The web demos — interactive HTML/CSS/JS (`examples/web/`)
@@ -87,8 +88,8 @@ It ships with the cache plugin mounted, so repeat the same request with
 New to Orbit? Start with `01-hello`, then `02` (the N+1 fix — the core reason
 to exist), then `03` (how plugins give the protocol its brains). `05–07` are
 about the wire: size, streaming, and custom formats. `08–09` show the realtime
-transport and a live speed demo. `10–11` are the reference architecture — the
-same layered book API served by Express and Hono.
+transport and a live speed demo. `10–12` are the reference architecture — the
+same layered book API served by Express, Hono and Cloudflare Workers.
 
 Want to see it move before reading anything? Run
 `node examples/node/09-speed.ts` — it measures the engine on *your* machine in

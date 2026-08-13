@@ -258,7 +258,6 @@ this is the work queue.
   prototype for this package.
 - **`@orbit/redis` / `@orbit/kv-cache`** — `CacheStore` is a shipped interface;
   no production stores yet.
-- **`@orbit/cloudflare-workers`** — the third server wrapper (ROADMAP 🟡).
 - **0.1.x**: Postgres adapter, federation-friendly relation semantics.
 - **1.0**: lock envelope + error codes for backwards compatibility.
 - **2.0**: native (WASM/C++) parser for the B3 wire-path gap, first-party
