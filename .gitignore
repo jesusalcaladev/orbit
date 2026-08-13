@@ -5,3 +5,5 @@ bench/results/
 examples/web/uploads/
 *.log
 .DS_Store
+
+*.tsbuildinfo
