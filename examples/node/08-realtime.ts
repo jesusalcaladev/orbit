@@ -9,7 +9,7 @@
  * the WebSocket protocol (RFC 6455) is hand-rolled, and the client is Node's
  * built-in `WebSocket`.
  *
- * Run:  node examples/08-realtime.ts   (after `npm run build`)
+ * Run:  node examples/node/08-realtime.ts   (after `npm run build`)
  */
 import { createServer } from 'node:http';
 import { pathToFileURL } from 'node:url';

@@ -97,5 +97,5 @@ hub.resume('feed', 0, handler); // replay seq > 0
 hub.unsubscribe('feed'); // release the shared adapter hook
 ```
 
-See [`examples/08-realtime.ts`](../examples/08-realtime.ts) for a runnable
+See [`examples/node/08-realtime.ts`](../examples/node/08-realtime.ts) for a runnable
 demo including a real disconnect → resume cycle.

@@ -197,7 +197,7 @@ export interface CacheStore {
 ## The plugin ecosystem
 
 The core ships one built-in plugin (cache) and one reference example
-(`examples/03-auth-plugin.ts`). The first-party **`@orbit/*` plugin and
+(`examples/node/03-auth-plugin.ts`). The first-party **`@orbit/*` plugin and
 adapter packages** — `@orbit/auth`, `@orbit/logging`, `@orbit/redis`,
 `@orbit/postgres`, … — are blueprinted in
 [docs/ecosystem.md](./ecosystem.md): which frozen contract each one

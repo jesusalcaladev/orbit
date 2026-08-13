@@ -6,7 +6,7 @@
  * verbatim — this is how you'd add CSV, protobuf, XML, or any format without
  * touching the engine.
  *
- * Run:  node examples/07-serializer-custom.ts   (after `npm run build`)
+ * Run:  node examples/node/07-serializer-custom.ts   (after `npm run build`)
  */
 import { pathToFileURL } from 'node:url';
 import { createOrbit, memoryAdapter } from '@orbit/core';

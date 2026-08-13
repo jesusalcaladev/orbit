@@ -22,7 +22,7 @@ pnpm install
 | `pnpm run typecheck` | Strict TypeScript check (builds all packages, then checks examples/bench) |
 | `pnpm run build` | Emit ESM + `.d.ts` to `dist/` in every package |
 | `pnpm run example` | Run the zero-dependency demo server |
-| `pnpm run examples` | Run all nine runnable examples |
+| `pnpm run examples` | Run all eleven runnable examples |
 | `pnpm run bench` | Run the B1–B9 benchmarks and regenerate the chart |
 
 ## Running the benchmarks

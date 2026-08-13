@@ -6,7 +6,7 @@
  * relation level follows. Clients can render progressively instead of
  * waiting for the whole tree (great for deep graphs on slow networks).
  *
- * Run:  node examples/06-streaming-sse.ts   (after `npm run build`)
+ * Run:  node examples/node/06-streaming-sse.ts   (after `npm run build`)
  */
 import { pathToFileURL } from 'node:url';
 import { createOrbit, memoryAdapter, SSE_CONTENT_TYPE } from '@orbit/core';

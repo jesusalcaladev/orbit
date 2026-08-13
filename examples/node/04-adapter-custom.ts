@@ -7,7 +7,7 @@
  * `subscribe` hook. Everything you see is the whole contract; nothing is
  * hidden behind a framework.
  *
- * Run:  node examples/04-adapter-custom.ts   (after `npm run build`)
+ * Run:  node examples/node/04-adapter-custom.ts   (after `npm run build`)
  */
 import { pathToFileURL } from 'node:url';
 import { createOrbit } from '@orbit/core';

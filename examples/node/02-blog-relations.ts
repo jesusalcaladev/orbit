@@ -8,7 +8,7 @@
  * The `resolve` counter shows the difference: 2 users × 3 posts would be
  * 6 round-trips without batching; here it is a single batched call.
  *
- * Run:  node examples/02-blog-relations.ts   (after `npm run build`)
+ * Run:  node examples/node/02-blog-relations.ts   (after `npm run build`)
  */
 import { pathToFileURL } from 'node:url';
 import { createOrbit, memoryAdapter } from '@orbit/core';

@@ -48,7 +48,7 @@ they are infrastructure concerns, not protocol concerns:
   request budgets belong in the server wrapper. The core defends per-request
   (size, depth, protocol), not per-IP.
 - **Authentication / authorization** — that is a plugin's job (`onBeforeParse`
-  / `onBeforeResolve`), demonstrated by `examples/03-auth-plugin.ts`. The core
+  / `onBeforeResolve`), demonstrated by `examples/node/03-auth-plugin.ts`. The core
   ships no identity assumptions.
 - **Request smuggling** — the `node:http` demo server and any framework wrapper
   must keep their own HTTP-layer hygiene (header size limits, `CL:TE`/`TE:CL`

@@ -136,7 +136,7 @@ curl -s localhost:3000/orbit \
 { "data": { "name": "Ana", "posts": [{ "title": "Why Orbit?" }] } }
 ```
 
-See [examples/standalone-server.ts](./examples/standalone-server.ts) for a complete zero-dependency server (`npm run example`), the [nine runnable examples](./docs/examples.md) for one facet each, [docs/benchmarks.md](./docs/benchmarks.md) for the B1–B9 numbers against measured graphql-js (including the real-HTTP wire path and the cache-vs-DataLoader story), [docs/security.md](./docs/security.md) for the threat model, and [docs/ecosystem.md](./docs/ecosystem.md) for the first-party `@orbit/*` package plan.
+See [examples/node/standalone-server.ts](./examples/node/standalone-server.ts) for a complete zero-dependency server (`npm run example`), the [eleven runnable examples](./docs/examples.md) for one facet each, [docs/benchmarks.md](./docs/benchmarks.md) for the B1–B9 numbers against measured graphql-js (including the real-HTTP wire path and the cache-vs-DataLoader story), [docs/security.md](./docs/security.md) for the threat model, and [docs/ecosystem.md](./docs/ecosystem.md) for the first-party `@orbit/*` package plan.
 
 ## Query syntax at a glance
 
@@ -202,7 +202,7 @@ Every failure is an `OrbitError` with a standard code and a correct HTTP status:
 | [Serialization](./docs/serialization.md) | JSON, MessagePack, SSE streaming, gzip — `Accept`/`Accept-Encoding` negotiation |
 | [Benchmarks](./docs/benchmarks.md) | B1–B9 vs measured graphql-js — latency, round-trips, throughput, payload, streaming, realtime, real-HTTP wire path, cache-vs-DataLoader |
 | [Security](./docs/security.md) | Threat model: payload/depth limits, prototype-pollution hardening, realtime protocol defenses |
-| [Examples](./docs/examples.md) | The nine runnable examples, tour and reading order |
+| [Examples](./docs/examples.md) | The eleven runnable examples, tour and reading order |
 | [Architecture](./docs/architecture.md) | How the engine executes a query, serialization, extension points |
 | [Server integration](./docs/server.md) | Hono, Express, Workers, Bun, Deno, node:http |
 | [Errors](./docs/errors.md) | Error reference and the `onError` hook |
@@ -221,9 +221,9 @@ pnpm test            # 324 tests, Vitest (307 core + 13 rest + 4 cache)
 pnpm run test:coverage # ~94% stmts / ~88% branch / ~96% lines (see packages/core)
 pnpm run typecheck   # strict TypeScript (builds all packages, then checks examples/bench)
 pnpm run build       # ESM + .d.ts → dist/ in every package
-pnpm run example     # zero-dep demo server on localhost:3000
-pnpm run examples    # all nine headless examples
-pnpm run web         # interactive demos on localhost:4321 — chat, uploads, posts, auth + the Orbit-vs-GraphQL A/B lab (see docs/examples.md)
+pnpm run example     # zero-dep demo server on localhost:3000 (examples/node/standalone-server.ts)
+pnpm run examples    # all eleven headless examples, back to back (examples/node/)
+pnpm run web         # interactive demos on localhost:4321 — chat, uploads, posts, auth + the Orbit-vs-GraphQL A/B lab (examples/web/, see docs/examples.md)
 pnpm run bench       # B1–B9 benchmarks + chart (docs/benchmarks.md)
 pnpm run size        # core package weight vs graphql-js (docs/benchmarks.md)
 ```

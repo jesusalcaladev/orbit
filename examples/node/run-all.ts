@@ -2,7 +2,7 @@
  * Run every example back-to-back. Each example is self-contained and also
  * works standalone.
  *
- * Run:  node examples/run-all.ts   (after `npm run build`)
+ * Run:  node examples/node/run-all.ts   (after `npm run build`)
  */
 import { main as hello } from './01-hello.ts';
 import { main as blog } from './02-blog-relations.ts';
@@ -13,6 +13,8 @@ import { main as streaming } from './06-streaming-sse.ts';
 import { main as serializer } from './07-serializer-custom.ts';
 import { main as realtime } from './08-realtime.ts';
 import { main as speed } from './09-speed.ts';
+import { main as expressDemo } from './10-express.ts';
+import { main as honoDemo } from './11-hono.ts';
 
 const runs: Array<{ name: string; run: () => Promise<void> }> = [
   { name: '01 · hello', run: hello },
@@ -24,6 +26,8 @@ const runs: Array<{ name: string; run: () => Promise<void> }> = [
   { name: '07 · custom serializer', run: serializer },
   { name: '08 · realtime (ws)', run: realtime },
   { name: '09 · speed showcase', run: speed },
+  { name: '10 · book API on express', run: expressDemo },
+  { name: '11 · book API on hono', run: honoDemo },
 ];
 
 for (const { name, run } of runs) {

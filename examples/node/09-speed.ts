@@ -13,7 +13,7 @@
  *   5. Realtime         — one mutation reaches 50 live sockets in µs, and a
  *                         reconnecting client replays only the missed patches.
  *
- * Run:  node examples/09-speed.ts   (after `npm run build`)
+ * Run:  node examples/node/09-speed.ts   (after `npm run build`)
  */
 import { createServer } from 'node:http';
 import { pathToFileURL } from 'node:url';
@@ -304,7 +304,7 @@ export async function main(): Promise<void> {
   server.closeAllConnections();
 
   out.push('  ' + '─'.repeat(74));
-  out.push('  Same machine, same build — run it yourself:  node examples/09-speed.ts');
+  out.push('  Same machine, same build — run it yourself:  node examples/node/09-speed.ts');
   out.push('');
 
   // Node's built-in WebSocket (undici) keeps its client-side socket handles

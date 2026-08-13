@@ -5,7 +5,7 @@
  * reject requests whose caller lacks the right role, and `onAfterParse` to
  * inject the caller's scope into the query filters — no adapter changes.
  *
- * Run:  node examples/03-auth-plugin.ts   (after `npm run build`)
+ * Run:  node examples/node/03-auth-plugin.ts   (after `npm run build`)
  */
 import { pathToFileURL } from 'node:url';
 import { createOrbit, ErrorCode, memoryAdapter, OrbitError } from '@orbit/core';

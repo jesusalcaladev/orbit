@@ -5,7 +5,7 @@
  * `execute()` returns the projected graph, exactly what the HTTP handler
  * would have serialized.
  *
- * Run:  node examples/01-hello.ts   (after `npm run build`)
+ * Run:  node examples/node/01-hello.ts   (after `npm run build`)
  */
 import { pathToFileURL } from 'node:url';
 import { createOrbit, memoryAdapter } from '@orbit/core';
