@@ -5,6 +5,29 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
 ## [Unreleased]
 
 ### Added
+- **Response headers channel** — plugins and adapters can now set
+  `ctx.responseHeaders` (a `Record<string, string | string[]>`) anywhere in
+  the pipeline and the handler merges it into every response format (JSON,
+  MessagePack, plugin bodies) **and** error responses. Array values append
+  one header line per item, so `set-cookie` survives as separate lines.
+  This is the protocol's channel for session cookies (a login mutation can
+  flick its own cookie from inside `mutate`), CORS and custom
+  `cache-control`. `execute()` copies the pipeline's value back onto the
+  context it received. Documented in `docs/server.md`, `docs/plugins.md`,
+  spec §7.
+- **Negotiation metadata on every response** — `vary: accept,
+  accept-encoding` (CDN/proxy caches key on both dimensions and can never
+  serve the wrong format), `cache-control: no-store` on error responses
+  (SSE already had `no-cache`).
+- **Shared realtime session driver** — `createSessionDriver` (exported by
+  `@orbit/core`) is the single implementation of the frame-level protocol
+  (subscribe/ack, unsubscribe, resume, envelope request/response). The Node
+  transport and the Cloudflare Workers transport both drive it, so the
+  frozen frame contract cannot drift between runtimes. Direct unit tests in
+  `test/realtime-driver.test.ts`.
+- **Express `set-cookie` fidelity** — the wrapper copies multi-value
+  `set-cookie` headers one line per cookie via `getSetCookie()` instead of
+  the `, `-joined `Headers` iteration (which corrupts cookie attributes).
 - **`@orbit/cloudflare-workers`** — run the full protocol on the edge from a
   single `fetch` handler. `createWorker({ orbit, path, realtime, ctx,
   onError, fallback })` returns the exact `{ fetch(request, env, ctx) }`

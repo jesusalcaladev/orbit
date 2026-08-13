@@ -7,7 +7,7 @@ tests (`packages/core/test/contract.test.ts`, `api-surface.test.ts`).
 
 **Method:** each spec section was read in full; every frozen claim (envelope rules, error codes + statuses, content negotiation, cache semantics, adapter
 surface, realtime frames, plugin pipeline) was checked against the source and
-exercised through the handler (`packages/core/test/` covers 336 cases). The
+exercised through the handler (`packages/core/test/` covers 352 cases). The
 audit itself is a **supplement** to the tests — it documents the contract
 points and the deltas found.
 
@@ -33,6 +33,10 @@ observation (documented, no change required).
 | 13 | OQS key/value length caps (spec §4) | "Validated for length" was reworded away in #4 because only characters/escapes were checked — over-long single tokens were bounded only by the whole-body cap | Hardening | ✅ implemented: `maxKeyLength` (128) / `maxValueLength` (1024), configurable, enforced over HTTP, SSE and WebSocket paths |
 | 11 | Accept negotiation edge cases | msgpack-vs-SSE ties, wildcard-vs-explicit at equal/lower `q` weren't pinned by tests | Verification gap | 🔧 tests added |
 | 12 | `{ query }` / `{ do }` over WebSocket (spec §10) | Spec promised envelope frames on the socket; the transport spoke subscription control frames only — the spec marked it 🔜 | **Feature gap** | ✅ implemented: request/response over WS (correlation `id` outside the frozen envelope, same pipeline + payload as HTTP, `contentType` echoed for plugin-serialized bodies, binary bodies → `null`), 12 e2e tests |
+| 14 | Response headers (spec §7) | The handler built responses with fixed headers — a plugin/adapter could read any request header but could not *write* one: no `set-cookie` (session login from the pipeline), no CORS, no custom `cache-control`; no `vary`, so a CDN/proxy could serve the wrong negotiated format | **Feature gap** | ✅ implemented: additive `ctx.responseHeaders` channel merged into JSON/msgpack/plugin-body and error responses (array values → one header line each, `set-cookie` included); `vary: accept, accept-encoding` everywhere; `cache-control: no-store` on errors; `execute()` surfaces the pipeline value on its input ctx |
+| 15 | Realtime frame logic duplicated (spec §10) | The Node transport's `Session.#dispatch` and the Workers transport's `createRealtimeSession` each implemented the frame contract — two copies that could drift | Maintainability | ✅ extracted `createSessionDriver` into the core (runtime-agnostic); both transports delegate; direct unit tests |
+| 16 | Express multi-value `set-cookie` (wrapper) | The wrapper copied response headers via `Headers` iteration, which joins multi-value headers with `, ` — multiple `set-cookie` lines (one cookie per line is the standard) would be corrupted | **Bug** | 🔧 wrapper copies each cookie via `getSetCookie()` (Node ≥ 20); regression test with two cookies |
+| 17 | CF realtime guard error shape (wrapper) | `createWorker` answered the "handler-function orbit on the realtime path" guard with plain text — inconsistent with the standard `{ error: { code, message } }` contract | Consistency | 🔧 now `ORBIT_INTERNAL` (500) in the standard shape; test updated |
 
 None of the fixes changed a frozen wire shape: #1 is a strict superset (both
 spellings now parse), #2–#4/#6–#8 are documentation truthfulness, and #12 is
@@ -228,9 +232,14 @@ changes).
 | `packages/core/src/realtime/hub.ts` | Subscription parsing honors the engine's length caps. |
 | `packages/core/test/parser.test.ts` / `engine.test.ts` / `cache.test.ts` | Length-cap + precision-eviction regression tests. |
 | `examples/node/book/` | Adapters return entity-scoped `invalidates`; the demo shows entity-scoped precision. |
-| `spec.md` | §2 websocket status, §4 length caps, §5 `invalidates` semantics, §8 separator + entity eviction, §10 resume/after + WS envelope + auth-context claims, §13 example count. |
+| `spec.md` | §2 websocket status, §4 length caps, §5 `invalidates` semantics, §8 separator + entity eviction, §10 resume/after + WS envelope + auth-context claims, §13 example count; §7 response headers + vary/no-store. |
 | `examples/web/server.ts` | Removed the dead `x-orbit-cache-key` forwarding. |
 | `docs/spec-vision.md` | North-star analysis: principles → guardrails → alignment of recent work. |
+| `packages/core/src/types.ts` / `engine.ts` | `ctx.responseHeaders` channel + `vary` + `cache-control: no-store` (spec §7, #14). |
+| `packages/core/src/realtime/driver.ts` | Shared session driver — one frame contract for Node + Workers (#15). |
+| `packages/express/src/index.ts` | `getSetCookie()` copy — multi-value `set-cookie` preserved (#16). |
+| `packages/cloudflare-workers/src/index.ts` | Realtime guard answers the standard error shape (#17). |
+| `packages/core/test/server.test.ts` / `realtime-driver.test.ts` | Response-header + driver unit tests. |
 
 Everything else checked out consistent. The frozen contract (envelope §3,
 errors §6, adapter §9, pipeline §11) needed no implementation change.

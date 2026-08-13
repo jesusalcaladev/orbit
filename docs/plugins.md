@@ -139,6 +139,29 @@ All hooks receive `ctx`, an `OrbitContext` that is shared across the whole execu
 - `ctx.state` — plugin scratch space (`state ??= {}`).
 - `ctx.orbit` — the engine (for background work, as the cache plugin does).
 - `ctx.rawQuery` — the final raw query after `onBeforeParse`.
+- `ctx.responseHeaders` — **write channel**: set response headers (e.g.
+  `set-cookie`, CORS, custom `cache-control`) and the handler merges them
+  into the response. Array values append one header line per item. See
+  `docs/server.md` → *Response headers & cookies*.
+
+### Setting response headers (cookies, CORS, …)
+
+```ts
+hooks: {
+  onBeforeResolve: ({ ctx }) => {
+    ctx.responseHeaders = {
+      'set-cookie': ['sid=abc; HttpOnly; Path=/; SameSite=Lax'],
+      'x-powered-by': 'orbit',
+    };
+  },
+}
+```
+
+Adapters can set them too — a login mutation flicks its own session cookie
+from inside `mutate(action, args, ctx)`. Multi-value headers (`set-cookie`)
+must use array values; the handler appends one line per item. Negotiated
+responses already carry `vary: accept, accept-encoding`; errors carry
+`cache-control: no-store`; SSE carries `cache-control: no-cache`.
 
 ## Built-in: the cache plugin
 
@@ -207,7 +230,7 @@ export interface CacheStore {
 ## The plugin ecosystem
 
 The core ships one built-in plugin (cache) and one reference example
-(`examples/node/03-auth-plugin.ts`). The first-party **`@orbit/*` plugin and
+(`examples/node/authentication/03-auth-plugin.ts`). The first-party **`@orbit/*` plugin and
 adapter packages** — `@orbit/auth`, `@orbit/logging`, `@orbit/redis`,
 `@orbit/postgres`, … — are blueprinted in
 [docs/ecosystem.md](./ecosystem.md): which frozen contract each one

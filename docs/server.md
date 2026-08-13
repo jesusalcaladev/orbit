@@ -164,6 +164,54 @@ const res = await fetch('http://localhost:3000/orbit', {
 const { data, fromCache, invalidates } = await res.json();
 ```
 
+## Response headers & cookies
+
+**Reading request headers** (including cookies) is total: the engine exposes
+`ctx.headers` to every plugin and adapter, so `ctx.headers.get('cookie')` and
+`ctx.headers.get('authorization')` are available anywhere in the pipeline.
+
+**Writing response headers** is a first-class, additive channel: set
+`ctx.responseHeaders` from any plugin hook or from an adapter inside
+`mutate`, and the handler merges it into the response (JSON, MessagePack,
+plugin-serialized bodies AND error responses):
+
+```ts
+const loginPlugin: OrbitPlugin = {
+  name: 'session-cookie',
+  hooks: {
+    onAfterParse({ ctx }) {
+      // A session cookie issued by the protocol itself.
+      ctx.responseHeaders = {
+        'set-cookie': ['sid=abc; HttpOnly; Path=/; SameSite=Lax', 'theme=dark; Path=/'],
+      };
+    },
+  },
+};
+```
+
+- **Array values append one header line per item** — `set-cookie` in
+  particular must be one line per cookie; `Headers.append` preserves that
+  (the Node `Headers` iteration joins multi-value headers with `, `, which
+  would corrupt cookie attributes — `@orbit/express` copies each cookie
+  individually via `getSetCookie()`).
+- **Adapters can set them too** — the classic login mutation:
+  `ctx.responseHeaders = { 'set-cookie': 'session=…; HttpOnly; Path=/' }`
+  inside `mutate` and the cookie rides out with the `{ success }` payload.
+- **`execute()` copies the pipeline's value back** onto the context it
+  received, so programmatic callers can read it too.
+- **SSE caveat:** streaming responses send their headers the moment the
+  stream starts, before the pipeline runs — a plugin-set `responseHeaders`
+  cannot reach an SSE response. Pass them via the handler's `ctx` option
+  instead: `orbit.handler(request, { responseHeaders: { … } })`.
+- **CORS** stays a deployer concern: attach `Access-Control-*` in the
+  framework layer (Express middleware, Hono middleware, a wrapping `fetch`
+  in the worker) or via `ctx.responseHeaders` on the paths that need it.
+
+**Negotiation metadata is emitted automatically:** every response carries
+`vary: accept, accept-encoding` (so a CDN/proxy keying its cache on URL
+cannot serve the wrong format), error responses carry `cache-control:
+no-store`, and SSE responses carry `cache-control: no-cache`.
+
 ## Programmatic use (no HTTP)
 
 ```ts

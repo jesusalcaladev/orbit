@@ -236,6 +236,21 @@ Explicit types always beat wildcards; highest `q`-value wins.
 (`content-encoding: gzip`), for JSON, MessagePack, SSE and plugin payloads,
 when the runtime provides `CompressionStream`.
 
+### Response headers (additive)
+
+Plugins and adapters may attach response headers by setting
+`ctx.responseHeaders` (a `Record<string, string | string[]>`) anywhere in
+the pipeline; the handler merges them into every response format (JSON,
+MessagePack, plugin bodies, errors). Array values append one header line per
+item — `set-cookie` needs one line per cookie. This is the protocol's channel
+for session cookies, CORS headers and custom cache-control. `execute()`
+copies the pipeline's value back onto the context it received. For SSE
+streaming, headers are sent before the pipeline runs, so a pipeline-set
+`responseHeaders` cannot reach the stream — pass them via the handler's `ctx`
+option instead. The engine also emits negotiation metadata automatically:
+`vary: accept, accept-encoding` on every response, `cache-control: no-store`
+on errors, and `cache-control: no-cache` on SSE.
+
 ### Streaming semantics (SSE) ✅
 
 The handler emits one SSE frame per resolved breadth-first level, then a final
@@ -372,8 +387,6 @@ forwards `mutate`/`subscribe` when provided.
   (multipart) and SSE streaming remain HTTP-only.
 
 ### Subscription protocol (wire frames)
-
-### Subscription protocol (proposed frames)
 
 ```jsonc
 { "subscribe": "user(id=\"1\") { name, posts { title } }", "id": "sub-1" }

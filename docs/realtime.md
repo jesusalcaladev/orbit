@@ -8,6 +8,16 @@ across disconnects, replays missed patches on resume, and serves `{ query }` /
 The transport is Node-specific (`node:http`). The `SubscriptionHub` it uses is
 runtime-agnostic and can be driven by any transport later (SSE, uWebSockets…).
 
+**One frame contract, one implementation.** The frame-level protocol
+(subscribe/ack, unsubscribe, resume, and the `{ query }` / `{ do }` envelope
+request/response) lives in a shared, runtime-agnostic **session driver**
+(`createSessionDriver`, exported by `@orbit/core`). Both the Node transport
+and the Cloudflare Workers transport (`@orbit/cloudflare-workers`, which
+upgrades with the Workers-native `WebSocketPair`) drive the same driver — so
+the contract cannot drift between runtimes. Transports keep what is theirs:
+frame encoding (JSON/msgpack), socket APIs, retention windows (Node only) and
+heartbeats.
+
 ## Quick start
 
 ```ts
@@ -141,5 +151,5 @@ hub.resume('feed', 0, handler); // replay seq > 0
 hub.unsubscribe('feed'); // release the shared adapter hook
 ```
 
-See [`examples/node/08-realtime.ts`](../examples/node/08-realtime.ts) for a runnable
+See [`examples/node/streaming/08-realtime.ts`](../examples/node/streaming/08-realtime.ts) for a runnable
 demo including a real disconnect → resume cycle.
