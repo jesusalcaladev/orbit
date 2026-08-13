@@ -7,7 +7,12 @@ import {
   validateEnvelope,
 } from './envelope.js';
 import { ErrorCode, isOrbitError, OrbitError, toOrbitError } from './errors.js';
-import { DEFAULT_MAX_DEPTH, parseOQS } from './parser.js';
+import {
+  DEFAULT_MAX_DEPTH,
+  DEFAULT_MAX_KEY_LENGTH,
+  DEFAULT_MAX_VALUE_LENGTH,
+  parseOQS,
+} from './parser.js';
 import { PluginRegistry } from './plugins/registry.js';
 import { isShortCircuit } from './plugins/types.js';
 import type { OrbitPlugin } from './plugins/types.js';
@@ -50,6 +55,10 @@ export interface OrbitConfig {
   maxQueryDepth?: number;
   /** Maximum envelope size in bytes. Default 10 MiB. */
   maxPayloadBytes?: number;
+  /** Maximum identifier length (entity, field and filter-key names). Default 128. */
+  maxKeyLength?: number;
+  /** Maximum filter-value length (quoted or bare). Default 1024. */
+  maxValueLength?: number;
   /** Optional cache plugin configuration. When set, automatically mounts
    *  `createCachePlugin` with these options and integrates caching into the
    *  handler (reads cache spec from `envelope.cache` or `x-orbit-cache` header). */
@@ -61,6 +70,8 @@ interface OrbitOptions {
   plugins: PluginRegistry;
   maxQueryDepth: number;
   maxPayloadBytes: number;
+  maxKeyLength: number;
+  maxValueLength: number;
 }
 
 interface SerializeOutcome {
@@ -116,6 +127,10 @@ export class Orbit {
    * empty plugin list the tree is read-only, so repeat queries skip parsing.
    */
   #parse(query: string, origin: NodeOrigin): QueryNode {
+    // Safe to omit the length caps from the key: they are engine-constant
+    // (readonly options), this cache is per-engine, and the LRU path only
+    // runs with zero plugins — two engines with different caps never share
+    // a cache. If caps ever become per-request, they must join this key.
     const key = `${origin}\u0000${this.#options.maxQueryDepth}\u0000${query}`;
     const hit = this.#parseCache.get(key);
     if (hit !== undefined) {
@@ -124,7 +139,12 @@ export class Orbit {
       this.#parseCache.set(key, hit);
       return hit;
     }
-    const node = parseOQS(query, { maxDepth: this.#options.maxQueryDepth, origin });
+    const node = parseOQS(query, {
+      maxDepth: this.#options.maxQueryDepth,
+      maxKeyLength: this.#options.maxKeyLength,
+      maxValueLength: this.#options.maxValueLength,
+      origin,
+    });
     this.#parseCache.set(key, node);
     if (this.#parseCache.size > PARSE_CACHE_MAX) {
       const oldest = this.#parseCache.keys().next().value as string | undefined;
@@ -146,6 +166,16 @@ export class Orbit {
   /** Maximum relation nesting depth (used by the realtime hub too). */
   get maxQueryDepth(): number {
     return this.#options.maxQueryDepth;
+  }
+
+  /** Maximum identifier length, enforced at parse (used by the realtime hub too). */
+  get maxKeyLength(): number {
+    return this.#options.maxKeyLength;
+  }
+
+  /** Maximum filter-value length, enforced at parse (used by the realtime hub too). */
+  get maxValueLength(): number {
+    return this.#options.maxValueLength;
   }
 
   /**
@@ -240,7 +270,11 @@ export class Orbit {
         const { envelope, files } = await this.#readMultipart(request, contentType);
         const fullCtx: OrbitContext = files ? { ...base, files } : base;
         if (format === 'sse') {
-          parseOQS(envelope.query ?? '', { maxDepth: this.#options.maxQueryDepth });
+          parseOQS(envelope.query ?? '', {
+            maxDepth: this.#options.maxQueryDepth,
+            maxKeyLength: this.#options.maxKeyLength,
+            maxValueLength: this.#options.maxValueLength,
+          });
           return this.#sseResponse(this.stream(envelope, fullCtx), gzip, fullCtx);
         }
         const result = await this.execute(envelope, fullCtx);
@@ -258,7 +292,11 @@ export class Orbit {
         // Fail fast on query syntax errors BEFORE committing to a 200 stream:
         // only resolution-stage errors (e.g. an entity that doesn't resolve)
         // become SSE frames. Without this, ORBIT_INVALID_QUERY would be a 200.
-        parseOQS(envelope.query ?? '', { maxDepth: this.#options.maxQueryDepth });
+        parseOQS(envelope.query ?? '', {
+          maxDepth: this.#options.maxQueryDepth,
+          maxKeyLength: this.#options.maxKeyLength,
+          maxValueLength: this.#options.maxValueLength,
+        });
         return this.#sseResponse(this.stream(envelope, base), gzip, base);
       }
 
@@ -387,7 +425,12 @@ export class Orbit {
     let parsed =
       this.#options.plugins.list.length === 0
         ? this.#parse(raw, origin)
-        : parseOQS(raw, { maxDepth: this.#options.maxQueryDepth, origin });
+        : parseOQS(raw, {
+            maxDepth: this.#options.maxQueryDepth,
+            maxKeyLength: this.#options.maxKeyLength,
+            maxValueLength: this.#options.maxValueLength,
+            origin,
+          });
 
     // 3. onAfterParse — enrich or replace the parsed tree.
     for (const plugin of this.#options.plugins.list) {
@@ -464,6 +507,22 @@ export class Orbit {
       Array.isArray(mutation.invalidates) && mutation.invalidates.length > 0
         ? mutation.invalidates
         : undefined;
+
+    // Server-side cache hygiene (spec §8): evict every cached entry whose
+    // query reads the mutated entity — the cache plugin indexes entries by
+    // the entities in their tree — plus anything the adapter names in
+    // `invalidates` (entity names or exact store keys). This runs BEFORE
+    // the `return` re-query below so a post-mutation read is always fresh.
+    const entityCache = findEntityEvictingCache(this.#options.plugins);
+    if (entityCache) {
+      entityCache.invalidateEntity(entity);
+      if (invalidates) {
+        for (const key of invalidates) {
+          entityCache.invalidateEntity(key);
+          entityCache.invalidate(key);
+        }
+      }
+    }
 
     // Optional re-query of the affected sub-graph. Executed through the SAME
     // query pipeline as a client query (spec §5: "hooks included") — auth
@@ -857,7 +916,31 @@ export function createOrbit(config: OrbitConfig = {}): Orbit {
     plugins,
     maxQueryDepth: config.maxQueryDepth ?? DEFAULT_MAX_DEPTH,
     maxPayloadBytes: config.maxPayloadBytes ?? DEFAULT_MAX_PAYLOAD_BYTES,
+    maxKeyLength: config.maxKeyLength ?? DEFAULT_MAX_KEY_LENGTH,
+    maxValueLength: config.maxValueLength ?? DEFAULT_MAX_VALUE_LENGTH,
   });
+}
+
+/**
+ * The cache-plugin capability the engine drives for server-side eviction.
+ * Discovered by duck-typing (no hardcoded plugin name): any plugin exposing
+ * `invalidateEntity` can be driven — `createCachePlugin` provides it, and
+ * future cache implementations can too.
+ */
+interface EntityEvictingCache {
+  invalidateEntity(entity: string): void;
+  invalidate(key: string): void;
+}
+
+/** Find the first mounted plugin that can evict cache entries by entity. */
+function findEntityEvictingCache(plugins: PluginRegistry): EntityEvictingCache | undefined {
+  for (const plugin of plugins.list) {
+    const candidate = plugin as OrbitPlugin & Partial<EntityEvictingCache>;
+    if (typeof candidate.invalidateEntity === 'function') {
+      return candidate as OrbitPlugin & EntityEvictingCache;
+    }
+  }
+  return undefined;
 }
 
 /** gzip a byte payload via the web-standard CompressionStream. */

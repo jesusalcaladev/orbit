@@ -195,6 +195,60 @@ describe('parseOQS — errors', () => {
   });
 });
 
+describe('parseOQS — length caps (spec §4)', () => {
+  it('rejects identifiers longer than the default max key length (128)', () => {
+    const key = 'a'.repeat(129);
+    expect(() => parseOQS(`${key}(id="1")`)).toThrowError(
+      expect.objectContaining({ code: ErrorCode.INVALID_QUERY }),
+    );
+  });
+
+  it('accepts identifiers exactly at the default limit', () => {
+    const key = 'a'.repeat(128);
+    expect(() => parseOQS(`${key}(id="1")`)).not.toThrow();
+  });
+
+  it('rejects quoted values longer than the default max value length (1024)', () => {
+    expect(() => parseOQS(`user(id="${'a'.repeat(1025)}")`)).toThrowError(
+      expect.objectContaining({ code: ErrorCode.INVALID_QUERY }),
+    );
+  });
+
+  it('accepts values exactly at the default limit', () => {
+    expect(() => parseOQS(`user(id="${'a'.repeat(1024)}")`)).not.toThrow();
+  });
+
+  it('caps bare (unquoted) values too', () => {
+    expect(() => parseOQS(`user(id=${'a'.repeat(1025)})`)).toThrowError(
+      expect.objectContaining({ code: ErrorCode.INVALID_QUERY }),
+    );
+  });
+
+  it('enforces configured limits', () => {
+    expect(() => parseOQS('user(id="1") { name }', { maxKeyLength: 4 })).not.toThrow();
+    expect(() => parseOQS('username(id="1")', { maxKeyLength: 4 })).toThrowError(
+      expect.objectContaining({ code: ErrorCode.INVALID_QUERY }),
+    );
+    expect(() => parseOQS('user(id="12345")', { maxValueLength: 4 })).toThrowError(
+      expect.objectContaining({ code: ErrorCode.INVALID_QUERY }),
+    );
+  });
+
+  it('reports the offending kind and length in the error details', () => {
+    try {
+      parseOQS(`user(id="${'x'.repeat(1025)}")`);
+      expect.unreachable('should have thrown');
+    } catch (error) {
+      const details = (
+        error as {
+          details: { kind: string; length: number; maxLength: number };
+        }
+      ).details;
+      expect(details).toMatchObject({ kind: 'value', length: 1025, maxLength: 1024 });
+    }
+  });
+});
+
 describe('parseOQS — depth limits', () => {
   it('allows nesting up to the configured max depth', () => {
     const node = parseOQS('a { b { c { d } } }', { maxDepth: 3 });

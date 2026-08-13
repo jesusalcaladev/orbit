@@ -5,9 +5,19 @@ import { setOwn } from './utils.js';
 /** Default maximum relation nesting depth, per the protocol spec (> 10 fails). */
 export const DEFAULT_MAX_DEPTH = 10;
 
+/** Default maximum length of an identifier (entity, field or filter key). */
+export const DEFAULT_MAX_KEY_LENGTH = 128;
+
+/** Default maximum length of a filter value (quoted or bare). */
+export const DEFAULT_MAX_VALUE_LENGTH = 1024;
+
 export interface ParseOptions {
   /** Maximum relation nesting depth. Defaults to 10. */
   maxDepth?: number;
+  /** Maximum identifier length (entity, field and filter-key names). Defaults to 128. */
+  maxKeyLength?: number;
+  /** Maximum filter-value length (quoted or bare). Defaults to 1024. */
+  maxValueLength?: number;
   /** Origin stamped on every node. Defaults to `'client'`. */
   origin?: NodeOrigin;
 }
@@ -53,12 +63,52 @@ class Parser {
   private pos = 0;
   private readonly input: string;
   private readonly maxDepth: number;
+  private readonly maxKeyLength: number;
+  private readonly maxValueLength: number;
   private readonly origin: NodeOrigin;
 
   constructor(input: string, options: ParseOptions) {
     this.input = input;
     this.maxDepth = options.maxDepth ?? DEFAULT_MAX_DEPTH;
+    this.maxKeyLength = options.maxKeyLength ?? DEFAULT_MAX_KEY_LENGTH;
+    this.maxValueLength = options.maxValueLength ?? DEFAULT_MAX_VALUE_LENGTH;
     this.origin = options.origin ?? 'client';
+  }
+
+  /** Reject identifiers longer than `maxKeyLength` (spec §4 length validation). */
+  private checkKeyLength(ident: string, at: number): void {
+    if (ident.length > this.maxKeyLength) {
+      throw new OrbitError(
+        ErrorCode.INVALID_QUERY,
+        `Identifier exceeds the maximum length of ${this.maxKeyLength} characters`,
+        {
+          details: {
+            kind: 'key',
+            length: ident.length,
+            maxLength: this.maxKeyLength,
+            at,
+          },
+        },
+      );
+    }
+  }
+
+  /** Reject filter values longer than `maxValueLength` (spec §4 length validation). */
+  private checkValueLength(value: string, at: number): void {
+    if (value.length > this.maxValueLength) {
+      throw new OrbitError(
+        ErrorCode.INVALID_QUERY,
+        `Value exceeds the maximum length of ${this.maxValueLength} characters`,
+        {
+          details: {
+            kind: 'value',
+            length: value.length,
+            maxLength: this.maxValueLength,
+            at,
+          },
+        },
+      );
+    }
   }
 
   private fail(message: string): never {
@@ -82,7 +132,9 @@ class Parser {
     const start = this.pos;
     this.pos += 1;
     while (this.pos < this.input.length && IDENT_CHAR.test(this.input[this.pos]!)) this.pos += 1;
-    return this.input.slice(start, this.pos);
+    const ident = this.input.slice(start, this.pos);
+    this.checkKeyLength(ident, start);
+    return ident;
   }
 
   parseRoot(): QueryNode {
@@ -190,11 +242,14 @@ class Parser {
     if (this.pos === start) {
       this.fail('Expected a value after "="');
     }
-    return this.input.slice(start, this.pos);
+    const value = this.input.slice(start, this.pos);
+    this.checkValueLength(value, start);
+    return value;
   }
 
   private readQuoted(quote: string): string {
-    this.pos += 1; // opening quote
+    const start = this.pos - 1; // opening quote, for length-error reporting
+    this.pos += 1;
     let out = '';
     while (this.pos < this.input.length) {
       const ch = this.input[this.pos]!;
@@ -206,6 +261,7 @@ class Parser {
         this.pos += 1;
       } else if (ch === quote) {
         this.pos += 1;
+        this.checkValueLength(out, start);
         return out;
       } else {
         out += ch;

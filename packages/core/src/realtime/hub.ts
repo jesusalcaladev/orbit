@@ -65,7 +65,11 @@ export class SubscriptionHub {
     clientId: string,
     onEvent: (seq: number, event: SubscriptionEvent) => void,
   ): RealtimeSubscription {
-    const node = parseOQS(oqs, { maxDepth: this.#orbit.maxQueryDepth });
+    const node = parseOQS(oqs, {
+      maxDepth: this.#orbit.maxQueryDepth,
+      maxKeyLength: this.#orbit.maxKeyLength,
+      maxValueLength: this.#orbit.maxValueLength,
+    });
     const key = `${node.entity}\u0000${canonicalFilters(node.filters)}`;
 
     const existing = this.#subscribers.get(clientId);

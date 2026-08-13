@@ -306,6 +306,24 @@ describe('errors', () => {
     });
   });
 
+  it('enforces maxKeyLength / maxValueLength from the engine config', async () => {
+    const orbit = makeOrbit({ maxKeyLength: 8, maxValueLength: 16 });
+    // Identifier (entity) longer than maxKeyLength.
+    await expect(orbit.execute({ query: 'a-too-long-entity { id }' })).rejects.toMatchObject({
+      code: ErrorCode.INVALID_QUERY,
+    });
+    // Quoted filter value longer than maxValueLength.
+    await expect(
+      orbit.execute({ query: 'user(id="0123456789abcdef0") { name }' }),
+    ).rejects.toMatchObject({
+      code: ErrorCode.INVALID_QUERY,
+    });
+    // At the limits it still works.
+    await expect(
+      orbit.execute({ query: 'user(id="0123456789abcde") { name }' }),
+    ).resolves.toMatchObject({ status: 200 });
+  });
+
   it('propagates precise adapter errors', async () => {
     const orbit = createOrbit({
       adapters: memoryAdapter([
