@@ -159,10 +159,10 @@ await fetch('/orbit', {
 ## Example
 
 A complete, layered book API — relations, auth, caching and realtime — runs
-as [`examples/node/10-express.ts`](../../examples/node/10-express.ts):
+as [`examples/node/frameworks/10-express.ts`](../../examples/node/frameworks/10-express.ts):
 
 ```sh
-node examples/node/10-express.ts
+node examples/node/frameworks/10-express.ts
 ```
 
 ## Test

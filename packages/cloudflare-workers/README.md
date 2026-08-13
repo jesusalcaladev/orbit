@@ -183,10 +183,10 @@ await fetch('/api/orbit', {
 ## Example
 
 The same layered book API — relations, auth, caching and realtime — runs on
-the edge — see [`examples/node/12-cloudflare-workers.ts`](../../examples/node/12-cloudflare-workers.ts):
+the edge — see [`examples/node/frameworks/12-cloudflare-workers.ts`](../../examples/node/frameworks/12-cloudflare-workers.ts):
 
 ```sh
-node examples/node/12-cloudflare-workers.ts
+node examples/node/frameworks/12-cloudflare-workers.ts
 ```
 
 ## Test

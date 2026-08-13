@@ -157,10 +157,10 @@ await fetch('/orbit', {
 ## Example
 
 The same layered book API — relations, auth, caching and realtime — also runs
-on Hono — see [`examples/node/11-hono.ts`](../../examples/node/11-hono.ts):
+on Hono — see [`examples/node/frameworks/11-hono.ts`](../../examples/node/frameworks/11-hono.ts):
 
 ```sh
-node examples/node/11-hono.ts
+node examples/node/frameworks/11-hono.ts
 ```
 
 ## Test
