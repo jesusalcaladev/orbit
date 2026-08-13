@@ -1,4 +1,6 @@
-# 🔮 Orbit
+<p align="center">
+  <img src="assets/cover-dark.png" alt="Orbit — modular data layer for the modern fullstack" width="100%" />
+</p>
 
 > **Modular data layer for the modern fullstack.**
 > A thin, blazing-fast contract layer that transports intent from client to server — with **zero runtime dependencies**.
