@@ -40,7 +40,7 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
   (subscribe/ack, seq events, in-connection resume, `{ query }`/`{ do }`
   envelopes), with two honest edge differences: no cross-connection resume
   (Durable Objects = future work) and no app-level heartbeats (the platform
-  keeps connections alive). 21 tests in `packages/cloudflare-workers/test/`
+  keeps connections alive). 26 tests in `packages/cloudflare-workers/test/`
   exercise the full protocol through `worker.fetch` (JSON/msgpack/SSE/gzip/
   uploads/errors/cache) and the realtime session over a fake socket.
   Example `examples/node/12-cloudflare-workers.ts` serves the same book API
@@ -85,7 +85,7 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
   `/:id` path when an `id` filter is present), relations inject the
   parent id via `parentKey`, mutations map to `POST`/`PATCH`/`DELETE`
   (customizable per action), upstream 404 → `null`, other failures →
-  precise `OrbitError`s. 13 tests in `packages/rest/test/`.
+  precise `OrbitError`s. 14 tests in `packages/rest/test/`.
 - **`@orbit/cache`** — the cache plugin's dedicated distribution package.
   The implementation deliberately STAYS inside the frozen `@orbit/core`
   (its export surface is pinned by `api-surface.test.ts`; moving the code
@@ -100,6 +100,18 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
   **324 tests** (307 core + 13 rest + 4 cache).
 
 ### Docs
+- **Package READMEs completed** — new `packages/cache/README.md` and
+  `packages/rest/README.md` (the two shipped ecosystem packages that lacked
+  one): quick start, options tables, behavior notes, the `CacheStore`
+  contract for implementers. Every shipped `@orbit/*` package now carries a
+  README.
+- **Stale counts corrected** — `docs/ecosystem.md` + `ROADMAP.md` now
+  report the real rest test count (14, not 13) and the real express/hono
+  end-to-end totals (14 + 13); the CHANGELOG's rest (14) and
+  cloudflare-workers (26) test counts now match the suite.
+- **`@orbit/rest` typing tightened** — `RestMutationSpec.method` is now a
+  closed `RestMethod` union (`GET | POST | PUT | PATCH | DELETE`) instead of
+  a bare `string`, so a typo in a mutation map fails at compile time.
 - **New `docs/ecosystem.md`** — the blueprint for the first-party
   `@orbit/*` package ecosystem: every planned package (adapters, caches,
   plugins, server wrappers, clients), the frozen contract each one

@@ -30,10 +30,13 @@
 import { ErrorCode, OrbitError, isRecord } from '@orbit/core';
 import type { DataAdapter, Filters, MutationArgs, MutationResult, OrbitContext } from '@orbit/core';
 
+/** The HTTP methods the REST adapter can issue. */
+export type RestMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+
 /** HTTP mapping for one mutation action. */
 export interface RestMutationSpec {
-  /** HTTP method, e.g. `POST`. */
-  method: string;
+  /** HTTP method for this action, e.g. `POST`. */
+  method: RestMethod;
   /** Path override for this action. Defaults to the adapter path. */
   path?: string;
 }

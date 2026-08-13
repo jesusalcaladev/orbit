@@ -148,7 +148,7 @@ Workers-native `WebSocketPair` upgrade over the same runtime-agnostic
 
 1. **`@orbit/rest`** ✅ — the simplest adapter (fetch-based; the old
    `fetchAdapter` was removed from core). Validated the scaffolding pattern
-   end to end. `packages/rest` ships with its own tests (13) exercising the
+   end to end. `packages/rest` ships with its own tests (14) exercising the
    real `DataAdapter` contract against a mocked fetch.
 2. **`@orbit/cache`** ✅ — the plugin's dedicated distribution package. The
    implementation deliberately STAYS in the frozen core: the import surface

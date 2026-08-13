@@ -188,15 +188,15 @@ artifact on every push.
    round-trips/throughput/streaming, not B4). B3's goal is met — no engine
    change needed; the only remaining gap is the undici transport, documented.
 3. **Split packages in a monorepo** — DONE: `@orbit/rest` (fetch-based
-   adapter, shipped with 13 tests against the real `DataAdapter` contract) and
+   adapter, shipped with 14 tests against the real `DataAdapter` contract) and
    `@orbit/cache` (distribution home of the cache plugin — re-exports from the
    frozen core to keep the dependency direction one-way; Redis/KV stores
    implement the re-exported `CacheStore` contract). (`@orbit/core` keeps only
    the memory adapter as reference.) **Server wrappers shipped too:**
    `@orbit/hono` + `@orbit/express` — thin raw bridges that pass the
    framework's original request to the engine and pipe the response through
-   untouched (full protocol fidelity, see `docs/server.md`), each with 11
-   real end-to-end tests and a layered book-API example (`examples/node/frameworks/10-express.ts`, `examples/node/frameworks/11-hono.ts`). **`@orbit/cloudflare-workers`** ships the same book API behind a plain `fetch` handler with Workers bindings on the OrbitContext and Workers-native WebSocket realtime (`examples/node/frameworks/12-cloudflare-workers.ts`).
+   untouched (full protocol fidelity, see `docs/server.md`), with 14
+   (express) + 13 (hono) real end-to-end tests and a layered book-API example (`examples/node/frameworks/10-express.ts`, `examples/node/frameworks/11-hono.ts`). **`@orbit/cloudflare-workers`** ships the same book API behind a plain `fetch` handler with Workers bindings on the OrbitContext and Workers-native WebSocket realtime (`examples/node/frameworks/12-cloudflare-workers.ts`).
 4. **Ship `@orbit/auth`** (easy — hooks already exist).
 5. **Ship `@orbit/redis`** (Redis `CacheStore`), then **`@orbit/kv-cache`**
    (Cloudflare KV).
