@@ -68,7 +68,7 @@ That's why the core has **zero runtime dependencies**: a contract layer should b
 - **Wire format negotiation.** `Accept` decides the response — JSON, **MessagePack** (zero-dep codec), or **SSE streaming** (the graph arrives level by level, first byte in ~7 ms). `Accept-Encoding: gzip` compresses both JSON and msgpack. Errors speak the same format.
 - **Streaming.** `orbit.stream()` yields the root as soon as its adapter answers; relations follow. Clients render before the database finishes the deep joins.
 - **Realtime subscriptions.** A zero-dependency WebSocket transport (`createRealtimeServer`) streams adapter `subscribe` events to clients with per-subscription sequence numbers, retention across disconnects, and patch replay on `resume` — 100 clients share one adapter hook.
-- **Frozen contracts.** The `DataAdapter` interface (resolve/batch/mutate/subscribe) and the envelope are canonicalized in [`spec.md`](./spec.md) — realtime is designed into the adapter contract, with the WebSocket transport on the roadmap.
+- **Frozen contracts.** The `DataAdapter` interface (resolve/batch/mutate/subscribe) and the envelope are canonicalized in [`spec.md`](./spec.md) — realtime is designed into the adapter contract, and the WebSocket transport is shipped in v0.0.1.
 - **Framework-agnostic handler.** Works with `Request`/`Response` runtimes, or call `orbit.execute(envelope, ctx)` directly.
 - **Ecosystem packages.** `@orbit/rest` (fetch-based `DataAdapter`: queries → `GET`, mutations → `POST`/`PATCH`/`DELETE`) and `@orbit/cache` (the cache plugin's dedicated distribution home, where the Redis/KV stores slot in) ship alongside the frozen core — see [docs/ecosystem.md](./docs/ecosystem.md).
 - **Zero runtime dependencies.** `typescript` and `vitest` are dev-only. The whole protocol is a compact (~3 300 lines), typed ES2022 core — including the MessagePack codec and the WebSocket transport.
@@ -136,7 +136,7 @@ curl -s localhost:3000/orbit \
 { "data": { "name": "Ana", "posts": [{ "title": "Why Orbit?" }] } }
 ```
 
-See [examples/node/standalone-server.ts](./examples/node/standalone-server.ts) for a complete zero-dependency server (`npm run example`), the [eleven runnable examples](./docs/examples.md) for one facet each, [docs/benchmarks.md](./docs/benchmarks.md) for the B1–B9 numbers against measured graphql-js (including the real-HTTP wire path and the cache-vs-DataLoader story), [docs/security.md](./docs/security.md) for the threat model, and [docs/ecosystem.md](./docs/ecosystem.md) for the first-party `@orbit/*` package plan.
+See [examples/node/standalone-server.ts](./examples/node/standalone-server.ts) for a complete zero-dependency server (`npm run example`), the [eleven runnable examples](./docs/examples.md) for one facet each, [docs/benchmarks.md](./docs/benchmarks.md) for the B1–B9 numbers against measured graphql-js (including the real-HTTP wire path and the cache-vs-DataLoader story), [docs/security.md](./docs/security.md) for the threat model, [docs/ecosystem.md](./docs/ecosystem.md) for the first-party `@orbit/*` package plan, [docs/protocol-audit.md](./docs/protocol-audit.md) for the spec-vs-code verification, and [docs/spec-vision.md](./docs/spec-vision.md) for the north star behind the spec.
 
 ## Query syntax at a glance
 
@@ -167,13 +167,19 @@ Attach a cache spec to any request — in the envelope or the `x-orbit-cache` he
 
 Register the cache plugin **after** any plugin that transforms data in `onBeforeSerialize`, so the cached value is the final payload — cache hits are served as-is, without re-running transforms.
 
-Mutations return `invalidates` keys so the **client** knows what to clear:
+Server-side invalidation is **automatic and entity-scoped** (spec §8): the
+cache plugin indexes every entry by the entities its query tree reads, and a
+mutation evicts exactly the entries that touch its entity — a `books.create`
+refetches `books` queries while `reviews` queries survive. Mutations also
+return `invalidates` (entity names or exact store keys) so the **client**
+knows what to clear:
 
 ```json
-{ "data": { "success": true, "id": "123" }, "invalidates": ["cache:user:123"] }
+{ "data": { "success": true, "id": "123" }, "invalidates": ["user"] }
 ```
 
-> Server-side invalidation is manual: `cache.invalidate(key)` / `cache.invalidatePrefix('orbit:')`. See [docs/plugins.md](./docs/plugins.md#built-in-the-cache-plugin).
+Precise per-record eviction is deliberately out of scope — it would need data
+semantics the core refuses to own. See [docs/plugins.md](./docs/plugins.md#built-in-the-cache-plugin).
 
 ## Errors
 
@@ -206,6 +212,8 @@ Every failure is an `OrbitError` with a standard code and a correct HTTP status:
 | [Architecture](./docs/architecture.md) | How the engine executes a query, serialization, extension points |
 | [Server integration](./docs/server.md) | Hono, Express, Workers, Bun, Deno, node:http |
 | [Errors](./docs/errors.md) | Error reference and the `onError` hook |
+| [Protocol audit](./docs/protocol-audit.md) | Spec-vs-code verification — every inconsistency found and fixed, what remains |
+| [Spec vision](./docs/spec-vision.md) | The north star: principles as filters, guardrails against drift, alignment of recent work |
 | [Protocol spec](./spec.md) | The canonical, frozen contract — envelope, errors, adapters, realtime & roadmap |
 | [Changelog](./CHANGELOG.md) | Version history |
 
@@ -217,7 +225,7 @@ in as `packages/*`.
 
 ```bash
 pnpm install         # dev dependencies only (typescript, vitest)
-pnpm test            # 324 tests, Vitest (307 core + 13 rest + 4 cache)
+pnpm test            # 380 tests, Vitest (336 core + 13 express + 13 hono + 14 rest + 4 cache)
 pnpm run test:coverage # ~94% stmts / ~88% branch / ~96% lines (see packages/core)
 pnpm run typecheck   # strict TypeScript (builds all packages, then checks examples/bench)
 pnpm run build       # ESM + .d.ts → dist/ in every package

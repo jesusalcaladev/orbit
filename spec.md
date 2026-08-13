@@ -126,9 +126,12 @@ posts(status="published", limit="10") { title, author { name } }
 - **Filters** are passed verbatim to adapters as `Record<string, string>` — the adapter interprets them.
 - **Fields** are projected server-side: only requested leaf fields leave the server.
 - **Relations** become nested queries; their resolvers receive `ctx.parent` with the resolved parent data.
-- Keys are validated for characters (identifier charset), values for their quote/escape
-  structure; the whole envelope is size-capped by `maxPayloadBytes`. Malformed syntax
-  raises `ORBIT_INVALID_QUERY`.
+- Keys are validated for characters (identifier charset) **and length** —
+  entity/field/filter-key names are capped at **128 chars** (`maxKeyLength`,
+  configurable). Values are validated for their quote/escape structure **and
+  length** — capped at **1024 chars** (`maxValueLength`, configurable). The
+  whole envelope is size-capped by `maxPayloadBytes`. Malformed syntax or an
+  over-long key/value raises `ORBIT_INVALID_QUERY` (400).
 
 ---
 
@@ -143,7 +146,9 @@ posts(status="published", limit="10") { title, author { name } }
 ```
 
 - `do` must be `entity.action`. The engine looks up the adapter and calls `mutate(action, args, ctx)` with the verb after the dot.
-- The adapter returns `{ id?, invalidates?, ... }`. `invalidates` (cache keys) is echoed to the client.
+- The adapter returns `{ id?, invalidates?, ... }`. `invalidates` names
+  entities or exact cache keys for server-side eviction (§8) and is echoed to
+  the client so it can evict its own cache too.
 - With `return`, the engine re-queries the sub-graph through the same pipeline (hooks included) and returns it as `data`.
 - Without `return`, the response is `{ data: { success: true, id? } }`.
 - Mutations are **not** streamable.
@@ -261,13 +266,17 @@ header) — a comma- or space-separated spec:
 | `ttl=300` | Fresh for 300 s. |
 | `stale=60` | Serve stale up to 60 s while revalidating in the background (stale-while-revalidate). |
 
-Cache hits are marked `fromCache: true`. Mutations may return `invalidates`
-(cache keys), **echoed to the client** so it can evict its own cache; for
-server-side eviction the app wires the cache plugin's `invalidate`/
-`invalidatePrefix` after writes. The engine itself never auto-evicts — cache
-plugin keys are opaque hashes (`orbit:<hash>`), so app-level keys like
-`cache:user:1` cannot address them; precise tag-based eviction is 🔜 planned.
-The store is pluggable (a zero-dep memory store ships; Redis is planned).
+Cache hits are marked `fromCache: true`. **Server-side eviction is automatic
+and precise at the entity level**: the cache plugin indexes every stored entry
+by the entities its query tree reads (root **and** relations), and the engine
+evicts exactly the entries that touch the mutated entity — a `books.create`
+refetches cached `books` queries while `reviews` queries survive. The
+adapter's `invalidates` may additionally name entities (`['user']`) or exact
+store keys (`cache.keyFor(node)`); it is **echoed to the client** so
+client-side caches can evict too. Eviction stops at entity granularity on
+purpose: per-record precision would require data semantics, and the core
+knows no databases (principle 3). The store is pluggable (a zero-dep memory
+store ships; Redis is planned).
 
 ---
 

@@ -172,10 +172,20 @@ plugins: [createCachePlugin(), maskPlugin]  // ✗ cached value is pre-transform
 
 ### Invalidation
 
-Mutations return `invalidates` keys (`cache:user:123`) for the **client** to clear. The server-side store keys look like `orbit:<hash>` (`cache.keyFor(node)`), so server-side invalidation is explicit:
+Server-side eviction is **automatic and entity-scoped** (spec §8): every
+stored entry is indexed by the entities its query tree reads, and the engine
+evicts exactly the entries that touch the mutated entity — a `books.create`
+refetches `books` queries (even relation reads like `authors → books`) while
+`reviews` queries survive. Mutations may additionally return `invalidates`
+naming entities (`['user']`) or exact store keys; it is echoed to the client
+so client-side caches can evict too. Per-record precision is deliberately out
+of scope — it would require data semantics the core refuses to own.
+
+The imperative surface remains for app-driven eviction:
 
 ```ts
-cache.invalidate(cache.keyFor(parsedNode));   // one key
+cache.invalidateEntity('user');               // evict every entry reading 'user'
+cache.invalidate(cache.keyFor(parsedNode));   // one exact store key
 cache.invalidatePrefix('orbit:');             // by prefix
 cache.clear();                                // everything
 ```

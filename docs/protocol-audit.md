@@ -7,7 +7,7 @@ tests (`packages/core/test/contract.test.ts`, `api-surface.test.ts`).
 
 **Method:** each spec section was read in full; every frozen claim (envelope rules, error codes + statuses, content negotiation, cache semantics, adapter
 surface, realtime frames, plugin pipeline) was checked against the source and
-exercised through the handler (`packages/core/test/` covers 324 cases). The
+exercised through the handler (`packages/core/test/` covers 336 cases). The
 audit itself is a **supplement** to the tests — it documents the contract
 points and the deltas found.
 
@@ -29,7 +29,8 @@ observation (documented, no change required).
 | 7 | Subscription auth context (spec §10) | Spec said the adapter's `subscribe` gets handshake auth context; v0.0.1 authorizes at the upgrade only (`authorize` option) | Over-promise | 🔧 spec corrected (marked 🔜) |
 | 8 | Example count (spec §13) | "9 examples" while 11 node examples + 5 web demos + book API exist | Doc drift | 🔧 spec updated |
 | 9 | gzip without `CompressionStream` (spec §7 vs handler) | Spec conditions gzip on "when the runtime provides CompressionStream"; the handler gzipped on the header alone → a runtime without it would 500 | **Bug** | 🔧 handler now feature-checks `CompressionStream` |
-| 10 | `invalidates` eviction (spec §8 vs engine) | Spec said mutations return `invalidates` "so the cache plugin can evict precisely"; the engine only *echoes* them (no mutation hook exists, and plugin keys are opaque hashes an app-level key like `cache:user:1` can't address) | Over-promise | 🔧 spec reworded (echo + app-wired eviction; tag-based eviction listed as 🔜) |
+| 10 | `invalidates` eviction (spec §8 vs engine) | Spec said mutations return `invalidates` "so the cache plugin can evict precisely"; the engine only *echoed* them (no mutation hook exists, and plugin keys are opaque hashes an app-level key like `cache:user:1` can't address) | **Feature gap** | ✅ implemented: automatic entity-scoped eviction — the plugin indexes entries by the entities in their query tree, the engine evicts on mutation; `invalidates` names extra entities or exact store keys |
+| 13 | OQS key/value length caps (spec §4) | "Validated for length" was reworded away in #4 because only characters/escapes were checked — over-long single tokens were bounded only by the whole-body cap | Hardening | ✅ implemented: `maxKeyLength` (128) / `maxValueLength` (1024), configurable, enforced over HTTP, SSE and WebSocket paths |
 | 11 | Accept negotiation edge cases | msgpack-vs-SSE ties, wildcard-vs-explicit at equal/lower `q` weren't pinned by tests | Verification gap | 🔧 tests added |
 | 12 | `{ query }` / `{ do }` over WebSocket (spec §10) | Spec promised envelope frames on the socket; the transport spoke subscription control frames only — the spec marked it 🔜 | **Feature gap** | ✅ implemented: request/response over WS (correlation `id` outside the frozen envelope, same pipeline + payload as HTTP, `contentType` echoed for plugin-serialized bodies, binary bodies → `null`), 12 e2e tests |
 
@@ -67,9 +68,9 @@ changes).
 - Relation nesting depth enforced per level ✅ (`ORBIT_MAX_DEPTH_EXCEEDED`, 400).
 - Projection: only requested leaf fields leave the server ✅; a node with no
   selection returns the value as-is ✅.
-- "Validated for length" — not implemented (only characters) → 🔧 spec reworded
-  (#4). Residual: individual key/value length is bounded only by the whole-body
-  cap — noted, acceptable.
+- "Validated for length" ✅ — keys capped at 128 chars (`maxKeyLength`) and
+  values at 1024 chars (`maxValueLength`), configurable at the engine and
+  enforced over HTTP, SSE and WebSocket paths (#13).
 
 ### §5 Mutations
 
@@ -140,11 +141,13 @@ changes).
 
 - Spec sources: envelope `cache` field **and** `x-orbit-cache` header ✅
   (envelope wins).
-- `invalidates` from mutations is echoed to the client only — the engine never
-  auto-evicts (no mutation hook in the frozen pipeline; plugin keys are opaque
-  `orbit:<hash>` hashes that app-level keys can't address). Server-side
-  eviction is app-wired (`invalidate`/`invalidatePrefix`), as the book example
-  does. Tag-based precise eviction is 🔜 → spec §8 reworded accordingly (#10).
+- Server-side eviction is automatic and precise at the entity level: the
+  plugin indexes each entry by the entities its query tree reads (root **and**
+  relations), and the engine evicts on mutation — before any `return`
+  re-query, so a post-mutation read is always fresh. `invalidates` may name
+  extra entities or exact store keys and is echoed to the client (#10).
+  Per-record precision is deliberately out of scope — it would require data
+  semantics the core can't own (principle 3).
 - `ttl=`, `stale=`, `ttl=,stale=` combos, and a JSON-object form ✅.
 - **Space-separated specs failed** (spec §8 says "space-separated") → 🔧 parser
   accepts comma **and** space; regression tests added (#1). Trailing separators
@@ -219,8 +222,15 @@ changes).
 | `packages/core/test/negotiate.test.ts` | Pinned Accept tie-breaks and wildcard-vs-q edge cases. |
 | `packages/core/src/realtime/server.ts` | `{ query }` / `{ do }` envelope request/response over the socket (spec §10). |
 | `packages/core/test/realtime-request.test.ts` | 12 e2e tests: query/mutation/return/errors/cache/pipeline/msgpack/mixing/plugin bodies. |
-| `spec.md` | §2 websocket status, §4 length wording, §8 separator + invalidates semantics, §10 resume/after + WS envelope + auth-context claims, §13 example count. |
+| `packages/core/src/parser.ts` | Length caps: `maxKeyLength` (128) / `maxValueLength` (1024), enforced at parse (spec §4). |
+| `packages/core/src/plugins/cache.ts` | Entity index + `invalidateEntity` — precise server-side eviction (spec §8). |
+| `packages/core/src/engine.ts` | Wires the length caps into every parse path; evicts the mutated entity's cache entries after mutations. |
+| `packages/core/src/realtime/hub.ts` | Subscription parsing honors the engine's length caps. |
+| `packages/core/test/parser.test.ts` / `engine.test.ts` / `cache.test.ts` | Length-cap + precision-eviction regression tests. |
+| `examples/node/book/` | Adapters return entity-scoped `invalidates`; the demo shows entity-scoped precision. |
+| `spec.md` | §2 websocket status, §4 length caps, §5 `invalidates` semantics, §8 separator + entity eviction, §10 resume/after + WS envelope + auth-context claims, §13 example count. |
 | `examples/web/server.ts` | Removed the dead `x-orbit-cache-key` forwarding. |
+| `docs/spec-vision.md` | North-star analysis: principles → guardrails → alignment of recent work. |
 
 Everything else checked out consistent. The frozen contract (envelope §3,
 errors §6, adapter §9, pipeline §11) needed no implementation change.
@@ -241,14 +251,6 @@ this is the work queue.
    session beyond the upgrade `authorize` gate. Additive opt-in: `authorize`
    returning a context object the transport forwards to both `execute` and
    (via a new optional hook parameter) adapters.
-2. **Precise server-side cache invalidation.** Today only whole-store / prefix
-   invalidation works server-side; `invalidates` keys are app-level and cannot
-   address the opaque `orbit:<hash>` plugin keys. A tag index (invalidate by
-   entity + filters touched by a mutation) would make §8's "evict precisely"
-   literally true.
-3. **OQS key/value length caps.** Bounded only by `maxPayloadBytes` today;
-   explicit per-key/per-value caps would restore the spec's original "validated
-   for length" promise as hardening.
 
 ### Roadmap (0.1.x → 2.0)
 
