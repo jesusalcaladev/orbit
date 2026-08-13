@@ -20,6 +20,9 @@ importers:
       '@hono/node-server':
         specifier: ^1.13.0
         version: 1.19.17(hono@4.13.1)
+      '@orbit/cloudflare-workers':
+        specifier: workspace:*
+        version: link:packages/cloudflare-workers
       '@orbit/core':
         specifier: workspace:*
         version: link:packages/core
@@ -67,6 +70,22 @@ importers:
         version: 8.21.3
 
   packages/cache:
+    dependencies:
+      '@orbit/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.3
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: ^4.1.10
+        version: 4.1.10(@types/node@24.13.3)(@vitest/coverage-v8@4.1.10)(vite@8.2.1(@types/node@24.13.3)(jiti@2.6.1)(yaml@2.9.0))
+
+  packages/cloudflare-workers:
     dependencies:
       '@orbit/core':
         specifier: workspace:*

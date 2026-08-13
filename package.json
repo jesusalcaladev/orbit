@@ -36,6 +36,7 @@
     "@commitlint/cli": "^21.2.1",
     "@commitlint/config-conventional": "^21.2.0",
     "@hono/node-server": "^1.13.0",
+    "@orbit/cloudflare-workers": "workspace:*",
     "@orbit/core": "workspace:*",
     "@orbit/express": "workspace:*",
     "@orbit/hono": "workspace:*",
