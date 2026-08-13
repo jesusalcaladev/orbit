@@ -30,6 +30,14 @@ describe('parseCacheSpec', () => {
     expect(parseCacheSpec(' { "ttl": 300, "stale": 60 } ')).toEqual({ ttl: 300, stale: 60 });
   });
 
+  it('accepts space-separated specs too (spec §8 wording)', () => {
+    // The spec says "space-separated"; the historical examples use commas —
+    // both must parse, and a space before a comma must not break either.
+    expect(parseCacheSpec('ttl=300 stale=60')).toEqual({ ttl: 300, stale: 60 });
+    expect(parseCacheSpec('ttl=300, stale=60')).toEqual({ ttl: 300, stale: 60 });
+    expect(parseCacheSpec('  ttl=300  stale=60  ')).toEqual({ ttl: 300, stale: 60 });
+  });
+
   it('returns an empty spec for empty input', () => {
     expect(parseCacheSpec('')).toEqual({});
   });
@@ -65,6 +73,15 @@ describe('cache plugin', () => {
     await orbit.execute({ query: 'user(id="1") { name }' });
     await orbit.execute({ query: 'user(id="1") { name }' });
     expect(resolve).toHaveBeenCalledTimes(2);
+  });
+
+  it('caches end to end with a space-separated spec', async () => {
+    const { orbit, resolve } = makeCachedOrbit();
+    const envelope = { query: 'user(id="1") { name }', cache: 'ttl=300 stale=60' };
+    await orbit.execute(envelope);
+    const hit = await orbit.execute(envelope);
+    expect(hit.fromCache).toBe(true);
+    expect(resolve).toHaveBeenCalledTimes(1);
   });
 
   it('reads the spec from the x-orbit-cache header', async () => {

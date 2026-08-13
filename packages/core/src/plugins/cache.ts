@@ -66,10 +66,11 @@ export function createMemoryCacheStore(options: MemoryCacheStoreOptions = {}): C
 /**
  * Parse a cache spec string into a `CacheSpec`.
  *
- * Supported shapes:
+ * Supported shapes (pairs are comma- **or** space-separated, per spec §8):
  * - `"ttl=300"` — hard freshness of 300 s (refetch past that)
  * - `"stale=60"` — always serve, background refresh past 60 s
- * - `"ttl=300,stale=60"` — fresh for 300 s, then serve+refresh until 360 s
+ * - `"ttl=300,stale=60"` / `"ttl=300 stale=60"` — fresh for 300 s, then
+ *   serve+refresh until 360 s
  * - `'{"ttl": 300, "stale": 60}'` — JSON object
  *
  * Throws `ORBIT_INVALID_QUERY` on malformed specs.
@@ -101,8 +102,17 @@ export function parseCacheSpec(raw: string): CacheSpec {
     return spec;
   }
 
+  // A trailing separator is an empty pair (`ttl=1,`) — malformed, reject it
+  // rather than silently dropping it (a trailing comma is still an error even
+  // though commas are now one of the accepted separators).
+  if (/[\s,]$/.test(input)) throw fail();
+
   const spec: CacheSpec = {};
-  for (const part of input.split(',')) {
+  // Comma- AND space-separated: the spec (§8) says "space-separated" while
+  // the historical examples use commas — accept both so a client following
+  // either spelling works. `"ttl=300 stale=60"` used to fail with
+  // ORBIT_INVALID_QUERY (the single part `Number('300 stale=60')` is NaN).
+  for (const part of input.split(/[\s,]+/).filter(Boolean)) {
     const eq = part.indexOf('=');
     if (eq <= 0) throw fail();
     const key = part.slice(0, eq).trim();
