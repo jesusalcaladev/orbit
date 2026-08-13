@@ -53,7 +53,7 @@ transports are all just *adapters* and *plugins* you mount.
 3. **The core knows no databases.** Data sources implement the `DataAdapter` contract; nothing else leaks in. ✅
 4. **Everything else is a plugin.** Auth, cache, logging, custom serializers — hooks, in order, no magic. ✅
 5. **Zero dependencies.** The entire core ships with `npm install`-free. ✅
-6. **Best-in-class wire.** Binary serialization, compression, and streaming are part of the protocol, not an afterthought. ✅ (msgpack/gzip/SSE) · 🔜 (websocket)
+6. **Best-in-class wire.** Binary serialization, compression, and streaming are part of the protocol, not an afterthought. ✅ (msgpack/gzip/SSE + zero-dependency WebSocket realtime)
 7. **Realtime is a first-class citizen.** Subscriptions and delta sync are designed into the adapter contract now, not bolted on later. 🔜 (transport)
 
 ---
@@ -126,7 +126,9 @@ posts(status="published", limit="10") { title, author { name } }
 - **Filters** are passed verbatim to adapters as `Record<string, string>` — the adapter interprets them.
 - **Fields** are projected server-side: only requested leaf fields leave the server.
 - **Relations** become nested queries; their resolvers receive `ctx.parent` with the resolved parent data.
-- Keys/values are validated for length and characters; malformed syntax raises `ORBIT_INVALID_QUERY`.
+- Keys are validated for characters (identifier charset), values for their quote/escape
+  structure; the whole envelope is size-capped by `maxPayloadBytes`. Malformed syntax
+  raises `ORBIT_INVALID_QUERY`.
 
 ---
 
@@ -251,7 +253,8 @@ data: {"level":"done","data":{…complete graph…}}
 
 ## 8. Caching ✅
 
-The client opts in per request with the `cache` field — a space-separated spec:
+The client opts in per request with the `cache` field (or the `x-orbit-cache`
+header) — a comma- or space-separated spec:
 
 | Spec | Meaning |
 | --- | --- |
@@ -259,8 +262,12 @@ The client opts in per request with the `cache` field — a space-separated spec
 | `stale=60` | Serve stale up to 60 s while revalidating in the background (stale-while-revalidate). |
 
 Cache hits are marked `fromCache: true`. Mutations may return `invalidates`
-(cache keys) so the cache plugin can evict precisely. The store is pluggable
-(a zero-dep memory store ships; Redis is planned).
+(cache keys), **echoed to the client** so it can evict its own cache; for
+server-side eviction the app wires the cache plugin's `invalidate`/
+`invalidatePrefix` after writes. The engine itself never auto-evicts — cache
+plugin keys are opaque hashes (`orbit:<hash>`), so app-level keys like
+`cache:user:1` cannot address them; precise tag-based eviction is 🔜 planned.
+The store is pluggable (a zero-dep memory store ships; Redis is planned).
 
 ---
 
@@ -322,9 +329,10 @@ forwards `mutate`/`subscribe` when provided.
 
 ### Transport
 
-- A WebSocket endpoint multiplexes all traffic for a connection. ✅
-- The envelope format is reused on the wire: clients send `{ query }`, `{ do }`
-  or subscription control messages as JSON (or MessagePack) frames. ✅
+- A WebSocket endpoint multiplexes all subscription traffic for a connection. ✅
+- Clients send subscription control messages — `subscribe`, `unsubscribe`,
+  `resume` — as JSON (or MessagePack) frames. Query/`do` envelopes over the
+  socket (`{ query }`, `{ do }`) are 🔜 planned, not part of v0.0.1. ✅ (control frames) · 🔜 (envelope over WS)
 
 ### Subscription protocol (proposed frames)
 
@@ -342,18 +350,21 @@ forwards `mutate`/`subscribe` when provided.
 
 ### Delta sync & reconnect (benchmark B6)
 
-- Clients keep a **resume cursor** (`id` of the last applied patch).
-- On reconnect, the client sends `{ "resume": "sub-1", "after": "evt-42" }`.
-- The server replays **only the patches after the cursor** (target: < 200 ms)
+- Clients keep a **resume cursor** (the last applied `seq` of the
+  per-subscription sequence numbers).
+- On reconnect, the client sends `{ "resume": "sub-1", "after": 42 }`.
+- The server replays **only the patches with `seq > after`** (target: < 200 ms)
   instead of refetching the whole graph (Apollo baseline: 2 s).
-- Deliveries are ordered per subscription; a per-subscription sequence number
-  lets the client detect gaps.
+- Deliveries are ordered per subscription; the sequence number lets the client
+  detect gaps.
 
 ### Heartbeats & lifecycle
 
 - Server pings every 30 s (`ping` frame); a missed ping closes the connection.
 - Subscriptions are tied to the connection; reconnection + resume re-establishes them.
-- The adapter's `subscribe` may attach auth context from the connection handshake.
+- The transport's `authorize` option gates upgrades (token/header checks). Passing
+  request context *into* a subscription's adapter hook is 🔜 planned — v0.0.1
+  authorizes at the handshake only.
 
 ---
 
@@ -459,7 +470,7 @@ Measured on real hardware by `npm run bench` (see `docs/benchmarks.md`).
 
 | Version | Contents | Status |
 | --- | --- | --- |
-| **0.0.1** | Core engine, OQS, envelope, errors, JSON/msgpack/SSE, gzip, caching, plugin pipeline, frozen `DataAdapter` + envelope, memoryAdapter, WebSocket realtime transport + security suite, prototype-pollution hardening, 9 examples, benchmark suite (B1–B9) incl. real-HTTP wire path + cache-vs-DataLoader head-to-heads, CI (GitHub Actions matrix), frozen public API surface (spec §13), spec. | ✅ shipped |
+| **0.0.1** | Core engine, OQS, envelope, errors, JSON/msgpack/SSE, gzip, caching, plugin pipeline, frozen `DataAdapter` + envelope, memoryAdapter, WebSocket realtime transport + security suite, prototype-pollution hardening, 11 node examples + 5 interactive web demos + the layered book API, benchmark suite (B1–B9) incl. real-HTTP wire path + cache-vs-DataLoader head-to-heads, CI (GitHub Actions matrix), frozen public API surface (spec §13), spec. | ✅ shipped |
 | **0.1.x** | First real adapters (Postgres, Redis cache store), federation-friendly relation semantics. | 🔜 |
 | **1.0** | Envelope & error codes locked for backwards compatibility; audit of every section in this spec. | 🔜 |
 | **2.0 🔮** | Federated Orbit servers, native (WASM/C++) parsers to close the B3 wire-path gap (engine core already exceeds the goal), first-party client SDKs. | 🔜 |
