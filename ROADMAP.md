@@ -32,7 +32,7 @@
 | Plugin registry + duplicate-name rejection | ✅ | `src/plugins/registry.ts` |
 | Strict pipeline order (introspectable) | ✅ | `src/plugins/types.ts` `HOOK_ORDER` |
 
-**⬜ First-party plugin packages** (the "brains", shipped as `@orbit/<target>`):  - [ ] **`@orbit/auth`** — hooks `onBeforeResolve`/`onBeforeExecute` with role checks. *Only a hand-written example exists today: `examples/node/03-auth-plugin.ts`.*
+**⬜ First-party plugin packages** (the "brains", shipped as `@orbit/<target>`):  - [ ] **`@orbit/auth`** — hooks `onBeforeResolve`/`onBeforeExecute` with role checks. *Only a hand-written example exists today: `examples/node/authentication/03-auth-plugin.ts`.*
 - [x] **`@orbit/cache`** — shipped as a distribution package that re-exports the plugin from the frozen core (one-way dependency, no `core → cache` cycle). The code-level split is a deliberate breaking change reserved for a future major — see §9.
 - [ ] **`@orbit/redis`** — a `RedisCacheStore` implementing the `CacheStore` contract (contract is done and swappable; only the store impl is missing). Supports TTL/SWR and prefix invalidation.
 - [ ] **`@orbit/kv-cache`** — Cloudflare Workers KV `CacheStore`, same contract as `@orbit/redis` (see below). (`@orbit/cloudflare-workers` is the *server wrapper* package — see §7.)
@@ -196,7 +196,7 @@ artifact on every push.
    `@orbit/hono` + `@orbit/express` — thin raw bridges that pass the
    framework's original request to the engine and pipe the response through
    untouched (full protocol fidelity, see `docs/server.md`), each with 11
-   real end-to-end tests and a layered book-API example (`examples/node/10-express.ts`, `examples/node/11-hono.ts`). **`@orbit/cloudflare-workers`** ships the same book API behind a plain `fetch` handler with Workers bindings on the OrbitContext and Workers-native WebSocket realtime (`examples/node/12-cloudflare-workers.ts`).
+   real end-to-end tests and a layered book-API example (`examples/node/frameworks/10-express.ts`, `examples/node/frameworks/11-hono.ts`). **`@orbit/cloudflare-workers`** ships the same book API behind a plain `fetch` handler with Workers bindings on the OrbitContext and Workers-native WebSocket realtime (`examples/node/frameworks/12-cloudflare-workers.ts`).
 4. **Ship `@orbit/auth`** (easy — hooks already exist).
 5. **Ship `@orbit/redis`** (Redis `CacheStore`), then **`@orbit/kv-cache`**
    (Cloudflare KV).

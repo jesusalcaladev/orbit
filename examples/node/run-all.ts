@@ -4,18 +4,18 @@
  *
  * Run:  node examples/node/run-all.ts   (after `npm run build`)
  */
-import { main as hello } from './01-hello.ts';
-import { main as blog } from './02-blog-relations.ts';
-import { main as auth } from './03-auth-plugin.ts';
-import { main as adapters } from './04-adapter-custom.ts';
-import { main as msgpack } from './05-msgpack.ts';
-import { main as streaming } from './06-streaming-sse.ts';
-import { main as serializer } from './07-serializer-custom.ts';
-import { main as realtime } from './08-realtime.ts';
-import { main as speed } from './09-speed.ts';
-import { main as expressDemo } from './10-express.ts';
-import { main as honoDemo } from './11-hono.ts';
-import { main as workersDemo } from './12-cloudflare-workers.ts';
+import { main as hello } from './fundamentals/01-hello.ts';
+import { main as blog } from './relations/02-blog-relations.ts';
+import { main as auth } from './authentication/03-auth-plugin.ts';
+import { main as adapters } from './adapters/04-adapter-custom.ts';
+import { main as msgpack } from './serialization/05-msgpack.ts';
+import { main as streaming } from './streaming/06-streaming-sse.ts';
+import { main as serializer } from './serialization/07-serializer-custom.ts';
+import { main as realtime } from './streaming/08-realtime.ts';
+import { main as speed } from './performance/09-speed.ts';
+import { main as expressDemo } from './frameworks/10-express.ts';
+import { main as honoDemo } from './frameworks/11-hono.ts';
+import { main as workersDemo } from './frameworks/12-cloudflare-workers.ts';
 
 const runs: Array<{ name: string; run: () => Promise<void> }> = [
   { name: '01 · hello', run: hello },

@@ -23,7 +23,7 @@ import { pathToFileURL } from 'node:url';
 import { createWorker, createRealtimeSession } from '@orbit/cloudflare-workers';
 import { decodeMsgpack, encodeMsgpack } from '@orbit/core';
 import type { WsEvent } from '@orbit/cloudflare-workers';
-import { buildBookOrbit, identifyApiKey } from './book/engine.ts';
+import { buildBookOrbit, identifyApiKey } from '../book/engine.ts';
 
 const ADMIN = 'admin-123';
 const MEMBER = 'ana-456';

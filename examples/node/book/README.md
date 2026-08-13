@@ -54,9 +54,9 @@ directly.
 ## Run
 
 ```sh
-pnpm run build && node examples/node/10-express.ts   # Express on :3100
-pnpm run build && node examples/node/11-hono.ts      # Hono on :3200
-node examples/node/12-cloudflare-workers.ts          # Workers — no port, worker.fetch direct
+pnpm run build && node examples/node/frameworks/10-express.ts   # Express on :3100
+pnpm run build && node examples/node/frameworks/11-hono.ts      # Hono on :3200
+node examples/node/frameworks/12-cloudflare-workers.ts          # Workers — no port, worker.fetch direct
 # or all back-to-back:
 node examples/node/run-all.ts
 ```

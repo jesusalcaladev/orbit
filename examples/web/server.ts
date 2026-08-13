@@ -308,6 +308,10 @@ const postAdapter: DataAdapter = {
       }
       return { id: post.id, likes: post.likes, liked: !liked };
     }
+    if (action === 'clear') {
+      posts.length = 0;
+      return { id: 'all' };
+    }
     throw new Error(`unknown post action '${action}'`);
   },
 };

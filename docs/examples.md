@@ -21,18 +21,18 @@ node examples/node/run-all.ts   # run all twelve, back to back
 
 | File | Demonstrates |
 | :--- | :--- |
-| [`01-hello.ts`](../examples/node/01-hello.ts) | The smallest possible Orbit setup: one adapter, one query, projected output, and the standard error contract. |
-| [`02-blog-relations.ts`](../examples/node/02-blog-relations.ts) | Nested relations (`user { posts { comments } }`), **batching** (counts the `resolve()` calls — the whole graph in a handful of calls), and a mutation with a `return` sub-graph + `invalidates`. |
-| [`03-auth-plugin.ts`](../examples/node/03-auth-plugin.ts) | A real plugin: `onBeforeParse` reads an API key, `onBeforeResolve` enforces roles, `onBeforeExecute` scopes a viewer's filters to themselves. Zero adapter changes. |
-| [`04-adapter-custom.ts`](../examples/node/04-adapter-custom.ts) | The full frozen `DataAdapter` contract written by hand (a `Map`-backed adapter): `resolve`, `batch`, `mutate` and the realtime `subscribe` hook with a zero-dependency event emitter. |
-| [`05-msgpack.ts`](../examples/node/05-msgpack.ts) | MessagePack end-to-end: the envelope is sent as `application/x-msgpack`, the response negotiated via `Accept`, both encoded/decoded with the zero-dependency codec. |
-| [`06-streaming-sse.ts`](../examples/node/06-streaming-sse.ts) | `Accept: text/event-stream` — the graph arrives level by level; the client sees `level: 0`, then `level: 1`, then `level: 'done'` frames. |
-| [`07-serializer-custom.ts`](../examples/node/07-serializer-custom.ts) | A plugin whose `onBeforeSerialize` returns a `SerializedPayload` — the same query served as JSON **or** CSV depending on `Accept`. |
-| [`08-realtime.ts`](../examples/node/08-realtime.ts) | The WebSocket realtime transport end-to-end: subscribe to a live feed, mutations stream events, and a real disconnect → reconnect → `resume` replays the missed patches. |
-| [`09-speed.ts`](../examples/node/09-speed.ts) | **The speed showcase** — every number measured live on this machine: engine core µs/op + RPS, the full fetch handler, the 5-level deep graph (5 DB round-trips vs GraphQL's 1,111), the 20-post feed at a fraction of the JSON bytes, and a realtime fan-out to 50 live sockets. |
-| [`10-express.ts`](../examples/node/10-express.ts) | **The book API on Express** — a layered, best-practice app: domain (`book/data.ts`) → application (`book/engine.ts`) → interface (this file). Relations, authn in the framework + authz in the engine, client-driven caching, realtime via `attachRealtime`. |
-| [`11-hono.ts`](../examples/node/11-hono.ts) | **The same book API on Hono** — identical engine, identical walkthrough, proving the engine is framework-agnostic. |
-| [`12-cloudflare-workers.ts`](../examples/node/12-cloudflare-workers.ts) | **The same book API on Cloudflare Workers** — the engine behind one `fetch` handler, driven through `worker.fetch` with bindings in every context, plus the Workers-native realtime session. |
+| [`01-hello.ts`](../examples/node/fundamentals/01-hello.ts) | The smallest possible Orbit setup: one adapter, one query, projected output, and the standard error contract. |
+| [`02-blog-relations.ts`](../examples/node/relations/02-blog-relations.ts) | Nested relations (`user { posts { comments } }`), **batching** (counts the `resolve()` calls — the whole graph in a handful of calls), and a mutation with a `return` sub-graph + `invalidates`. |
+| [`03-auth-plugin.ts`](../examples/node/authentication/03-auth-plugin.ts) | A real plugin: `onBeforeParse` reads an API key, `onBeforeResolve` enforces roles, `onBeforeExecute` scopes a viewer's filters to themselves. Zero adapter changes. |
+| [`04-adapter-custom.ts`](../examples/node/adapters/04-adapter-custom.ts) | The full frozen `DataAdapter` contract written by hand (a `Map`-backed adapter): `resolve`, `batch`, `mutate` and the realtime `subscribe` hook with a zero-dependency event emitter. |
+| [`05-msgpack.ts`](../examples/node/serialization/05-msgpack.ts) | MessagePack end-to-end: the envelope is sent as `application/x-msgpack`, the response negotiated via `Accept`, both encoded/decoded with the zero-dependency codec. |
+| [`06-streaming-sse.ts`](../examples/node/streaming/06-streaming-sse.ts) | `Accept: text/event-stream` — the graph arrives level by level; the client sees `level: 0`, then `level: 1`, then `level: 'done'` frames. |
+| [`07-serializer-custom.ts`](../examples/node/serialization/07-serializer-custom.ts) | A plugin whose `onBeforeSerialize` returns a `SerializedPayload` — the same query served as JSON **or** CSV depending on `Accept`. |
+| [`08-realtime.ts`](../examples/node/streaming/08-realtime.ts) | The WebSocket realtime transport end-to-end: subscribe to a live feed, mutations stream events, and a real disconnect → reconnect → `resume` replays the missed patches. |
+| [`09-speed.ts`](../examples/node/performance/09-speed.ts) | **The speed showcase** — every number measured live on this machine: engine core µs/op + RPS, the full fetch handler, the 5-level deep graph (5 DB round-trips vs GraphQL's 1,111), the 20-post feed at a fraction of the JSON bytes, and a realtime fan-out to 50 live sockets. |
+| [`10-express.ts`](../examples/node/frameworks/10-express.ts) | **The book API on Express** — a layered, best-practice app: domain (`book/data.ts`) → application (`book/engine.ts`) → interface (this file). Relations, authn in the framework + authz in the engine, client-driven caching, realtime via `attachRealtime`. |
+| [`11-hono.ts`](../examples/node/frameworks/11-hono.ts) | **The same book API on Hono** — identical engine, identical walkthrough, proving the engine is framework-agnostic. |
+| [`12-cloudflare-workers.ts`](../examples/node/frameworks/12-cloudflare-workers.ts) | **The same book API on Cloudflare Workers** — the engine behind one `fetch` handler, driven through `worker.fetch` with bindings in every context, plus the Workers-native realtime session. |
 
 The book API is the reference architecture example: `examples/node/book/`
 holds the shared, framework-agnostic layers that all three hosts serve (see
@@ -52,11 +52,17 @@ browser talking to the protocol:
 
 | Demo | What it shows |
 | :--- | :--- |
-| [`01-chat`](../examples/web/01-chat/) | Realtime chat over Orbit's zero-dependency WebSocket: a `do: chat.send` mutation in every tab, one shared adapter `subscribe` hook, per-message round-trip latency. Open two tabs and talk. |
-| [`02-file-image`](../examples/web/02-file-image/) | Native multipart uploads: one `FormData` body carries the JSON `envelope` field + the file, which lands as a real `File` in `ctx.files` inside `mutate`. Drag & drop, previews served from `/uploads/*`. |
+| [`chat-realtime`](../examples/web/chat-realtime/) | Realtime chat over Orbit's zero-dependency WebSocket: a `do: chat.send` mutation in every tab, one shared adapter `subscribe` hook, per-message round-trip latency. Open two tabs and talk. |
+| [`twitter-post`](../examples/web/twitter-post/) | Native multipart uploads: one `FormData` body carries the JSON `envelope` field + the file, which lands as a real `File` in `ctx.files` inside `mutate`. Compose a post, attach an image, preview it. |
 | [`03-mini-post`](../examples/web/03-mini-post/) | A feed with **nested relations** (`posts { author { name } }`) resolved through the adapter contract and batched per level, plus like/unlike mutations. |
 | [`04-mini-auth`](../examples/web/04-mini-auth/) | Register/log in (scrypt-hashed passwords), the plugin reads `x-orbit-token` into `ctx.state.caller`, and a protected query is denied with `ORBIT_PERMISSION_DENIED` without the token. |
 | [`05-orbit-vs-graphql`](../examples/web/05-orbit-vs-graphql/) | **The A/B lab**: the same chat, the same message bus, two protocols on one server. Send simultaneously to both, or run batches — end-to-end round-trips (send → mutation → shared bus → subscription → your tab) measured live, p50/p95/p99/max, payload bytes, and a comparative chart. |
+
+The node examples live in concept folders under `examples/node/`:
+`fundamentals/`, `relations/`, `authentication/`, `adapters/`, `serialization/`,
+`streaming/`, `performance/` and `frameworks/`. The web demos live under
+`examples/web/` (`chat-realtime/`, `twitter-post/`, `03-mini-post/`,
+`04-mini-auth/`, `05-orbit-vs-graphql/`).
 
 **How the A/B is wired** — `examples/web/server.ts` creates one shared world;
 Orbit serves `/orbit` (handler) + `/realtime` (its WebSocket), graphql-js
@@ -92,5 +98,5 @@ transport and a live speed demo. `10–12` are the reference architecture — th
 same layered book API served by Express, Hono and Cloudflare Workers.
 
 Want to see it move before reading anything? Run
-`node examples/node/09-speed.ts` — it measures the engine on *your* machine in
+`node examples/node/performance/09-speed.ts` — it measures the engine on *your* machine in
 seconds.

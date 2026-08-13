@@ -130,7 +130,7 @@ hooks: {
 }
 ```
 
-See [examples/node/07-serializer-custom.ts](../examples/node/07-serializer-custom.ts) for a working CSV serializer.
+See [examples/node/serialization/07-serializer-custom.ts](../examples/node/serialization/07-serializer-custom.ts) for a working CSV serializer.
 
 ## Size constraints
 

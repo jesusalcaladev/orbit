@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Post · Twitter style — Orbit</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="demo">
+      <div class="demo-head">
+        <a class="back" href="/">← demos</a>
+        <h1>Post</h1>
+        <span class="pill orbit">Orbit WS</span>
+        <span class="pill" id="conn-pill">connecting…</span>
+      </div>
+
+      <div class="panel">
+        <div class="row">
+          <label>
+            <span>What's happening?</span>
+            <textarea id="text" rows="1" placeholder="What's on your mind?" maxlength="280" autocomplete="off"></textarea>
+          </label>
+          <div class="row">
+            <button id="send" class="mint">Post</button>
+            <button id="clear" class="ghost" title="Clear the timeline">Clear</button>
+            <input id="file" type="file" accept="image/*" hidden />
+            <button id="attach" class="ghost" style="margin-left: 8px; font-size: 12px;">Attach</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Timeline</h2>
+        <div id="timeline" class="timeline"></div>
+      </div>
+
+      <div class="stats">
+        <div class="stat">
+          <div class="k">Posts</div>
+          <div class="v" id="count">0</div>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

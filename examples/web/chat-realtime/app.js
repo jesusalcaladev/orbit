@@ -1,17 +1,14 @@
-import { chatHistory, esc, fmtMs, orbit, orbitSocket, statsOf, timeOf, toast } from '../shared.js';
+import { esc, fmtMs, orbit, orbitSocket, statsOf, timeOf, toast } from '../shared.js';
 
 const nameInput = document.getElementById('name');
 const textInput = document.getElementById('text');
 const sendBtn = document.getElementById('send');
 const clearBtn = document.getElementById('clear');
-const feed = document.getElementById('feed');
-const connEl = document.getElementById('conn');
+const chat = document.getElementById('chat');
+const statusEl = document.getElementById('status');
 const connDot = document.getElementById('conn-dot');
 const connPill = document.getElementById('conn-pill');
-const feedHint = document.getElementById('feed-hint');
-const lastEl = document.getElementById('last');
-const avgEl = document.getElementById('avg');
-const p95El = document.getElementById('p95');
+const connLabel = document.getElementById('conn-label');
 const countEl = document.getElementById('count');
 
 // ---- state ----
@@ -34,52 +31,51 @@ function colorOf(author) {
 // ---- rendering ----
 
 function renderEmpty() {
-  if (feed.children.length === 0) {
-    const el = document.createElement('div');
-    el.className = 'empty';
-    el.innerHTML =
-      '<div class="big">💬</div>No messages yet.<br />Say hello — every tab gets it instantly.';
-    feed.appendChild(el);
-  }
+  const empty = chat.querySelector('.empty');
+  if (empty) empty.remove();
+  const el = document.createElement('div');
+  el.className = 'empty';
+  el.innerHTML =
+    '<div class="msg-system">💬</div>No messages yet. Say hello — every tab gets it instantly.';
+  chat.appendChild(el);
+  chat.scrollTop = chat.scrollHeight;
 }
 
 function clearFeed() {
-  feed.innerHTML = '';
+  chat.innerHTML = '';
   renderEmpty();
 }
 
 function addMessage(message, { mine = false, latency } = {}) {
   if (!message || message.id == null || seen.has(String(message.id))) return null;
   seen.add(String(message.id));
-  // Drop the empty-state placeholder once a real message lands.
-  const empty = feed.querySelector('.empty');
+
+  // Remove empty state once a real message lands
+  const empty = chat.querySelector('.empty');
   if (empty) empty.remove();
 
   const row = document.createElement('div');
-  row.className = `msg${mine ? ' mine' : ''}`;
+  row.className = `message${mine ? ' message--own' : ''}`;
   const initial = (message.author || '?').slice(0, 1).toUpperCase();
   row.innerHTML = `
     <div class="avatar" style="background: ${colorOf(message.author)}">${esc(initial)}</div>
     <div class="bubble">
-      <div class="who">${esc(message.author)}</div>
+      <div class="author">${esc(message.author)}</div>
       <div class="text">${esc(message.text)}</div>
-      <div class="when">
-        <span>${timeOf(message.ts)}</span>
-        ${latency !== undefined ? `<span class="rt">↺ ${fmtMs(latency)}</span>` : ''}
-      </div>
+      <div class="timestamp">${timeOf(message.ts)}</div>
     </div>`;
-  feed.appendChild(row);
-  feed.scrollTop = feed.scrollHeight;
+  chat.appendChild(row);
+  chat.scrollTop = chat.scrollHeight;
   countEl.textContent = String(seen.size);
   return row;
 }
 
 function system(line) {
   const el = document.createElement('div');
-  el.className = 'sys';
+  el.className = 'message--system';
   el.textContent = line;
-  feed.appendChild(el);
-  feed.scrollTop = feed.scrollHeight;
+  chat.appendChild(el);
+  chat.scrollTop = chat.scrollHeight;
 }
 
 // ---- latency stats ----
@@ -87,11 +83,8 @@ function system(line) {
 function pushLatency(ms) {
   samples.push(ms);
   if (samples.length > 200) samples.shift();
-  lastEl.textContent = fmtMs(ms);
-  lastEl.classList.add('good');
   const s = statsOf(samples);
-  avgEl.textContent = fmtMs(s.avg);
-  p95El.textContent = fmtMs(s.p95);
+  // Don't render per-message latency in this style; keep it simple
 }
 
 // ---- connection status ----
@@ -103,12 +96,10 @@ function setStatus(state) {
     reconnecting: ['reconnecting…', 'err'],
   };
   const [label, cls] = map[state] ?? ['…', ''];
-  connEl.textContent = label;
-  connEl.className = cls ? `v ${cls}` : 'v';
+  connLabel.textContent = label;
   connDot.className = `dot ${cls}`;
   connPill.className = `pill ${cls}`;
   connPill.textContent = label;
-  feedHint.textContent = state === 'live' ? 'live' : 'reconnecting…';
 }
 
 // ---- history ----
@@ -120,8 +111,7 @@ async function loadHistory() {
     seen.clear();
     clearFeed();
     for (const message of messages) addMessage(message);
-    if (messages.length > 0)
-      system(`joined — ${messages.length} message${messages.length === 1 ? '' : 's'} in the room`);
+    system(`joined — ${messages.length} message${messages.length === 1 ? '' : 's'} in the room`);
     countEl.textContent = String(seen.size);
   } catch (error) {
     toast(error.message, true);
@@ -138,16 +128,12 @@ void orbitSocket({
   subscribe: 'chat { id, author, text, ts, clientId }',
   onStatus: (state) => setStatus(state),
   onAck: (_id, kind, seq) => {
-    // First connect, or a fresh subscribe after the resume window expired:
-    // history is the source of truth. Resume reconnects replay the gap.
     if (!loaded || kind === 'subscribe') loadHistory();
     else if (seq > 0) {
       system('reconnected — caught up on missed messages');
-      feedHint.textContent = 'live';
     }
   },
   onEvent: (event) => {
-    // The bus was cleared — refetch the (now empty) history.
     if (event.type === 'deleted') {
       loadHistory();
       return;
@@ -194,20 +180,15 @@ async function clearRoom() {
     clearFeed();
     countEl.textContent = '0';
     samples.length = 0;
-    lastEl.textContent = '—';
-    avgEl.textContent = '—';
-    p95El.textContent = '—';
   } catch (error) {
     toast(error.message, true);
   }
 }
 
-sendBtn.addEventListener('click', send);
-textInput.addEventListener('keydown', (event) => {
-  if (event.key === 'Enter') send();
-});
-clearBtn.addEventListener('click', clearRoom);
+// ---- first paint ----
 
-// First paint: empty-state + connection is handled by the socket callbacks.
 setStatus('connecting');
 renderEmpty();
+
+// Initialize inputs after first render
+setTimeout(() => nameInput.focus(), 100);

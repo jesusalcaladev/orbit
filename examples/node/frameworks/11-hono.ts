@@ -19,8 +19,8 @@
 import { pathToFileURL } from 'node:url';
 import { serve } from '@hono/node-server';
 import { attachRealtime, createHonoApp } from '@orbit/hono';
-import { buildBookOrbit, identifyApiKey } from './book/engine.ts';
-import { runBookDemo } from './book/demo.ts';
+import { buildBookOrbit, identifyApiKey } from '../book/engine.ts';
+import { runBookDemo } from '../book/demo.ts';
 
 export async function main(): Promise<void> {
   const port = Number(process.env.PORT) || 3200;
