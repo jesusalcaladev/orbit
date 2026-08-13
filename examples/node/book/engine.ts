@@ -98,11 +98,12 @@ function timingPlugin(): OrbitPlugin {
  *   books, book → reviews) with the N+1 fix from `memoryAdapter.batch`.
  * - Mutations validate in the repository and are wrapped into protocol
  *   errors (`ORBIT_FILTER_INVALID`, `ORBIT_PERMISSION_DENIED`, …).
- * - Client-driven caching: the cache plugin is mounted explicitly so the
- *   engine can invalidate it. Clients opt a request in with
- *   `x-orbit-cache: ttl=60`; any mutation that changes data clears the store
- *   (cache keys are opaque `orbit:<hash>` — a production app would track
- *   query keys and invalidate precisely; clearing is the honest generic).
+ * - Client-driven caching: the cache plugin is mounted explicitly. Clients
+ *   opt a request in with `x-orbit-cache: ttl=60`. Server-side eviction is
+ *   automatic and precise at the entity level (spec §8): the engine evicts
+ *   every cached query that reads the mutated entity, and each adapter also
+ *   returns `invalidates` naming the entities it changed — so a `books`
+ *   mutation refetches `books` queries while the `reviews` cache survives.
  * - Realtime: `reviews` exposes a `subscribe` hook over the repository's
  *   change notifications, so a WebSocket subscription receives review
  *   creations as events (spec §10).
@@ -110,9 +111,6 @@ function timingPlugin(): OrbitPlugin {
 export function buildBookOrbit(): Orbit {
   const repo = new BookRepository();
   const cache = createCachePlugin({ headerName: 'x-orbit-cache' });
-
-  /** A mutation changed data — drop every cached query so reads refetch. */
-  const invalidateCache = () => cache.invalidatePrefix('orbit:');
 
   return createOrbit({
     plugins: [cache, policyPlugin(), timingPlugin()],
@@ -150,8 +148,9 @@ export function buildBookOrbit(): Orbit {
               year: Number(payload.year),
               authorId: String(payload.authorId ?? ''),
             });
-            invalidateCache();
-            return { id: book.id };
+            // The engine auto-evicts 'books' entries anyway; naming it here is
+            // explicit and self-documenting for the client-side cache too.
+            return { id: book.id, invalidates: ['books'] };
           }
           if (action === 'remove') {
             if (caller.role !== 'admin') {
@@ -161,8 +160,7 @@ export function buildBookOrbit(): Orbit {
             if (!repo.removeBook(id)) {
               throw new OrbitError(ErrorCode.FILTER_INVALID, `No book with id '${id}'`);
             }
-            invalidateCache();
-            return { success: true };
+            return { success: true, invalidates: ['books'] };
           }
           throw new OrbitError(ErrorCode.MUTATION_FAILED, `books.${action} is not supported`);
         },
@@ -190,12 +188,11 @@ export function buildBookOrbit(): Orbit {
                 text: String(payload.text ?? ''),
               });
               // Ordering note: the realtime fan-out (domain listener → hub →
-              // socket) happens synchronously inside addReview, and this
-              // invalidation completes in the same synchronous block — before
-              // the socket write is flushed, so a subscriber re-querying after
-              // the event can never hit a stale cached read.
-              invalidateCache();
-              return { id: review.id };
+              // socket) happens synchronously inside addReview, and the
+              // engine's entity eviction runs in the same synchronous block —
+              // before the HTTP response flushes, so a subscriber re-querying
+              // after the event can never hit a stale cached read.
+              return { id: review.id, invalidates: ['reviews'] };
             } catch (error) {
               // Repository errors are domain messages — map onto the protocol.
               throw new OrbitError(

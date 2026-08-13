@@ -159,18 +159,23 @@ export async function runBookDemo(base: string, host: string): Promise<void> {
   const frames = (await sse.text()).split('\n\n').filter((frame) => frame.trim().length > 0);
   line('sse', sse, `${frames.length} frames → ${frames[0]?.split('\n')[0]}`);
 
-  // 9 · The cache lifecycle, end to end: opt-in → hit → invalidated by a
-  // mutation → fresh. Cache keys are opaque hashes; the engine clears the
-  // store whenever a mutation changes data.
+  // 9 · Precise server-side cache eviction (spec §8): opt-in → hit → a
+  // mutation refetches exactly the queries that read the mutated entity,
+  // while unrelated caches survive. The cache plugin indexes every entry by
+  // the entities in its query tree, and the engine evicts on mutation.
   const cacheHeaders = { 'content-type': 'application/json', 'x-orbit-cache': 'ttl=60' };
-  const cacheQuery = jsonBody({ query: 'books { id, title }' });
-  const c1 = (await post(endpoint, cacheQuery, cacheHeaders).then((r) => r.json())) as OrbitBody;
-  const c2 = (await post(endpoint, cacheQuery, cacheHeaders).then((r) => r.json())) as OrbitBody;
+  const booksQuery = jsonBody({ query: 'books { id, title }' });
+  const reviewsQuery = jsonBody({ query: 'reviews { id, rating }' });
   const bookCount = (data: unknown) => ((data as unknown[] | undefined) ?? []).length;
+  const b1 = (await post(endpoint, booksQuery, cacheHeaders).then((r) => r.json())) as OrbitBody;
+  const b2 = (await post(endpoint, booksQuery, cacheHeaders).then((r) => r.json())) as OrbitBody;
+  const rv1 = (await post(endpoint, reviewsQuery, cacheHeaders).then((r) => r.json())) as OrbitBody;
+  const rv2 = (await post(endpoint, reviewsQuery, cacheHeaders).then((r) => r.json())) as OrbitBody;
   console.log(
-    `  ${'cache'.padEnd(16)} ${'200'.padEnd(4)} ${bookCount(c1.data)} books (miss) → ${bookCount(c2.data)} books, fromCache: ${c2.fromCache === true}`,
+    `  ${'cache'.padEnd(16)} ${'200'.padEnd(4)} ${bookCount(b1.data)} books (miss) → ${bookCount(b2.data)} books, fromCache: ${b2.fromCache === true} · ${bookCount(rv1.data)} reviews (miss) → ${bookCount(rv2.data)} reviews, fromCache: ${rv2.fromCache === true}`,
   );
 
+  // A books mutation invalidates 'books' — the books entry refetches…
   const rmMember = await post(
     endpoint,
     jsonBody({ do: 'books.remove', args: { filter: { id: createdId } } }),
@@ -185,9 +190,11 @@ export async function runBookDemo(base: string, host: string): Promise<void> {
   console.log(
     `  ${'books.remove'.padEnd(16)} ${String(rmAdmin.status).padEnd(4)} member → ${rmMember.status} ${rmErr.error?.code ?? '?'} | admin ${await rmAdmin.text()}`,
   );
-  const c3 = (await post(endpoint, cacheQuery, cacheHeaders).then((r) => r.json())) as OrbitBody;
+  const b3 = (await post(endpoint, booksQuery, cacheHeaders).then((r) => r.json())) as OrbitBody;
+  // …while the reviews cache survives (entity-scoped precision).
+  const rv3 = (await post(endpoint, reviewsQuery, cacheHeaders).then((r) => r.json())) as OrbitBody;
   console.log(
-    `  ${'cache'.padEnd(16)} ${'200'.padEnd(4)} after mutation → ${bookCount(c3.data)} books, fromCache: ${c3.fromCache === true} (invalidated → refetch)`,
+    `  ${'cache'.padEnd(16)} ${'200'.padEnd(4)} after books.remove → ${bookCount(b3.data)} books, fromCache: ${b3.fromCache === true} (refetch) · ${bookCount(rv3.data)} reviews, fromCache: ${rv3.fromCache === true} (survived)`,
   );
 
   // 10 · Realtime: a WebSocket subscription receives the mutation as an event.

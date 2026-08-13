@@ -139,6 +139,25 @@ function cacheKeyFor(node: QueryNode): string {
   return `orbit:${fnv1a64(treeKey(node))}`;
 }
 
+/**
+ * Every entity a query tree reads (root + relations, deduped). Powers
+ * precise server-side eviction: a mutation on `user` evicts exactly the
+ * cached queries that read `user` — anywhere in their tree.
+ */
+function collectEntities(node: QueryNode): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const walk = (n: QueryNode) => {
+    if (!seen.has(n.entity)) {
+      seen.add(n.entity);
+      out.push(n.entity);
+    }
+    for (const child of Object.values(n.relations)) walk(child);
+  };
+  walk(node);
+  return out;
+}
+
 export interface CachePluginOptions {
   /** Cache store. Defaults to an in-memory store. */
   store?: CacheStore;
@@ -155,6 +174,12 @@ export interface CachePlugin extends OrbitPlugin {
   invalidate(key: string): void;
   /** Invalidate every key starting with a prefix. */
   invalidatePrefix(prefix: string): void;
+  /**
+   * Evict every entry whose query reads this entity — root or relation
+   * (precise server-side invalidation, spec §8). The engine calls this
+   * automatically after every mutation on the mutated entity.
+   */
+  invalidateEntity(entity: string): void;
   /** Clear the whole store. */
   clear(): void;
   /** Compute the cache key for a parsed query node. */
@@ -180,6 +205,32 @@ export function createCachePlugin(options: CachePluginOptions = {}): CachePlugin
   const headerName = options.headerName ?? DEFAULT_HEADER;
   const defaultTtl = options.defaultTtl ?? 300;
   const revalidating = new Set<string>();
+  // Entity → cache keys index, mirror of the store. Every entry is tagged
+  // with the entities its query tree reads; `invalidateEntity` walks this
+  // index so a mutation evicts exactly the queries that touch its entity.
+  // Invariant: entries are indexed on store and unindexed on delete/clear.
+  // A store that self-evicts by capacity (maxEntries) can drop a key the
+  // index still knows — benign: `invalidateEntity` deletes already-gone
+  // keys (no-ops) and then clears the whole entity bucket.
+  const entityIndex = new Map<string, Set<string>>();
+
+  const indexKey = (key: string, node: QueryNode) => {
+    for (const entity of collectEntities(node)) {
+      let keys = entityIndex.get(entity);
+      if (!keys) {
+        keys = new Set();
+        entityIndex.set(entity, keys);
+      }
+      keys.add(key);
+    }
+  };
+
+  const unindexKey = (key: string) => {
+    for (const keys of entityIndex.values()) keys.delete(key);
+    const empty: string[] = [];
+    for (const [entity, keys] of entityIndex) if (keys.size === 0) empty.push(entity);
+    for (const entity of empty) entityIndex.delete(entity);
+  };
 
   const readSpec = (ctx: OrbitContext): CacheSpec => {
     const raw = ctx.envelope?.cache ?? ctx.headers?.get(headerName);
@@ -194,15 +245,26 @@ export function createCachePlugin(options: CachePluginOptions = {}): CachePlugin
     store,
     invalidate: (key) => {
       store.delete(key);
+      unindexKey(key);
     },
     invalidatePrefix: (prefix) => {
       if (!store.keys) return;
       for (const key of store.keys()) {
-        if (key.startsWith(prefix)) store.delete(key);
+        if (key.startsWith(prefix)) {
+          store.delete(key);
+          unindexKey(key);
+        }
       }
+    },
+    invalidateEntity: (entity) => {
+      const keys = entityIndex.get(entity);
+      if (!keys) return;
+      for (const key of [...keys]) store.delete(key);
+      entityIndex.delete(entity);
     },
     clear: () => {
       store.clear();
+      entityIndex.clear();
     },
     keyFor: (node) => cacheKeyFor(node),
 
@@ -255,11 +317,12 @@ export function createCachePlugin(options: CachePluginOptions = {}): CachePlugin
         return { shortCircuit: entry.value };
       },
 
-      async onBeforeSerialize({ data, ctx }) {
+      async onBeforeSerialize({ data, node, ctx }) {
         if (ctx.state?.[SKIP_KEY]) return;
         const miss = ctx.state?.[MISS_KEY] as { key: string; query: string } | undefined;
         if (!miss) return;
         store.set(miss.key, { value: data, createdAt: Date.now(), query: miss.query });
+        indexKey(miss.key, node);
         delete ctx.state![MISS_KEY];
       },
     },

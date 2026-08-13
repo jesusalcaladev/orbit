@@ -237,6 +237,33 @@ describe('cache plugin', () => {
     expect(resolve).toHaveBeenCalledTimes(3);
   });
 
+  it('invalidateEntity evicts exactly the entity-scoped entries', async () => {
+    const bookResolve = vi.fn(() => [{ id: 'b1' }]);
+    const reviewResolve = vi.fn(() => [{ id: 'r1' }]);
+    const cache = createCachePlugin({ store: createMemoryCacheStore() });
+    const orbit = createOrbit({
+      adapters: memoryAdapter([
+        { entity: 'book', resolve: bookResolve },
+        { entity: 'review', resolve: reviewResolve },
+      ]),
+      plugins: [cache],
+    });
+    const bookEnv = { query: 'book { id }', cache: 'ttl=60' };
+    const reviewEnv = { query: 'review { id }', cache: 'ttl=60' };
+    await orbit.execute(bookEnv);
+    await orbit.execute(reviewEnv);
+    await orbit.execute(bookEnv);
+    await orbit.execute(reviewEnv);
+    expect(bookResolve).toHaveBeenCalledTimes(1);
+    expect(reviewResolve).toHaveBeenCalledTimes(1);
+
+    cache.invalidateEntity('book');
+    await orbit.execute(bookEnv);
+    expect(bookResolve).toHaveBeenCalledTimes(2);
+    await orbit.execute(reviewEnv);
+    expect(reviewResolve).toHaveBeenCalledTimes(1);
+  });
+
   it('evicts the oldest entry beyond the capacity cap', () => {
     const store = createMemoryCacheStore({ maxEntries: 2 });
     store.set('a', { value: 1, createdAt: 1, query: '' });
@@ -245,5 +272,95 @@ describe('cache plugin', () => {
     expect(store.get('a')).toBeUndefined();
     expect(store.get('b')).toBeDefined();
     expect(store.get('c')).toBeDefined();
+  });
+});
+
+describe('precise server-side eviction (spec §8)', () => {
+  it('a mutation evicts only the entries that read the mutated entity', async () => {
+    const bookResolve = vi.fn(() => [{ id: 'b1' }]);
+    const reviewResolve = vi.fn(() => [{ id: 'r1' }]);
+    const cache = createCachePlugin();
+    const orbit = createOrbit({
+      adapters: memoryAdapter([
+        {
+          entity: 'book',
+          resolve: bookResolve,
+          mutate: () => ({ success: true }),
+        },
+        { entity: 'review', resolve: reviewResolve },
+      ]),
+      plugins: [cache],
+    });
+    const bookEnv = { query: 'book { id }', cache: 'ttl=60' };
+    const reviewEnv = { query: 'review { id }', cache: 'ttl=60' };
+
+    await orbit.execute(bookEnv);
+    await orbit.execute(reviewEnv);
+    await orbit.execute(bookEnv);
+    await orbit.execute(reviewEnv);
+    expect(bookResolve).toHaveBeenCalledTimes(1);
+    expect(reviewResolve).toHaveBeenCalledTimes(1);
+
+    // A mutation on 'book' refetches the book cache…
+    await orbit.execute({ do: 'book.create' });
+    await orbit.execute(bookEnv);
+    expect(bookResolve).toHaveBeenCalledTimes(2);
+    // …while the review cache survives untouched (entity-scoped precision).
+    await orbit.execute(reviewEnv);
+    expect(reviewResolve).toHaveBeenCalledTimes(1);
+  });
+
+  it('indexes relation entities too — a mutation evicts queries that read it anywhere', async () => {
+    const cache = createCachePlugin();
+    const orbit = createOrbit({
+      adapters: memoryAdapter([
+        {
+          entity: 'book',
+          resolve: () => [{ id: 'b1', reviews: [{ id: 'r1' }] }],
+        },
+        {
+          entity: 'reviews',
+          resolve: () => [],
+          mutate: () => ({ success: true }),
+        },
+      ]),
+      plugins: [cache],
+    });
+    // This tree reads BOTH 'book' and 'reviews' — a reviews mutation must
+    // evict it, even though 'reviews' is only a relation, not the root.
+    const env = { query: 'book { id, reviews { id } }', cache: 'ttl=60' };
+    await orbit.execute(env);
+    const hit = await orbit.execute(env);
+    expect(hit.fromCache).toBe(true);
+
+    await orbit.execute({ do: 'reviews.add' });
+    const after = await orbit.execute(env);
+    expect(after.fromCache).toBe(false);
+  });
+
+  it('evicts additional entities named in invalidates', async () => {
+    const cache = createCachePlugin();
+    const orbit = createOrbit({
+      adapters: memoryAdapter([
+        {
+          entity: 'user',
+          resolve: vi.fn(({ id }: { id?: string }) => users.find((u) => u.id === id)),
+        },
+        {
+          entity: 'post',
+          resolve: () => [],
+          // The adapter declares that this mutation also invalidates 'user'.
+          mutate: () => ({ success: true, invalidates: ['user'] }),
+        },
+      ]),
+      plugins: [cache],
+    });
+    const userEnv = { query: 'user(id="1") { name }', cache: 'ttl=60' };
+    await orbit.execute(userEnv);
+    await orbit.execute(userEnv);
+
+    await orbit.execute({ do: 'post.create' });
+    const after = await orbit.execute(userEnv);
+    expect(after.fromCache).toBe(false);
   });
 });
