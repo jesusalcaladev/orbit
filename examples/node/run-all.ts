@@ -15,6 +15,7 @@ import { main as realtime } from './08-realtime.ts';
 import { main as speed } from './09-speed.ts';
 import { main as expressDemo } from './10-express.ts';
 import { main as honoDemo } from './11-hono.ts';
+import { main as workersDemo } from './12-cloudflare-workers.ts';
 
 const runs: Array<{ name: string; run: () => Promise<void> }> = [
   { name: '01 · hello', run: hello },
@@ -28,6 +29,7 @@ const runs: Array<{ name: string; run: () => Promise<void> }> = [
   { name: '09 · speed showcase', run: speed },
   { name: '10 · book API on express', run: expressDemo },
   { name: '11 · book API on hono', run: honoDemo },
+  { name: '12 · book API on workers', run: workersDemo },
 ];
 
 for (const { name, run } of runs) {
