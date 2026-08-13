@@ -29,8 +29,8 @@ packages/
   plugins/   @orbit/auth            ⬜ OrbitPlugin — authn/authz hooks
              @orbit/logging         ⬜ OrbitPlugin — span timing / observability
              @orbit/cache           ✅ shipped — distribution home (impl stays in frozen core)
-  servers/   @orbit/hono            ⬜ handler wrapper for Hono
-             @orbit/express         ⬜ handler wrapper for Express
+  servers/   @orbit/hono            ✅ shipped — thin handler wrapper for Hono
+             @orbit/express         ✅ shipped — thin handler wrapper for Express
              @orbit/cloudflare-workers ⬜ handler wrapper for Workers
   clients/   @orbit/client          ⬜ core frontend client (deferred)
              @orbit/client-react    ⬜ cache-aware React bindings (deferred)
@@ -127,9 +127,17 @@ cache-plugin ordering rule.
 
 ### The handler (frozen — `(Request, ctx?) => Promise<Response>`)
 
-Server wrappers (`@orbit/hono`, `@orbit/express`,
-`@orbit/cloudflare-workers`) are ~20-line adapters that drop
-`orbit.handler` into the framework's request/response cycle. See
+Server wrappers wrap the handler for a specific framework. **`@orbit/hono`
+and `@orbit/express` are shipped** as *thin raw bridges*: the framework's
+original request (raw body + headers) goes straight to the engine's handler,
+and the engine's response — status, every header, and the body including SSE
+streams — comes back untouched. That keeps the full protocol intact
+(JSON/msgpack input, JSON/msgpack/SSE output, gzip, multipart uploads, the
+standard error contract) with no re-serialization in the wrapper. Both also
+export `attachRealtime(server, orbit, options)`, which mounts the core
+WebSocket transport on the same http server (one call — the engine's
+subscription feed stays the single source of truth).
+`@orbit/cloudflare-workers` is still on the roadmap. See
 [docs/server.md](./server.md) for each host.
 
 ## Build order (from ROADMAP §9)
@@ -151,8 +159,9 @@ Server wrappers (`@orbit/hono`, `@orbit/express`,
    backends that make the B6/B9 cache story production-ready. They implement
    the `CacheStore` contract re-exported by `@orbit/cache`.
 5. **`@orbit/postgres` + `@orbit/mongo`** — the flagship DB adapters.
-6. **Server wrappers** and — once the protocol is proven stable — the
-   **clients**.
+6. **Server wrappers** ✅ (`@orbit/hono`, `@orbit/express` — thin raw
+   bridges, shipped with real end-to-end tests) and — once the protocol is
+   proven stable — the **clients**.
 
 Each step is a separate conventional commit (`feat: add @orbit/redis`), its
 own `packages/<name>` workspace, tests, docs row, ROADMAP flip and CHANGELOG

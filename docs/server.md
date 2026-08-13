@@ -25,7 +25,7 @@ const server = createServer(async (req, res) => {
 });
 ```
 
-A complete version ships in [examples/standalone-server.ts](../examples/standalone-server.ts) — run it with `npm run example`.
+A complete version ships in [examples/node/standalone-server.ts](../examples/node/standalone-server.ts) — run it with `npm run example`.
 
 ## Hono
 
@@ -41,6 +41,13 @@ const orbit = createOrbit({
 
 const app = new Hono();
 app.post('/orbit', (c) => orbit.handler(c.req.raw, c.env));
+```
+
+Or use the thin wrapper — same thing, one line:
+
+```ts
+import { createHonoApp } from '@orbit/hono';
+const app = createHonoApp(orbit, { path: '/orbit' });
 ```
 
 ## Express
@@ -63,6 +70,32 @@ app.post('/orbit', async (req, res) => {
   );
   res.status(response.status).type('application/json').send(await response.text());
 });
+```
+
+Or use the thin wrapper — it reads the raw body itself, so no `express.json()`
+is needed and MessagePack / multipart uploads keep working:
+
+```ts
+import { createExpressApp } from '@orbit/express';
+const app = createExpressApp(orbit, { path: '/orbit' });
+```
+
+Both wrappers (`@orbit/express`, `@orbit/hono`) also mount the realtime
+WebSocket transport on the same http server:
+
+```ts
+import { attachRealtime } from '@orbit/express';
+const server = app.listen(3000);
+const realtime = attachRealtime(server, orbit); // ws://localhost:3000/realtime
+```
+
+Call `attachRealtime` **once** per server (a second call throws). On shutdown,
+close the realtime sessions **before** the server — upgraded sockets keep
+`server.close()` waiting forever otherwise:
+
+```ts
+realtime.close(); // terminate every WebSocket session
+server.close();
 ```
 
 ## Cloudflare Workers

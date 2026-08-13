@@ -13,7 +13,7 @@
 | Item | Status | Where |
 | :--- | :--- | :--- |
 | Thin zero-dependency contract layer (no magic ORM) | ✅ | `src/`, `package.json` (0 runtime deps) |
-| Framework-agnostic handler `(Request) => Response` | ✅ | `Orbit#handler`, `docs/server.md`, `examples/standalone-server.ts` |
+| Framework-agnostic handler `(Request) => Response` | ✅ | `Orbit#handler`, `docs/server.md`, `examples/node/standalone-server.ts` |
 | Filters passed verbatim, no schema lock-in | ✅ | `src/types.ts` `Filters`, `src/adapters/types.ts` |
 
 ---
@@ -32,8 +32,7 @@
 | Plugin registry + duplicate-name rejection | ✅ | `src/plugins/registry.ts` |
 | Strict pipeline order (introspectable) | ✅ | `src/plugins/types.ts` `HOOK_ORDER` |
 
-**⬜ First-party plugin packages** (the "brains", shipped as `@orbit/<target>`):
-- [ ] **`@orbit/auth`** — hooks `onBeforeResolve`/`onBeforeExecute` with role checks. *Only a hand-written example exists today: `examples/03-auth-plugin.ts`.*
+**⬜ First-party plugin packages** (the "brains", shipped as `@orbit/<target>`):  - [ ] **`@orbit/auth`** — hooks `onBeforeResolve`/`onBeforeExecute` with role checks. *Only a hand-written example exists today: `examples/node/03-auth-plugin.ts`.*
 - [x] **`@orbit/cache`** — shipped as a distribution package that re-exports the plugin from the frozen core (one-way dependency, no `core → cache` cycle). The code-level split is a deliberate breaking change reserved for a future major — see §9.
 - [ ] **`@orbit/redis`** — a `RedisCacheStore` implementing the `CacheStore` contract (contract is done and swappable; only the store impl is missing). Supports TTL/SWR and prefix invalidation.
 - [ ] **`@orbit/kv-cache`** — Cloudflare Workers KV `CacheStore`, same contract as `@orbit/redis` (see below). (`@orbit/cloudflare-workers` is the *server wrapper* package — see §7.)
@@ -127,8 +126,8 @@ Future structure (each as its own published package):
 
 ```
 @orbit/core                 ✅ (exists — engine, hooks, OQS, envelope, memory adapter)
-@orbit/hono                 ⬜ thin server wrapper for the Hono handler
-@orbit/express              ⬜ thin server wrapper for Express
+@orbit/hono                 ✅ thin server wrapper — the Orbit handler on Hono
+@orbit/express              ✅ thin server wrapper — the Orbit handler on Express
 @orbit/cloudflare-workers   ⬜ workers handler wrapper (pairs with @orbit/kv-cache)
 @orbit/bun / @orbit/deno    ⬜ (if desired — handler already runs anywhere)
 @orbit/postgres             ⬜
@@ -193,7 +192,11 @@ artifact on every push.
    `@orbit/cache` (distribution home of the cache plugin — re-exports from the
    frozen core to keep the dependency direction one-way; Redis/KV stores
    implement the re-exported `CacheStore` contract). (`@orbit/core` keeps only
-   the memory adapter as reference.)
+   the memory adapter as reference.) **Server wrappers shipped too:**
+   `@orbit/hono` + `@orbit/express` — thin raw bridges that pass the
+   framework's original request to the engine and pipe the response through
+   untouched (full protocol fidelity, see `docs/server.md`), each with 11
+   real end-to-end tests and a layered book-API example (`examples/node/10-express.ts`, `examples/node/11-hono.ts`).
 4. **Ship `@orbit/auth`** (easy — hooks already exist).
 5. **Ship `@orbit/redis`** (Redis `CacheStore`), then **`@orbit/kv-cache`**
    (Cloudflare KV).
@@ -224,5 +227,5 @@ artifact on every push.
 | Redis cache store | ⬜ (`@orbit/redis`) |
 | Cloudflare KV cache store | ⬜ (`@orbit/kv-cache`) |
 | Postgres / Mongo adapters | ⬜ (`@orbit/postgres`, `@orbit/mongo`) |
-| Server wrappers | ⬜ (`@orbit/hono`, `@orbit/express`, `@orbit/cloudflare-workers`) |
+| Server wrappers | 🟡 (`@orbit/hono` ✅, `@orbit/express` ✅ — thin raw bridges + realtime `attachRealtime`; `@orbit/cloudflare-workers` ⬜) |
 | Clients | ⬜ (`@orbit/client`, `@orbit/client-react`, defer) |
