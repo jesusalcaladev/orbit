@@ -24,6 +24,7 @@
 import type { Server, IncomingMessage } from 'node:http';
 import type { Socket } from 'node:net';
 import type { Duplex } from 'node:stream';
+import { validateEnvelope } from '../envelope.js';
 import { ErrorCode, OrbitError, toOrbitError } from '../errors.js';
 import type { Orbit } from '../engine.js';
 import { decodeMsgpack, encodeMsgpack } from '../serialize/msgpack.js';
@@ -75,6 +76,7 @@ const MAX_FRAGMENT_COUNT = 1000;
 
 export class RealtimeServer {
   readonly #hub: SubscriptionHub;
+  readonly #orbit: Orbit;
   readonly #options: Required<
     Pick<
       RealtimeServerOptions,
@@ -87,6 +89,7 @@ export class RealtimeServer {
 
   constructor(orbit: Orbit, options: RealtimeServerOptions = {}) {
     this.#hub = new SubscriptionHub(orbit);
+    this.#orbit = orbit;
     this.#options = {
       path: options.path ?? DEFAULT_PATH,
       maxMessageBytes: options.maxMessageBytes ?? DEFAULT_MAX_MESSAGE_BYTES,
@@ -163,7 +166,7 @@ export class RealtimeServer {
           // (fan-out, resume replay) is not held back by delayed-ACK waits.
           (socket as Socket).setNoDelay(true);
           socket.write(upgradeResponse(key));
-          const session = new Session(socket, this.#hub, this.#options);
+          const session = new Session(socket, this.#orbit, this.#hub, this.#options);
           this.#sessions.add(session);
           socket.on('data', (chunk) => session.onData(chunk));
           socket.on('close', () => {
@@ -206,6 +209,7 @@ interface SessionOptions {
 
 class Session {
   readonly #socket: Duplex;
+  readonly #orbit: Orbit;
   readonly #hub: SubscriptionHub;
   readonly #options: SessionOptions;
   readonly #decoder: FrameDecoder;
@@ -219,8 +223,9 @@ class Session {
   #lastPong = Date.now();
   #closing = false;
 
-  constructor(socket: Duplex, hub: SubscriptionHub, options: SessionOptions) {
+  constructor(socket: Duplex, orbit: Orbit, hub: SubscriptionHub, options: SessionOptions) {
     this.#socket = socket;
+    this.#orbit = orbit;
     this.#hub = hub;
     this.#options = options;
     this.#decoder = new FrameDecoder(options.maxMessageBytes);
@@ -396,17 +401,29 @@ class Session {
       );
       return;
     }
-    try {
-      this.#dispatch(message);
-    } catch (error) {
+    // #dispatch is async — `{ query }` / `{ do }` envelopes execute on the
+    // engine (spec §10 request/response). Subscription-control rejections
+    // keep the exact same `{ error }` wire shape as before.
+    this.#dispatch(message).catch((error) => {
       const orbitError = toOrbitError(error);
       this.#send(this.#encode({ error: orbitError.toJSON().error }));
-    }
+    });
   }
 
-  #dispatch(message: unknown): void {
+  async #dispatch(message: unknown): Promise<void> {
     if (!isRecord(message)) {
       throw new OrbitError(ErrorCode.INVALID_QUERY, 'Realtime message must be a JSON object');
+    }
+
+    // Envelope request/response: a frame carrying `query` or `do` (even an
+    // invalid-typed one — let the envelope validator say so) is executed
+    // through the full engine pipeline, and the reply mirrors the HTTP JSON
+    // payload. The correlation `id` rides OUTSIDE the envelope: the frozen
+    // envelope (spec §3) drops unknown fields, so `id` is read here and
+    // echoed back verbatim.
+    if ('query' in message || 'do' in message) {
+      await this.#executeEnvelope(message);
+      return;
     }
 
     if (typeof message.subscribe === 'string') {
@@ -471,8 +488,56 @@ class Session {
 
     throw new OrbitError(
       ErrorCode.INVALID_QUERY,
-      "Message must contain 'subscribe', 'unsubscribe' or 'resume'",
+      "Message must contain 'subscribe', 'unsubscribe', 'resume', 'query' or 'do'",
     );
+  }
+
+  /**
+   * Execute a `{ query }` / `{ do }` envelope over the socket and reply with
+   * the same payload the HTTP handler serves — `{ id?, status, data,
+   * fromCache?, invalidates? }`, or `{ id?, status, error }` on failure.
+   * The envelope is validated and executed exactly like HTTP: `query` XOR
+   * `do`, `args`/`return`/`cache` semantics, depth limits, and the FULL
+   * plugin pipeline (auth gates, caching, error translation) all apply.
+   */
+  async #executeEnvelope(message: Record<string, unknown>): Promise<void> {
+    const id = typeof message.id === 'string' ? message.id : undefined;
+    try {
+      // validateEnvelope is the exact validator the HTTP path uses: it
+      // rejects bad shapes, strips unknown fields (including the correlation
+      // `id`), and enforces the `query` XOR `do` rule — identical semantics,
+      // one source of truth. Validation failures carry the `id` too.
+      const envelope = validateEnvelope(message);
+      const result = await this.#orbit.execute(envelope);
+      this.#send(
+        this.#encode({
+          ...(id !== undefined ? { id } : {}),
+          status: result.status,
+          // Plugin-serialized string payloads ride as `data` (with their
+          // `contentType`, so the client knows the format); binary payloads
+          // and SSE streaming stay HTTP-only — they cannot round-trip a JSON
+          // frame faithfully, so `data` is null for them.
+          data:
+            result.body !== undefined && typeof result.body === 'string'
+              ? result.body
+              : (result.data ?? null),
+          ...(result.body !== undefined && typeof result.body === 'string'
+            ? { contentType: result.contentType }
+            : {}),
+          ...(result.fromCache ? { fromCache: true } : {}),
+          ...(result.invalidates ? { invalidates: result.invalidates } : {}),
+        }),
+      );
+    } catch (error) {
+      const orbitError = toOrbitError(error);
+      this.#send(
+        this.#encode({
+          ...(id !== undefined ? { id } : {}),
+          status: orbitError.status,
+          error: orbitError.toJSON().error,
+        }),
+      );
+    }
   }
 
   #tickHeartbeat(): void {
