@@ -325,14 +325,44 @@ forwards `mutate`/`subscribe` when provided.
 > (`createRealtimeServer`, RFC 6455 hand-rolled — no `ws` dependency) with
 > subscription deduplication (N clients share one adapter hook),
 > per-subscription sequence numbers, retention + resume across disconnects,
-> and heartbeats. See `docs/realtime.md`.
+> heartbeats, **and `{ query }` / `{ do }` envelope requests** answered with
+> the same payload as HTTP. See `docs/realtime.md`.
 
 ### Transport
 
-- A WebSocket endpoint multiplexes all subscription traffic for a connection. ✅
-- Clients send subscription control messages — `subscribe`, `unsubscribe`,
-  `resume` — as JSON (or MessagePack) frames. Query/`do` envelopes over the
-  socket (`{ query }`, `{ do }`) are 🔜 planned, not part of v0.0.1. ✅ (control frames) · 🔜 (envelope over WS)
+- A WebSocket endpoint multiplexes all traffic for a connection: subscription
+  control frames **and** envelope requests. ✅
+- Clients send `subscribe` / `unsubscribe` / `resume` control messages **and**
+  `{ query }` / `{ do }` envelopes as JSON (or MessagePack) frames. ✅
+
+### Envelope request/response over the socket
+
+```jsonc
+// client →
+{ "query": "user(id=\"1\") { name }", "id": "req-1" }
+{ "do": "user.update", "args": { "filter": { "id": "1" }, "payload": { "name": "Ana" } }, "id": "req-2" }
+// server →
+{ "id": "req-1", "status": 200, "data": { "name": "Ana" } }
+{ "id": "req-2", "status": 200, "data": { "success": true, "id": "1" }, "invalidates": ["cache:user:1"] }
+{ "id": "req-3", "status": 404, "error": { "code": "ORBIT_ENTITY_UNREGISTERED", "message": "…" } }
+```
+
+- Envelopes are validated **exactly like HTTP** (`query` XOR `do`, `args` /
+  `return` / `cache` rules, depth limits) and run the **full plugin
+  pipeline** — auth gates, caching and error translation apply, so a policy
+  that denies on HTTP denies on the socket too.
+- The optional top-level `id` is a **correlation id, not an envelope field**:
+  the frozen envelope (§3) drops unknown fields, so the transport reads `id`
+  itself and echoes it back verbatim. Omit it for fire-and-forget.
+- Success replies mirror the HTTP JSON payload: `{ id?, status, data,
+  contentType?, fromCache?, invalidates? }` — `contentType` appears when a
+  plugin serialized the payload to a string (binary plugin bodies and SSE
+  streaming stay HTTP-only, `data: null`); failures use the standard
+  `{ id?, status, error: { code, message, details? } }` contract.
+- Message size is capped by `maxMessageBytes` (default 1 MiB); file uploads
+  (multipart) and SSE streaming remain HTTP-only.
+
+### Subscription protocol (wire frames)
 
 ### Subscription protocol (proposed frames)
 

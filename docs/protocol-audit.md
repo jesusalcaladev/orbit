@@ -7,7 +7,7 @@ tests (`packages/core/test/contract.test.ts`, `api-surface.test.ts`).
 
 **Method:** each spec section was read in full; every frozen claim (envelope rules, error codes + statuses, content negotiation, cache semantics, adapter
 surface, realtime frames, plugin pipeline) was checked against the source and
-exercised through the handler (`packages/core/test/` covers 312 cases). The
+exercised through the handler (`packages/core/test/` covers 324 cases). The
 audit itself is a **supplement** to the tests — it documents the contract
 points and the deltas found.
 
@@ -31,9 +31,12 @@ observation (documented, no change required).
 | 9 | gzip without `CompressionStream` (spec §7 vs handler) | Spec conditions gzip on "when the runtime provides CompressionStream"; the handler gzipped on the header alone → a runtime without it would 500 | **Bug** | 🔧 handler now feature-checks `CompressionStream` |
 | 10 | `invalidates` eviction (spec §8 vs engine) | Spec said mutations return `invalidates` "so the cache plugin can evict precisely"; the engine only *echoes* them (no mutation hook exists, and plugin keys are opaque hashes an app-level key like `cache:user:1` can't address) | Over-promise | 🔧 spec reworded (echo + app-wired eviction; tag-based eviction listed as 🔜) |
 | 11 | Accept negotiation edge cases | msgpack-vs-SSE ties, wildcard-vs-explicit at equal/lower `q` weren't pinned by tests | Verification gap | 🔧 tests added |
+| 12 | `{ query }` / `{ do }` over WebSocket (spec §10) | Spec promised envelope frames on the socket; the transport spoke subscription control frames only — the spec marked it 🔜 | **Feature gap** | ✅ implemented: request/response over WS (correlation `id` outside the frozen envelope, same pipeline + payload as HTTP, `contentType` echoed for plugin-serialized bodies, binary bodies → `null`), 12 e2e tests |
 
 None of the fixes changed a frozen wire shape: #1 is a strict superset (both
-spellings now parse), #2–#4/#6–#8 are documentation truthfulness.
+spellings now parse), #2–#4/#6–#8 are documentation truthfulness, and #12 is
+an additive feature (new optional frame fields only, zero frozen-shape
+changes).
 
 ---
 
@@ -214,6 +217,8 @@ spellings now parse), #2–#4/#6–#8 are documentation truthfulness.
 | `packages/core/test/cache.test.ts` | Regression tests: space-separated parse + end-to-end cache hit. |
 | `packages/core/src/engine.ts` | gzip only when the runtime provides `CompressionStream` (spec §7). |
 | `packages/core/test/negotiate.test.ts` | Pinned Accept tie-breaks and wildcard-vs-q edge cases. |
+| `packages/core/src/realtime/server.ts` | `{ query }` / `{ do }` envelope request/response over the socket (spec §10). |
+| `packages/core/test/realtime-request.test.ts` | 12 e2e tests: query/mutation/return/errors/cache/pipeline/msgpack/mixing/plugin bodies. |
 | `spec.md` | §2 websocket status, §4 length wording, §8 separator + invalidates semantics, §10 resume/after + WS envelope + auth-context claims, §13 example count. |
 | `examples/web/server.ts` | Removed the dead `x-orbit-cache-key` forwarding. |
 
@@ -229,22 +234,19 @@ this is the work queue.
 
 ### Near-term (designable now)
 
-1. **Query / `do` envelopes over WebSocket (spec §10 🔜).** The transport speaks
-   subscription control frames only. Implementing `{ query }` / `{ do }`
-   envelopes over the socket needs a wire-frame design first: a correlation
-   id (the frozen envelope drops unknown fields, so `id` must ride outside
-   `validateEnvelope`), a response frame shape, spec §10 text, tests, and a
-   demo. Highest-value wire-level gap.
-2. **Auth context into subscriptions (spec §10 🔜).** The frozen
-   `subscribe(filters, handler)` signature has no `ctx` — passing handshake
-   identity in requires an additive opt-in (e.g. `authorize` returning a
-   context object the hub forwards), not a signature change.
-3. **Precise server-side cache invalidation.** Today only whole-store / prefix
+1. **Auth context into subscriptions & envelope requests (spec §10 🔜).** The
+   frozen `subscribe(filters, handler)` signature has no `ctx`, and WS
+   envelope requests currently execute with an empty context — an app that
+   gates mutations on `ctx.state.caller` cannot authenticate a socket
+   session beyond the upgrade `authorize` gate. Additive opt-in: `authorize`
+   returning a context object the transport forwards to both `execute` and
+   (via a new optional hook parameter) adapters.
+2. **Precise server-side cache invalidation.** Today only whole-store / prefix
    invalidation works server-side; `invalidates` keys are app-level and cannot
    address the opaque `orbit:<hash>` plugin keys. A tag index (invalidate by
    entity + filters touched by a mutation) would make §8's "evict precisely"
    literally true.
-4. **OQS key/value length caps.** Bounded only by `maxPayloadBytes` today;
+3. **OQS key/value length caps.** Bounded only by `maxPayloadBytes` today;
    explicit per-key/per-value caps would restore the spec's original "validated
    for length" promise as hardening.
 

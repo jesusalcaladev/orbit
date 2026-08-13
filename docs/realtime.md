@@ -2,7 +2,8 @@
 
 Orbit's realtime transport (spec §10): a **zero-dependency WebSocket server**
 that streams adapter `subscribe` events to clients, keeps subscription state
-across disconnects, and replays missed patches on resume.
+across disconnects, replays missed patches on resume, and serves `{ query }` /
+`{ do }` envelope requests with the same payload as HTTP.
 
 The transport is Node-specific (`node:http`). The `SubscriptionHub` it uses is
 runtime-agnostic and can be driven by any transport later (SSE, uWebSockets…).
@@ -46,6 +47,49 @@ Frames are JSON by default, or MessagePack with `serialize: 'msgpack'`
 (binary frames). Control traffic (`ping`/`pong`/`close`) lives at the
 WebSocket layer — the server pings every `heartbeatMs` (default 30 s) and
 closes connections that don't pong back.
+
+## Envelope request/response (query/do over the socket)
+
+The same socket also serves **envelope requests** — send `{ query }` or
+`{ do }` (plus any envelope field: `args`, `return`, `cache`) and the server
+answers with the exact payload HTTP would serve:
+
+```js
+ws.send(JSON.stringify({ query: 'user(id="1") { name }', id: 'req-1' }));
+ws.send(JSON.stringify({
+  do: 'user.update',
+  args: { filter: { id: '1' }, payload: { name: 'Ana' } },
+  id: 'req-2',
+}));
+
+// server →
+{ id: 'req-1', status: 200, data: { name: 'Ana' } }
+{ id: 'req-2', status: 200, data: { success: true, id: '1' }, invalidates: ['cache:user:1'] }
+{ id: 'req-3', status: 404, error: { code: 'ORBIT_ENTITY_UNREGISTERED', message: '…' } }
+```
+
+| Frame | Meaning |
+| :--- | :--- |
+| client → | `{ "query": oqs, "id"?: string }` | Query through the full pipeline. |
+| client → | `{ "do": "entity.action", "args"?, "return"?, "cache"?, "id"?: string }` | Mutation through the full pipeline. |
+| server → | `{ "id"?, "status", "data", "contentType"?, "fromCache"?, "invalidates"? }` | Success — the HTTP JSON payload. |
+| server → | `{ "id"?, "status", "error": { code, message, details? } }` | Failure — the standard error contract. |
+
+Contract details:
+
+- **`id` is a correlation id, not an envelope field.** The frozen envelope
+  (spec §3) drops unknown fields, so the transport reads `id` itself and
+  echoes it back verbatim — omit it for fire-and-forget.
+- Envelopes are validated **exactly like HTTP** (`query` XOR `do`, `args` /
+  `return` / `cache` rules, depth limits) and run the **full plugin
+  pipeline** — auth gates, caching (`fromCache`), error translation all
+  apply, so a policy that denies on HTTP denies on the socket too.
+- Responses mirror HTTP JSON: `{ data, contentType?, fromCache?,
+  invalidates? }` plus a `status`. When a plugin serialized the payload to a
+  string (e.g. CSV), the string rides as `data` with its `contentType`;
+  custom-serializer binary payloads (`Uint8Array`) and SSE streaming stay
+  HTTP-only — `data` is `null` for them. Message size is capped by
+  `maxMessageBytes` (default 1 MiB).
 
 ## Retention & resume (the B6 story)
 
