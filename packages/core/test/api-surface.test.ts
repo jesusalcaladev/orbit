@@ -56,6 +56,9 @@ const FROZEN_TYPE_EXPORTS = [
   'OrbitEngineLike',
   'RealtimeServerOptions',
   'RealtimeSubscription',
+  'RealtimeSessionDriver',
+  'SessionSend',
+  'SessionDriverHooks',
   'Frame',
 ] as const;
 
@@ -102,6 +105,7 @@ const FROZEN_EXPORTS = [
   'RealtimeServer',
   'SubscriptionHub',
   'RESUME_LOG_MAX',
+  'createSessionDriver',
   'computeAcceptKey',
   'encodeFrame',
   'FrameDecoder',

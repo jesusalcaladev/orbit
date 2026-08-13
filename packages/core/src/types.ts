@@ -104,6 +104,20 @@ export interface OrbitContext {
    * Programmatic use: `orbit.execute({ do: 'user.upload' }, { files: { avatar } })`.
    */
   files?: Record<string, File>;
+  /**
+   * Response headers to merge into the handler's `Response` — set by plugins
+   * or adapters during the pipeline (e.g. `set-cookie` for session login,
+   * CORS, custom `cache-control`). Array values append multiple header lines
+   * (`set-cookie` needs one line per cookie). Merged into every handler
+   * response format (JSON, msgpack, plugin bodies) and into error responses.
+   *
+   * Note: for SSE streaming the headers are sent when the response starts,
+   * before the pipeline runs — a pipeline-set `responseHeaders` cannot reach
+   * an SSE response; pass them via the handler's `ctx` option instead.
+   * `execute()` copies the pipeline's value back onto the context it
+   * received, so the handler (which owns the Response) can read it.
+   */
+  responseHeaders?: Record<string, string | string[]>;
   [key: string]: unknown;
 }
 

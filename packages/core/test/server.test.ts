@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createOrbit, memoryAdapter } from '../src/index.js';
-import { ErrorCode } from '../src/errors.js';
+import { ErrorCode, OrbitError } from '../src/errors.js';
 
 const users = [{ id: '1', name: 'Ana' }];
 
@@ -147,7 +147,7 @@ describe('handler', () => {
     const key = 'CompressionStream' as keyof typeof globalThis;
     const original = globalThis[key];
     try {
-      (globalThis as { CompressionStream?: unknown }).CompressionStream = undefined;
+      (globalThis as unknown as { CompressionStream?: unknown }).CompressionStream = undefined;
       const request = new Request('http://localhost/orbit', {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'accept-encoding': 'gzip' },
@@ -158,7 +158,7 @@ describe('handler', () => {
       expect(response.headers.get('content-encoding')).toBeNull();
       expect(await response.json()).toEqual({ data: { name: 'Ana' } });
     } finally {
-      globalThis[key] = original;
+      (globalThis as unknown as Record<string, unknown>)[key] = original;
     }
   });
 
@@ -184,5 +184,159 @@ describe('handler', () => {
     });
     const response = await orbit.handler(request);
     expect(response.status).toBe(200);
+  });
+
+  it('tags every negotiated response with vary: accept, accept-encoding', async () => {
+    const orbit = makeOrbit();
+    const json = await orbit.handler(post({ query: 'user(id="1") { name }' }));
+    expect(json.headers.get('vary')).toBe('accept, accept-encoding');
+
+    const mp = await orbit.handler(
+      new Request('http://localhost/orbit', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/x-msgpack',
+        },
+        body: JSON.stringify({ query: 'user(id="1") { name }' }),
+      }),
+    );
+    expect(mp.headers.get('vary')).toBe('accept, accept-encoding');
+
+    // Plugin-serialized bodies are negotiated too.
+    const csvOrbit = makeOrbit({
+      plugins: [
+        {
+          name: 'csv',
+          hooks: {
+            onBeforeSerialize: ({ data }) => ({
+              body: `name:${(data as { name: string }).name}`,
+              contentType: 'text/csv',
+            }),
+          },
+        },
+      ],
+    });
+    const csv = await csvOrbit.handler(post({ query: 'user(id="1") { name }' }));
+    expect(csv.headers.get('vary')).toBe('accept, accept-encoding');
+  });
+
+  it('marks error responses cache-control: no-store', async () => {
+    const orbit = makeOrbit();
+    const notFound = await orbit.handler(post({ query: 'ghost { id }' }));
+    expect(notFound.status).toBe(404);
+    expect(notFound.headers.get('cache-control')).toBe('no-store');
+    expect(notFound.headers.get('vary')).toBe('accept, accept-encoding');
+
+    const bad = await orbit.handler(post({ nope: true }));
+    expect(bad.status).toBe(400);
+    expect(bad.headers.get('cache-control')).toBe('no-store');
+  });
+
+  it('merges pipeline-set responseHeaders into the response (set-cookie included)', async () => {
+    const orbit = makeOrbit({
+      plugins: [
+        {
+          name: 'cookie-jar',
+          hooks: {
+            onBeforeResolve: ({ ctx }) => {
+              ctx.responseHeaders = {
+                'set-cookie': ['sid=abc; HttpOnly; Path=/; SameSite=Lax', 'theme=dark; Path=/'],
+                'x-powered-by': 'orbit',
+              };
+            },
+          },
+        },
+      ],
+    });
+    const response = await orbit.handler(post({ query: 'user(id="1") { name }' }));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('x-powered-by')).toBe('orbit');
+    // Multiple cookies survive as separate header lines (never ", "-joined).
+    expect(response.headers.getSetCookie()).toEqual([
+      'sid=abc; HttpOnly; Path=/; SameSite=Lax',
+      'theme=dark; Path=/',
+    ]);
+  });
+
+  it('merges responseHeaders set by an adapter during a mutation (login cookie)', async () => {
+    const orbit = createOrbit({
+      adapters: memoryAdapter([
+        {
+          entity: 'session',
+          resolve: () => null,
+          mutate: (_action, _args, ctx) => {
+            ctx.responseHeaders = {
+              'set-cookie': 'session=token123; HttpOnly; Path=/; Max-Age=3600',
+            };
+            return { success: true, id: 's1' };
+          },
+        },
+      ]),
+    });
+    const response = await orbit.handler(post({ do: 'session.login', args: {} }));
+    expect(response.status).toBe(200);
+    expect(response.headers.getSetCookie()).toEqual([
+      'session=token123; HttpOnly; Path=/; Max-Age=3600',
+    ]);
+  });
+
+  it('merges caller-provided responseHeaders into SSE responses', async () => {
+    const orbit = makeOrbit();
+    const request = new Request('http://localhost/orbit', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'text/event-stream' },
+      body: JSON.stringify({ query: 'user { id }' }),
+    });
+    // Pipeline-set headers arrive too late for SSE (headers are sent when the
+    // stream starts) — the handler's ctx option is the supported channel.
+    const response = await orbit.handler(request, {
+      responseHeaders: { 'x-stream-id': 'sse-1' },
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('text/event-stream');
+    expect(response.headers.get('x-stream-id')).toBe('sse-1');
+    expect(response.headers.get('cache-control')).toBe('no-cache');
+  });
+
+  it('delivers responseHeaders set before a throwing pipeline step (error path)', async () => {
+    const orbit = makeOrbit({
+      plugins: [
+        {
+          name: 'cookie-then-fail',
+          hooks: {
+            onBeforeResolve: ({ ctx }) => {
+              ctx.responseHeaders = { 'set-cookie': 'session=partial; Path=/' };
+              throw new OrbitError(ErrorCode.PERMISSION_DENIED, 'denied after cookie');
+            },
+          },
+        },
+      ],
+    });
+    const response = await orbit.handler(post({ query: 'user(id="1") { name }' }));
+    expect(response.status).toBe(403);
+    // The cookie still rides out with the error response.
+    expect(response.headers.getSetCookie()).toEqual(['session=partial; Path=/']);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+  });
+
+  it('surfaces responseHeaders through execute() for programmatic callers', async () => {
+    const orbit = makeOrbit({
+      plugins: [
+        {
+          name: 'header-jar',
+          hooks: {
+            onBeforeResolve: ({ ctx }) => {
+              ctx.responseHeaders = { 'x-debug-echo': 'yes' };
+            },
+          },
+        },
+      ],
+    });
+    const ctx: { responseHeaders?: Record<string, string | string[]> } = {};
+    const result = await orbit.execute({ query: 'user(id="1") { name }' }, ctx);
+    expect(result.status).toBe(200);
+    expect(ctx.responseHeaders).toEqual({ 'x-debug-echo': 'yes' });
   });
 });

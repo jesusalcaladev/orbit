@@ -165,7 +165,19 @@ export function expressHandler(options: ExpressHandlerOptions): express.Handler 
       const response = await handler(request, base);
 
       res.status(response.status);
-      for (const [name, value] of response.headers) res.setHeader(name, value);
+      // Headers iteration JOINS multi-value headers with ", " — that corrupts
+      // multiple `set-cookie` lines (one cookie per header is the standard).
+      // getSetCookie() (Node ≥ 20) exposes each cookie separately: copy the
+      // rest of the headers normally and append each cookie individually. On
+      // runtimes without it, fall back to the joined iteration (best effort).
+      const hasGetSetCookie = typeof response.headers.getSetCookie === 'function';
+      for (const [name, value] of response.headers) {
+        if (hasGetSetCookie && name.toLowerCase() === 'set-cookie') continue;
+        res.setHeader(name, value);
+      }
+      if (hasGetSetCookie) {
+        for (const cookie of response.headers.getSetCookie()) res.append('set-cookie', cookie);
+      }
 
       if (response.body) {
         // Pipe the engine's (possibly streaming — SSE) body straight through.

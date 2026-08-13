@@ -145,10 +145,17 @@ export function createWorker<Env = unknown, Ctx = unknown>(
       if (realtimeEnabled && url.pathname === realtimePath) {
         // Realtime needs the engine itself (the hub drives the registered
         // adapters' `subscribe` hooks) — a plain handler function cannot
-        // serve subscriptions. Fail with a clear 500, never a crash.
+        // serve subscriptions. Fail with a clear 500 in the standard error
+        // shape, never a crash.
         if (typeof orbit === 'function' || !('adapters' in (orbit as object))) {
-          return new Response(
-            'Realtime subscriptions require a createOrbit() engine with registered adapters',
+          return Response.json(
+            {
+              error: {
+                code: 'ORBIT_INTERNAL',
+                message:
+                  'Realtime subscriptions require a createOrbit() engine with registered adapters',
+              },
+            },
             { status: 500 },
           );
         }

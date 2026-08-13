@@ -43,6 +43,13 @@ export const JSON_CONTENT_TYPE = 'application/json; charset=utf-8';
 /** A fetch-compatible handler function for Orbit queries. Takes a Request and returns a Promise<Response>. */
 export type OrbitHandler = (request: Request) => Promise<Response>;
 
+/**
+ * Every negotiated response varies on `accept` (JSON/msgpack/SSE) and
+ * `accept-encoding` (gzip) — proxies/CDNs must key their cache on both or
+ * they can serve the wrong format to a client that asked for another.
+ */
+const VARY = 'accept, accept-encoding';
+
 /** Max entries in the parse LRU — bounded so a hot client can't grow it forever. */
 const PARSE_CACHE_MAX = 256;
 
@@ -186,10 +193,21 @@ export class Orbit {
     const valid = validateEnvelope(envelope);
     const fullCtx: OrbitContext = { ...ctx, envelope: valid, orbit: this };
     try {
-      if (valid.do !== undefined) return await this.#executeMutation(valid, fullCtx);
-      return await this.#consumeQuery(valid, fullCtx);
+      const result =
+        valid.do !== undefined
+          ? await this.#executeMutation(valid, fullCtx)
+          : await this.#consumeQuery(valid, fullCtx);
+      return result;
     } catch (error) {
       throw await this.#normalizeError(error, fullCtx);
+    } finally {
+      // Response headers set by plugins/adapters on the pipeline context ride
+      // back to the caller, so the handler (which owns the Response) can
+      // merge them — on SUCCESS and on ERROR (a login mutation that issues a
+      // cookie and then fails still delivers the cookie with the error). The
+      // finally also picks up headers set by `onError` hooks. `execute()`
+      // callers that never build a Response simply ignore them.
+      if (fullCtx.responseHeaders !== undefined) ctx.responseHeaders = fullCtx.responseHeaders;
     }
   }
 
@@ -278,7 +296,7 @@ export class Orbit {
           return this.#sseResponse(this.stream(envelope, fullCtx), gzip, fullCtx);
         }
         const result = await this.execute(envelope, fullCtx);
-        return await this.#toResponse(result, format, gzip);
+        return await this.#toResponse(result, format, gzip, fullCtx);
       }
 
       const raw = new Uint8Array(await request.arrayBuffer());
@@ -301,12 +319,12 @@ export class Orbit {
       }
 
       const result = await this.execute(envelope, base);
-      return await this.#toResponse(result, format, gzip);
+      return await this.#toResponse(result, format, gzip, base);
     } catch (error) {
       // `execute` already normalizes (running onError hooks once); only
       // normalize raw errors here so translators never run twice.
       const orbitError = isOrbitError(error) ? error : await this.#normalizeError(error, base);
-      return this.#errorResponse(orbitError, format, gzip);
+      return this.#errorResponse(orbitError, format, gzip, base);
     }
   }
 
@@ -748,15 +766,20 @@ export class Orbit {
     return { data: current, contentType: ctx.contentType ?? JSON_CONTENT_TYPE };
   }
 
-  async #toResponse(result: OrbitResult, format: OrbitFormat, gzip: boolean): Promise<Response> {
+  async #toResponse(
+    result: OrbitResult,
+    format: OrbitFormat,
+    gzip: boolean,
+    ctx: OrbitContext,
+  ): Promise<Response> {
     // A plugin payload is an explicit override — served verbatim, but still
     // compressed when the client asked for gzip.
     if (result.body !== undefined) {
-      const headers: Record<string, string> = { 'content-type': result.contentType };
+      const headers = finalHeaders({ 'content-type': result.contentType, vary: VARY }, ctx);
       if (gzip) {
         const bytes =
           typeof result.body === 'string' ? new TextEncoder().encode(result.body) : result.body;
-        headers['content-encoding'] = 'gzip';
+        headers.set('content-encoding', 'gzip');
         return new Response(await gzipBytes(bytes), { status: result.status, headers });
       }
       return new Response(result.body as BodyInit, { status: result.status, headers });
@@ -770,59 +793,67 @@ export class Orbit {
 
     if (format === 'msgpack') {
       const bytes = encodeMsgpack(payload);
-      const headers: Record<string, string> = { 'content-type': MSGPACK_CONTENT_TYPE };
+      const headers = finalHeaders({ 'content-type': MSGPACK_CONTENT_TYPE, vary: VARY }, ctx);
       if (gzip) {
-        headers['content-encoding'] = 'gzip';
+        headers.set('content-encoding', 'gzip');
         return new Response(await gzipBytes(bytes), { status: result.status, headers });
       }
       return new Response(bytes, { status: result.status, headers });
     }
 
     const body = JSON.stringify(payload);
+    const headers = finalHeaders({ 'content-type': JSON_CONTENT_TYPE, vary: VARY }, ctx);
     if (gzip) {
+      headers.set('content-encoding', 'gzip');
       return new Response(await gzipBytes(new TextEncoder().encode(body)), {
         status: result.status,
-        headers: { 'content-type': JSON_CONTENT_TYPE, 'content-encoding': 'gzip' },
+        headers,
       });
     }
-    return new Response(body, {
-      status: result.status,
-      headers: { 'content-type': JSON_CONTENT_TYPE },
-    });
+    return new Response(body, { status: result.status, headers });
   }
 
   async #errorResponse(
     orbitError: OrbitError,
     format: OrbitFormat,
     gzip: boolean,
+    ctx: OrbitContext,
   ): Promise<Response> {
     const payload = orbitError.toJSON();
     if (format === 'sse') {
       return new Response(`data: ${JSON.stringify(payload)}\n\n`, {
         status: orbitError.status,
-        headers: { 'content-type': SSE_CONTENT_TYPE, 'cache-control': 'no-cache' },
+        headers: finalHeaders(
+          { 'content-type': SSE_CONTENT_TYPE, 'cache-control': 'no-cache', vary: VARY },
+          ctx,
+        ),
       });
     }
     if (format === 'msgpack') {
       const bytes = encodeMsgpack(payload);
-      const headers: Record<string, string> = { 'content-type': MSGPACK_CONTENT_TYPE };
+      const headers = finalHeaders(
+        { 'content-type': MSGPACK_CONTENT_TYPE, 'cache-control': 'no-store', vary: VARY },
+        ctx,
+      );
       if (gzip) {
-        headers['content-encoding'] = 'gzip';
+        headers.set('content-encoding', 'gzip');
         return new Response(await gzipBytes(bytes), { status: orbitError.status, headers });
       }
       return new Response(bytes, { status: orbitError.status, headers });
     }
     const body = JSON.stringify(payload);
+    const headers = finalHeaders(
+      { 'content-type': JSON_CONTENT_TYPE, 'cache-control': 'no-store', vary: VARY },
+      ctx,
+    );
     if (gzip) {
+      headers.set('content-encoding', 'gzip');
       return new Response(await gzipBytes(new TextEncoder().encode(body)), {
         status: orbitError.status,
-        headers: { 'content-type': JSON_CONTENT_TYPE, 'content-encoding': 'gzip' },
+        headers,
       });
     }
-    return new Response(body, {
-      status: orbitError.status,
-      headers: { 'content-type': JSON_CONTENT_TYPE },
-    });
+    return new Response(body, { status: orbitError.status, headers });
   }
 
   #sseResponse(
@@ -868,12 +899,16 @@ export class Orbit {
       },
     });
 
-    const headers: Record<string, string> = {
-      'content-type': SSE_CONTENT_TYPE,
-      'cache-control': 'no-cache',
-    };
+    // SSE streams answer immediately — response headers must be known before
+    // the pipeline runs. Merge only what the caller provided (e.g. via the
+    // handler's `ctx` option); a pipeline-set `responseHeaders` arrives too
+    // late to reach this Response (documented on `OrbitContext`).
+    const headers = finalHeaders(
+      { 'content-type': SSE_CONTENT_TYPE, 'cache-control': 'no-cache', vary: VARY },
+      ctx,
+    );
     if (gzip) {
-      headers['content-encoding'] = 'gzip';
+      headers.set('content-encoding', 'gzip');
       stream = stream.pipeThrough(new CompressionStream('gzip'));
     }
     return new Response(stream, { status: 200, headers });
@@ -941,6 +976,26 @@ function findEntityEvictingCache(plugins: PluginRegistry): EntityEvictingCache |
     }
   }
   return undefined;
+}
+
+/**
+ * Build a response `Headers` set: the engine's base headers (content-type,
+ * negotiation metadata) merged with the pipeline's `ctx.responseHeaders`.
+ * Array values append one header line per item — `set-cookie` in particular
+ * needs a line per cookie, and `Headers.append` preserves that.
+ */
+function finalHeaders(base: Record<string, string>, ctx: OrbitContext): Headers {
+  const headers = new Headers(base);
+  if (ctx.responseHeaders) {
+    for (const [name, value] of Object.entries(ctx.responseHeaders)) {
+      if (Array.isArray(value)) {
+        for (const item of value) headers.append(name, item);
+      } else {
+        headers.set(name, value);
+      }
+    }
+  }
+  return headers;
 }
 
 /** gzip a byte payload via the web-standard CompressionStream. */

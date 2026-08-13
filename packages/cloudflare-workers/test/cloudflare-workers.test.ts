@@ -192,7 +192,7 @@ describe('createWorker — the fetch handler', () => {
     expect(res.status).toBe(404);
   });
 
-  it('answers a clear 500 on the realtime path for a handler-function orbit', async () => {
+  it('answers a clear 500 in the standard error shape on the realtime path for a handler-function orbit', async () => {
     const worker = createWorker({ orbit: async () => new Response('ok') });
     const res = await worker.fetch(
       new Request('https://example.com/realtime', { headers: { upgrade: 'websocket' } }),
@@ -200,7 +200,9 @@ describe('createWorker — the fetch handler', () => {
       {},
     );
     expect(res.status).toBe(500);
-    expect(await res.text()).toContain('createOrbit()');
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe('ORBIT_INTERNAL');
+    expect(body.error.message).toContain('createOrbit()');
   });
 
   it('does not mount the realtime route when realtime is false', async () => {
@@ -325,6 +327,35 @@ describe('createWorker — the fetch handler', () => {
 
     expect(res.status).toBe(418);
     expect(await res.json()).toEqual({ error: 'kaboom' });
+  });
+
+  it('merges pipeline-set responseHeaders into the worker response (set-cookie)', async () => {
+    const orbit = createOrbit({
+      adapters: memoryAdapter([
+        {
+          entity: 'session',
+          resolve: () => null,
+          mutate: (_action, _args, ctx) => {
+            ctx.responseHeaders = {
+              'set-cookie': 'session=token123; HttpOnly; Path=/; Max-Age=3600',
+            };
+            return { success: true };
+          },
+        },
+      ]),
+    });
+    const worker = createWorker({ orbit });
+    const res = await worker.fetch(
+      jsonPost(new Request('https://example.com/api/orbit'), { do: 'session.login', args: {} }),
+      {},
+      {},
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.getSetCookie()).toEqual([
+      'session=token123; HttpOnly; Path=/; Max-Age=3600',
+    ]);
+    // Negotiated responses carry vary so CDN caches key on both dimensions.
+    expect(res.headers.get('vary')).toBe('accept, accept-encoding');
   });
 
   it('keeps the full wire protocol intact (msgpack, SSE, gzip, uploads, errors, cache)', async () => {

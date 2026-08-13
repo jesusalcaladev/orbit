@@ -98,6 +98,8 @@ export { createRealtimeServer, RealtimeServer } from './realtime/server.js';
 export type { RealtimeServerOptions } from './realtime/server.js';
 export { SubscriptionHub, RESUME_LOG_MAX } from './realtime/hub.js';
 export type { RealtimeSubscription } from './realtime/hub.js';
+export { createSessionDriver } from './realtime/driver.js';
+export type { RealtimeSessionDriver, SessionSend, SessionDriverHooks } from './realtime/driver.js';
 export {
   computeAcceptKey,
   encodeFrame,

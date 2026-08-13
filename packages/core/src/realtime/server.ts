@@ -24,11 +24,9 @@
 import type { Server, IncomingMessage } from 'node:http';
 import type { Socket } from 'node:net';
 import type { Duplex } from 'node:stream';
-import { validateEnvelope } from '../envelope.js';
-import { ErrorCode, OrbitError, toOrbitError } from '../errors.js';
+import { ErrorCode, toOrbitError } from '../errors.js';
 import type { Orbit } from '../engine.js';
 import { decodeMsgpack, encodeMsgpack } from '../serialize/msgpack.js';
-import { isRecord } from '../utils.js';
 import {
   CloseCode,
   FrameDecoder,
@@ -39,6 +37,8 @@ import {
   upgradeResponse,
 } from './frames.js';
 import type { Frame } from './frames.js';
+import { createSessionDriver } from './driver.js';
+import type { RealtimeSessionDriver } from './driver.js';
 import { SubscriptionHub } from './hub.js';
 
 export interface RealtimeServerOptions {
@@ -209,14 +209,10 @@ interface SessionOptions {
 
 class Session {
   readonly #socket: Duplex;
-  readonly #orbit: Orbit;
   readonly #hub: SubscriptionHub;
   readonly #options: SessionOptions;
   readonly #decoder: FrameDecoder;
-  readonly #clientSubs = new Map<
-    string,
-    { sub: { unsubscribe(): void }; onEvent: (seq: number, event: unknown) => void }
-  >();
+  readonly #driver: RealtimeSessionDriver;
   readonly #heartbeat: NodeJS.Timeout;
   readonly #retention = new Map<string, NodeJS.Timeout>();
   #fragment?: { opcode: number; chunks: Buffer[]; total: number; count: number };
@@ -225,10 +221,15 @@ class Session {
 
   constructor(socket: Duplex, orbit: Orbit, hub: SubscriptionHub, options: SessionOptions) {
     this.#socket = socket;
-    this.#orbit = orbit;
     this.#hub = hub;
     this.#options = options;
     this.#decoder = new FrameDecoder(options.maxMessageBytes);
+    // The shared session driver owns the frame-level protocol (subscribe/
+    // unsubscribe/resume/envelope requests). On attach we cancel any pending
+    // retention-release timer — the client re-attached before expiry.
+    this.#driver = createSessionDriver(orbit, hub, (message) => this.#send(this.#encode(message)), {
+      onAttach: (clientId) => this.#cancelRelease(clientId),
+    });
     this.#heartbeat = setInterval(() => this.#tickHeartbeat(), options.heartbeatMs);
     this.#heartbeat.unref();
   }
@@ -256,9 +257,10 @@ class Session {
     clearInterval(this.#heartbeat);
     // Detach every subscription and give the client a retention window to
     // reconnect + resume; the shared adapter hook stays alive meanwhile so
-    // the event log keeps growing (spec §10 resume / benchmark B6).
-    for (const clientId of this.#clientSubs.keys()) this.#scheduleRelease(clientId);
-    this.#clientSubs.clear();
+    // the event log keeps growing (spec §10 resume / benchmark B6). The
+    // driver drops its tracking (retention takes over the unsubscribe).
+    for (const clientId of this.#driver.activeIds()) this.#scheduleRelease(clientId);
+    this.#driver.clear();
   }
 
   /**
@@ -401,143 +403,13 @@ class Session {
       );
       return;
     }
-    // #dispatch is async — `{ query }` / `{ do }` envelopes execute on the
-    // engine (spec §10 request/response). Subscription-control rejections
-    // keep the exact same `{ error }` wire shape as before.
-    this.#dispatch(message).catch((error) => {
+    // The shared driver dispatches (async — `{ query }` / `{ do }` envelopes
+    // execute on the engine, spec §10 request/response). Subscription-control
+    // rejections keep the exact same `{ error }` wire shape as before.
+    this.#driver.dispatch(message).catch((error) => {
       const orbitError = toOrbitError(error);
       this.#send(this.#encode({ error: orbitError.toJSON().error }));
     });
-  }
-
-  async #dispatch(message: unknown): Promise<void> {
-    if (!isRecord(message)) {
-      throw new OrbitError(ErrorCode.INVALID_QUERY, 'Realtime message must be a JSON object');
-    }
-
-    // Envelope request/response: a frame carrying `query` or `do` (even an
-    // invalid-typed one — let the envelope validator say so) is executed
-    // through the full engine pipeline, and the reply mirrors the HTTP JSON
-    // payload. The correlation `id` rides OUTSIDE the envelope: the frozen
-    // envelope (spec §3) drops unknown fields, so `id` is read here and
-    // echoed back verbatim.
-    if ('query' in message || 'do' in message) {
-      await this.#executeEnvelope(message);
-      return;
-    }
-
-    if (typeof message.subscribe === 'string') {
-      const clientId = message.id;
-      if (typeof clientId !== 'string' || clientId.length === 0) {
-        throw new OrbitError(ErrorCode.INVALID_QUERY, "'id' is required for subscribe");
-      }
-      if (this.#clientSubs.has(clientId)) {
-        throw new OrbitError(
-          ErrorCode.SUBSCRIPTION_FAILED,
-          `A subscription '${clientId}' already exists`,
-        );
-      }
-      const onEvent = (seq: number, event: unknown) =>
-        this.#send(this.#encode({ id: clientId, seq, event }));
-      const sub = this.#hub.subscribe(message.subscribe, clientId, onEvent);
-      this.#clientSubs.set(clientId, { sub, onEvent });
-      this.#cancelRelease(clientId);
-      this.#send(this.#encode({ ack: clientId }));
-      return;
-    }
-
-    if (typeof message.unsubscribe === 'string') {
-      const clientId = message.unsubscribe;
-      const entry = this.#clientSubs.get(clientId);
-      if (entry) {
-        entry.sub.unsubscribe();
-        this.#clientSubs.delete(clientId);
-      }
-      this.#send(this.#encode({ unsubscribed: clientId }));
-      return;
-    }
-
-    if (typeof message.resume === 'string') {
-      const clientId = message.resume;
-      const entry = this.#clientSubs.get(clientId);
-      if (entry) {
-        // Same live session — just replay.
-        const after =
-          typeof message.after === 'number' && Number.isFinite(message.after) ? message.after : 0;
-        this.#hub.resume(clientId, after, entry.onEvent);
-        this.#send(this.#encode({ resumed: clientId, after }));
-        return;
-      }
-      // Reconnect: re-attach a retained subscription and replay the gap.
-      const onEvent = (seq: number, event: unknown) =>
-        this.#send(this.#encode({ id: clientId, seq, event }));
-      const after =
-        typeof message.after === 'number' && Number.isFinite(message.after) ? message.after : 0;
-      const sub = this.#hub.resume(clientId, after, onEvent);
-      if (!sub) {
-        throw new OrbitError(
-          ErrorCode.SUBSCRIPTION_FAILED,
-          `Unknown or expired subscription '${clientId}' — re-subscribe to start over`,
-        );
-      }
-      this.#clientSubs.set(clientId, { sub, onEvent });
-      this.#cancelRelease(clientId);
-      this.#send(this.#encode({ resumed: clientId, after }));
-      return;
-    }
-
-    throw new OrbitError(
-      ErrorCode.INVALID_QUERY,
-      "Message must contain 'subscribe', 'unsubscribe', 'resume', 'query' or 'do'",
-    );
-  }
-
-  /**
-   * Execute a `{ query }` / `{ do }` envelope over the socket and reply with
-   * the same payload the HTTP handler serves — `{ id?, status, data,
-   * fromCache?, invalidates? }`, or `{ id?, status, error }` on failure.
-   * The envelope is validated and executed exactly like HTTP: `query` XOR
-   * `do`, `args`/`return`/`cache` semantics, depth limits, and the FULL
-   * plugin pipeline (auth gates, caching, error translation) all apply.
-   */
-  async #executeEnvelope(message: Record<string, unknown>): Promise<void> {
-    const id = typeof message.id === 'string' ? message.id : undefined;
-    try {
-      // validateEnvelope is the exact validator the HTTP path uses: it
-      // rejects bad shapes, strips unknown fields (including the correlation
-      // `id`), and enforces the `query` XOR `do` rule — identical semantics,
-      // one source of truth. Validation failures carry the `id` too.
-      const envelope = validateEnvelope(message);
-      const result = await this.#orbit.execute(envelope);
-      this.#send(
-        this.#encode({
-          ...(id !== undefined ? { id } : {}),
-          status: result.status,
-          // Plugin-serialized string payloads ride as `data` (with their
-          // `contentType`, so the client knows the format); binary payloads
-          // and SSE streaming stay HTTP-only — they cannot round-trip a JSON
-          // frame faithfully, so `data` is null for them.
-          data:
-            result.body !== undefined && typeof result.body === 'string'
-              ? result.body
-              : (result.data ?? null),
-          ...(result.body !== undefined && typeof result.body === 'string'
-            ? { contentType: result.contentType }
-            : {}),
-          ...(result.fromCache ? { fromCache: true } : {}),
-          ...(result.invalidates ? { invalidates: result.invalidates } : {}),
-        }),
-      );
-    } catch (error) {
-      const orbitError = toOrbitError(error);
-      this.#send(
-        this.#encode({
-          ...(id !== undefined ? { id } : {}),
-          status: orbitError.status,
-          error: orbitError.toJSON().error,
-        }),
-      );
-    }
   }
 
   #tickHeartbeat(): void {

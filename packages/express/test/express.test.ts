@@ -377,6 +377,39 @@ describe('expressHandler', () => {
     expect(() => attachRealtime(server, engine)).toThrow(/already called/);
   });
 
+  it('preserves multiple set-cookie headers from responseHeaders', async () => {
+    const orbit = createOrbit({
+      adapters: memoryAdapter([
+        {
+          entity: 'session',
+          resolve: () => null,
+          mutate: (_action, _args, ctx) => {
+            ctx.responseHeaders = {
+              'set-cookie': ['sid=abc; HttpOnly; Path=/', 'theme=dark; Path=/'],
+            };
+            return { success: true };
+          },
+        },
+      ]),
+    });
+    const app = express();
+    app.use('/orbit', expressHandler({ orbit }));
+    const { url, close } = await listen(app);
+    openServers.push(close);
+
+    const res = await fetch(`${url}/orbit`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ do: 'session.login', args: {} }),
+    });
+
+    expect(res.status).toBe(200);
+    // getSetCookie() on the client side sees each cookie as its own line —
+    // the wrapper must not have ", "-joined them (which would corrupt
+    // attributes like SameSite/HttpOnly boundaries).
+    expect(res.headers.getSetCookie()).toEqual(['sid=abc; HttpOnly; Path=/', 'theme=dark; Path=/']);
+  });
+
   it('routes infrastructure errors through the custom onError', async () => {
     const app = express();
     app.use(

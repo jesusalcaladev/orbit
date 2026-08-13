@@ -36,14 +36,13 @@
  */
 import {
   ErrorCode,
-  OrbitError,
   SubscriptionHub,
+  createSessionDriver,
   decodeMsgpack,
   encodeMsgpack,
   toOrbitError,
-  validateEnvelope,
 } from '@orbit/core';
-import type { Orbit, SubscriptionEvent } from '@orbit/core';
+import type { Orbit } from '@orbit/core';
 
 /** Default maximum incoming message size (bytes). */
 export const DEFAULT_MAX_MESSAGE_BYTES = 1024 * 1024;
@@ -86,8 +85,7 @@ export interface RealtimeSession {
  * frames AND `{ query }` / `{ do }` envelope requests, multiplexed on one
  * connection. `server.accept()` is called here; `handleWebSocket` performs
  * the 101 upgrade and hands over the server side of the pair.
- */
-export function createRealtimeSession(
+ */ export function createRealtimeSession(
   server: WsSocket,
   orbit: Orbit,
   options: RealtimeSessionOptions = {},
@@ -95,7 +93,6 @@ export function createRealtimeSession(
   const hub = new SubscriptionHub(orbit);
   const serialize = options.serialize ?? 'json';
   const maxMessageBytes = options.maxMessageBytes ?? DEFAULT_MAX_MESSAGE_BYTES;
-  const clientSubs = new Map<string, { unsubscribe(): void }>();
   let closed = false;
 
   server.accept();
@@ -122,98 +119,11 @@ export function createRealtimeSession(
     send({ error: orbitError.toJSON().error });
   };
 
-  /**
-   * Execute a `{ query }` / `{ do }` envelope over the socket and reply with
-   * the same payload the HTTP handler serves — `{ id?, status, data,
-   * contentType?, fromCache?, invalidates? }`, or `{ id?, status, error }`.
-   * The correlation `id` rides outside the frozen envelope (spec §3 drops
-   * unknown fields) and is echoed verbatim on success AND failure.
-   */
-  async function executeEnvelope(message: Record<string, unknown>): Promise<void> {
-    const id = typeof message.id === 'string' ? message.id : undefined;
-    try {
-      const envelope = validateEnvelope(message);
-      const result = await orbit.execute(envelope);
-      send({
-        ...(id !== undefined ? { id } : {}),
-        status: result.status,
-        // Plugin-serialized string payloads ride as `data` (with their
-        // contentType); binary payloads stay HTTP-only → `data: null`.
-        data:
-          result.body !== undefined && typeof result.body === 'string'
-            ? result.body
-            : (result.data ?? null),
-        ...(result.body !== undefined && typeof result.body === 'string'
-          ? { contentType: result.contentType }
-          : {}),
-        ...(result.fromCache ? { fromCache: true } : {}),
-        ...(result.invalidates ? { invalidates: result.invalidates } : {}),
-      });
-    } catch (error) {
-      const orbitError = toOrbitError(error);
-      send({
-        ...(id !== undefined ? { id } : {}),
-        status: orbitError.status,
-        error: orbitError.toJSON().error,
-      });
-    }
-  }
-
-  async function dispatch(message: unknown): Promise<void> {
-    if (typeof message !== 'object' || message === null) {
-      throw new OrbitError(ErrorCode.INVALID_QUERY, 'Realtime message must be a JSON object');
-    }
-    const record = message as Record<string, unknown>;
-
-    // Envelope request/response (spec §10) — the full engine pipeline applies,
-    // so auth gates, caching and error translation behave exactly like HTTP.
-    if ('query' in record || 'do' in record) {
-      await executeEnvelope(record);
-      return;
-    }
-
-    if (typeof record.subscribe === 'string') {
-      const clientId = record.id;
-      if (typeof clientId !== 'string' || clientId.length === 0) {
-        throw new OrbitError(ErrorCode.INVALID_QUERY, "'id' is required for subscribe");
-      }
-      const onEvent = (seq: number, event: SubscriptionEvent) => send({ id: clientId, seq, event });
-      hub.subscribe(record.subscribe, clientId, onEvent);
-      clientSubs.set(clientId, { unsubscribe: () => hub.unsubscribe(clientId) });
-      send({ ack: clientId });
-      return;
-    }
-
-    if (typeof record.unsubscribe === 'string') {
-      const clientId = record.unsubscribe;
-      clientSubs.delete(clientId);
-      hub.unsubscribe(clientId);
-      send({ unsubscribed: clientId });
-      return;
-    }
-
-    if (typeof record.resume === 'string') {
-      const clientId = record.resume;
-      const after =
-        typeof record.after === 'number' && Number.isFinite(record.after) ? record.after : 0;
-      const onEvent = (seq: number, event: SubscriptionEvent) => send({ id: clientId, seq, event });
-      const sub = hub.resume(clientId, after, onEvent);
-      if (!sub) {
-        throw new OrbitError(
-          ErrorCode.SUBSCRIPTION_FAILED,
-          `Unknown or expired subscription '${clientId}' — re-subscribe to start over`,
-        );
-      }
-      clientSubs.set(clientId, { unsubscribe: () => hub.unsubscribe(clientId) });
-      send({ resumed: clientId, after });
-      return;
-    }
-
-    throw new OrbitError(
-      ErrorCode.INVALID_QUERY,
-      "Message must contain 'subscribe', 'unsubscribe', 'resume', 'query' or 'do'",
-    );
-  }
+  // The frame-level protocol (subscribe/ack, unsubscribe, resume, and the
+  // `{ query }` / `{ do }` envelope request/response) lives in the core's
+  // runtime-agnostic session driver — the exact same code the Node transport
+  // drives, so the frame contract cannot drift between runtimes.
+  const driver = createSessionDriver(orbit, hub, send);
 
   server.addEventListener('message', (event) => {
     if (closed) return;
@@ -257,7 +167,7 @@ export function createRealtimeSession(
       send({ error: { code: ErrorCode.INVALID_QUERY, message: 'Message must be text or bytes' } });
       return;
     }
-    dispatch(message).catch(encodeError);
+    driver.dispatch(message).catch(encodeError);
   });
 
   server.addEventListener('close', () => close());
@@ -265,8 +175,9 @@ export function createRealtimeSession(
   function close(): void {
     if (closed) return;
     closed = true;
-    for (const { unsubscribe } of clientSubs.values()) unsubscribe();
-    clientSubs.clear();
+    // Release every subscription immediately (no retention window on
+    // Workers — a closed socket releases its adapter hooks right away).
+    driver.releaseAll();
     hub.close();
   }
 
