@@ -174,6 +174,12 @@ const chatAdapter: DataAdapter = {
       emitChat({ type: 'created', id: message.id, data: message, patch: { ...message } });
       return { id: message.id };
     }
+    if (action === 'clear') {
+      messages.length = 0;
+      // Both protocols hear the reset; clients refetch history on this event.
+      emitChat({ type: 'deleted', id: 'all', data: null, patch: {} });
+      return { id: 'all' };
+    }
     throw new Error(`unknown chat action '${action}'`);
   },
   subscribe: (_filters: Filters, handler: (event: SubscriptionEvent) => void) => {
@@ -532,11 +538,10 @@ const server = createServer(async (req, res) => {
         body,
       });
       const response = await orbit.handler(request);
+      // The engine never emits an x-orbit-cache-key header — cache keys are
+      // opaque server-side hashes and the fromCache flag travels in the body.
       res.writeHead(response.status, {
         'content-type': response.headers.get('content-type') ?? 'application/json',
-        ...(response.headers.get('x-orbit-cache-key')
-          ? { 'x-orbit-cache-key': response.headers.get('x-orbit-cache-key')! }
-          : {}),
       });
       res.end(await response.text());
       return;

@@ -13,16 +13,35 @@ localStorage.setItem('orbit-fp', fingerprint);
 
 const QUERY = 'posts { id, text, likes, author { name } }';
 
+/** "just now", "4m ago", "2h ago", else a date. */
+function relTime(ts) {
+  const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  if (s < 5) return 'just now';
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return new Date(ts).toLocaleDateString();
+}
+
 async function refresh(animate = true) {
   const t0 = performance.now();
   const { data } = await orbit({ query: QUERY });
   lastEl.textContent = fmtMs(performance.now() - t0);
   lastEl.classList.add('good');
-  countEl.textContent = String((data ?? []).length);
+  const posts = data ?? [];
+  countEl.textContent = String(posts.length);
 
   const rows = new Map();
   feed.innerHTML = '';
-  for (const post of data ?? []) {
+  if (posts.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'empty-posts';
+    empty.textContent = 'No posts yet — write the first one ✍️';
+    feed.appendChild(empty);
+  }
+  for (const post of posts) {
     const el = document.createElement('div');
     el.className = 'post';
     const guest = post.author.id === 'guest';
@@ -30,7 +49,7 @@ async function refresh(animate = true) {
       <div class="top">
         <div class="who">${esc(post.author.name)}</div>
         ${guest ? '<span class="guest">guest</span>' : ''}
-        <div class="when">${new Date(post.ts).toLocaleTimeString()}</div>
+        <div class="when">${relTime(post.ts)}</div>
       </div>
       <div class="body">${esc(post.text)}</div>
       <button class="like" data-id="${esc(post.id)}">♡ <span>${post.likes}</span></button>`;

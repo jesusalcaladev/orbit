@@ -24,28 +24,101 @@ export async function orbit(envelope, options = {}) {
   return body;
 }
 
-/** Open the Orbit realtime socket and subscribe; returns { ws, send, close }. */
-export function orbitSocket({ subscribe, onEvent, onAck, onError }) {
-  const ws = new WebSocket(`ws://${location.host}/realtime`);
-  ws.onopen = () => {
-    if (subscribe) {
-      ws.send(JSON.stringify({ subscribe, id: 'feed' }));
-    }
+/** Fetch the whole chat history (insertion order, oldest first). */
+export async function chatHistory() {
+  const { data } = await orbit({ query: 'chat { id, author, text, ts, clientId }' });
+  return Array.isArray(data) ? data : [];
+}
+
+/**
+ * Open the Orbit realtime socket with automatic reconnect + resume.
+ *
+ * - First connect sends `subscribe`; every reconnect sends `resume` with the
+ *   last seen `seq`, so missed events are replayed from the retention log.
+ * - If the retention window expired, the server answers ORBIT_SUBSCRIPTION_FAILED
+ *   and we transparently fall back to a fresh `subscribe`.
+ * - `onStatus` reports 'connecting' | 'live' | 'reconnecting'.
+ *
+ * Returns `{ send, close }`.
+ */
+export function orbitSocket({ subscribe, onEvent, onAck, onError, onStatus, subId = 'feed' }) {
+  const retry = [500, 1200, 2500, 5000];
+  let ws = null;
+  let lastSeq = 0;
+  let closed = false;
+  let everSubscribed = false;
+  let attempts = 0;
+  let reconnectTimer = null;
+
+  const scheduleReconnect = () => {
+    // One reconnect at a time — a second trigger (e.g. onclose right after an
+    // error) must not spin up a duplicate socket.
+    if (reconnectTimer !== null) return;
+    const delay = retry[Math.min(attempts, retry.length - 1)] ?? 5000;
+    attempts += 1;
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      connect();
+    }, delay);
   };
-  ws.onmessage = (event) => {
-    const message = JSON.parse(event.data);
-    if (message.error) {
-      onError?.(message.error);
-    } else if (message.id && message.event) {
-      onEvent?.(message.event, message.seq);
-    } else if (message.ack) {
-      onAck?.(message.ack);
-    }
-  };
+
+  function connect() {
+    if (closed) return;
+    onStatus?.('connecting');
+    ws = new WebSocket(`ws://${location.host}/realtime`);
+    ws.onopen = () => {
+      attempts = 0;
+      onStatus?.('live');
+      const frame = everSubscribed ? { resume: subId, after: lastSeq } : { subscribe, id: subId };
+      everSubscribed = true;
+      ws.send(JSON.stringify(frame));
+    };
+    ws.onmessage = (event) => {
+      let message;
+      try {
+        message = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+      if (message.error) {
+        // `resume` hit an expired/unknown subscription — drop the dead socket
+        // and start over with a fresh subscribe.
+        if (everSubscribed && message.error.code === 'ORBIT_SUBSCRIPTION_FAILED') {
+          everSubscribed = false;
+          ws?.close();
+          scheduleReconnect();
+          return;
+        }
+        onError?.(message.error);
+      } else if (message.id && message.event) {
+        if (typeof message.seq === 'number' && message.seq > lastSeq) lastSeq = message.seq;
+        onEvent?.(message.event, message.seq);
+      } else if (message.ack || message.resumed) {
+        const kind = message.resumed !== undefined ? 'resume' : 'subscribe';
+        onAck?.(message.ack ?? message.resumed, kind, lastSeq);
+      }
+    };
+    ws.onclose = () => {
+      if (closed) return;
+      onStatus?.('reconnecting');
+      scheduleReconnect();
+    };
+  }
+
+  connect();
+
   return {
-    ws,
-    send: (frame) => ws.send(JSON.stringify(frame)),
-    close: () => ws.close(),
+    send: (frame) => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(frame));
+        return true;
+      }
+      return false;
+    },
+    close: () => {
+      closed = true;
+      ws?.close();
+    },
   };
 }
 
@@ -62,6 +135,15 @@ export function fmtBytes(bytes) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+}
+
+/** HH:MM:SS for a timestamp. */
+export function timeOf(ts) {
+  return new Date(ts).toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
 }
 
 /** Percentile of a sorted number array. */

@@ -4,17 +4,28 @@ const usernameInput = document.getElementById('username');
 const passwordInput = document.getElementById('password');
 const loginBtn = document.getElementById('login');
 const registerBtn = document.getElementById('register');
+const logoutBtn = document.getElementById('logout');
 const sessionEl = document.getElementById('session');
 const meEl = document.getElementById('me');
 const withToken = document.getElementById('with-token');
 const withoutToken = document.getElementById('without-token');
+const copyTokenBtn = document.getElementById('copy-token');
 
 let token = localStorage.getItem('orbit-token') ?? '';
 let username = localStorage.getItem('orbit-username') ?? '';
 
 function render() {
-  sessionEl.textContent = token ? `in as ${username}` : '—';
-  sessionEl.className = token ? 'v good' : 'v';
+  if (token) {
+    sessionEl.textContent = `in as ${username}`;
+    sessionEl.className = 'v good';
+    logoutBtn.disabled = false;
+    copyTokenBtn.disabled = false;
+  } else {
+    sessionEl.textContent = '—';
+    sessionEl.className = 'v';
+    logoutBtn.disabled = true;
+    copyTokenBtn.disabled = true;
+  }
 }
 
 async function auth(path, { body, expectToken }) {
@@ -59,6 +70,30 @@ registerBtn.addEventListener('click', async () => {
     await probe();
   } catch (error) {
     toast(error.message, true);
+  }
+});
+
+logoutBtn.addEventListener('click', async () => {
+  try {
+    await orbit({ do: 'user.logout', args: {} }, { token });
+  } catch {
+    // The token is wiped client-side either way.
+  }
+  token = '';
+  username = '';
+  localStorage.removeItem('orbit-token');
+  localStorage.removeItem('orbit-username');
+  render();
+  toast('Logged out');
+  await probe();
+});
+
+copyTokenBtn.addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(token);
+    toast('Token copied to clipboard');
+  } catch {
+    toast('Could not copy — select it manually', true);
   }
 });
 

@@ -4,6 +4,13 @@
   gap: 12px;
 }
 
+.empty-posts {
+  text-align: center;
+  color: var(--text-faint);
+  font-size: 13.5px;
+  padding: 40px 12px;
+}
+
 .post {
   background: var(--bg-soft);
   border: 1px solid var(--border);
@@ -73,6 +80,11 @@
 .like:hover {
   border-color: var(--danger);
   color: var(--danger);
+  transform: translateY(-1px);
+}
+
+.like:active {
+  transform: translateY(0);
 }
 
 .like.liked {

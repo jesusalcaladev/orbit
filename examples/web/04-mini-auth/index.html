@@ -26,6 +26,7 @@
         <input id="password" type="password" placeholder="password" autocomplete="current-password" />
         <button id="login">Log in</button>
         <button id="register" class="ghost">Register</button>
+        <button id="logout" class="ghost" disabled>Log out</button>
       </div>
 
       <div class="stats">
@@ -46,7 +47,7 @@
         </p>
         <div class="col">
           <div class="probe">
-            <div class="probe-k">With token</div>
+            <div class="probe-k">With token <button id="copy-token" class="ghost" style="float: right; padding: 2px 10px; font-size: 11px" disabled>copy</button></div>
             <pre id="with-token">…</pre>
           </div>
           <div class="probe">

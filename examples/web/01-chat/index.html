@@ -13,11 +13,13 @@
         <a class="back" href="/">← demos</a>
         <h1>Chat · realtime</h1>
         <span class="pill orbit">Orbit WS</span>
+        <span class="pill" id="conn-pill" style="margin-left: auto">connecting…</span>
       </div>
       <p class="demo-sub">
         Every message is a <code>do: chat.send</code> mutation; every tab receives it through a
         single shared adapter <code>subscribe</code> hook over the zero-dependency WebSocket
-        transport. Open this page in two tabs and talk to yourself.
+        transport. Open this page in two tabs and talk to yourself — the socket reconnects and
+        <code>resume</code>s any messages you missed.
       </p>
 
       <div class="panel">
@@ -26,9 +28,10 @@
             <span>Your name</span>
             <input id="name" type="text" value="Ada" maxlength="24" />
           </label>
-          <div class="row" style="flex: 1; min-width: 220px">
+          <div class="row" style="flex: 1; min-width: 240px">
             <input id="text" type="text" placeholder="Type a message…" autocomplete="off" />
-            <button id="send">Send</button>
+            <button id="send" class="mint">Send</button>
+            <button id="clear" class="ghost" title="Clear the shared room">Clear room</button>
           </div>
         </div>
       </div>
@@ -39,8 +42,16 @@
           <div class="v" id="conn">…</div>
         </div>
         <div class="stat">
-          <div class="k">Round-trip (last)</div>
+          <div class="k">Round-trip · last</div>
           <div class="v" id="last">—</div>
+        </div>
+        <div class="stat">
+          <div class="k">Round-trip · avg</div>
+          <div class="v" id="avg">—</div>
+        </div>
+        <div class="stat">
+          <div class="k">Round-trip · p95</div>
+          <div class="v" id="p95">—</div>
         </div>
         <div class="stat">
           <div class="k">Messages</div>
@@ -49,6 +60,11 @@
       </div>
 
       <div class="panel">
+        <div class="feed-head">
+          <span class="dot" id="conn-dot"></span>
+          <span class="feed-title">shared room · <code>chat</code></span>
+          <span class="feed-hint" id="feed-hint">live</span>
+        </div>
         <div id="feed" class="feed"></div>
       </div>
     </div>
