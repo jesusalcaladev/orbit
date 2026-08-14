@@ -81,11 +81,17 @@
 
 **Decisions / TODOs:**
 - [x] **Remove `fetchAdapter` from core** — done (see CHANGELOG): REST was opinionated and didn't belong in the pure contract layer; example 04 writes the frozen contract by hand. A future **`@orbit/rest`** package can add a fetch-based adapter.
-- [ ] **`@orbit/postgres`** — adapter translating `filters` → `WHERE ...` via `pg`.
+- [x] **`@orbit/postgres`** — adapter translating `filters` → parameterized
+  `WHERE …` over an injected `pg` client, with `IN`-clause batching, operator
+  overrides and `create`/`update`/`delete` mutations. 30 tests against an
+  in-memory fake (no network in CI).
 - [ ] **`@orbit/mongo`** — adapter mapping `filters` → `$match` via the `mongodb` driver.
 - [ ] **`@orbit/sqlite`** *(optional)* — quick local/embedded adapter.
 - [ ] **Optional `schema` on `DataAdapter`** — mentioned for type-generation plugins; the spec does not define it yet (open decision). Not implemented.
-- [ ] Decide whether `delete`/`create` verb conventions and any `subscribeToEntity` (live updates) belong in the contract **before** writing the DB adapters (changing the contract later = touching everything).
+- [x] **Verb conventions decided** — `do: 'entity.create' | 'entity.update' |
+  'entity.delete'` (plus custom aliases via the adapter's `mutations` map) are
+  adapter-level conventions riding the frozen `mutate(action, …)` path — no
+  contract change. `subscribeToEntity` stays rejected (spec §9).
 
 ---
 
@@ -133,7 +139,7 @@ Future structure (each as its own published package):
 @orbit/express              ✅ thin server wrapper — the Orbit handler on Express
 @orbit/cloudflare-workers   ✅ thin fetch handler — the Orbit handler on Workers (incl. Workers-native realtime)
 @orbit/bun / @orbit/deno    ⬜ (if desired — handler already runs anywhere)
-@orbit/postgres             ⬜
+@orbit/postgres             ✅ DataAdapter over an injected pg client (parameterized WHERE, IN batching, create/update/delete)
 @orbit/mongo                ⬜
 @orbit/sqlite               ⬜ (optional)
 @orbit/rest                 ✅ fetch-based adapter (queries→GET, mutations→POST/PATCH/DELETE)
@@ -204,7 +210,9 @@ artifact on every push.
 5. ✅ **Ship `@orbit/redis`** (Redis `CacheStore`) + ✅ **`@orbit/kv-cache`**
    (Cloudflare KV) — done: the `CacheStore` contract was widened to
    sync-or-async to make real network stores possible.
-6. **Ship `@orbit/postgres` + `@orbit/mongo`** (implement the frozen `DataAdapter`).
+6. **Ship `@orbit/postgres`** ✅ (parameterized `WHERE`, `IN`-clause batching,
+   `create`/`update`/`delete` — 30 tests) **+ `@orbit/mongo`** ⬜ (implement
+   the frozen `DataAdapter` over the `mongodb` driver).
 7. **Clients** (`@orbit/client`, `@orbit/client-react`) only once the protocol is stable.
 8. Optional stretch: field-level TTL, `@orbit/sqlite`, `@orbit/memcached`,
    type-generation via `adapter.schema`.
@@ -231,7 +239,8 @@ artifact on every push.
 | Logging plugin | ✅ (`@orbit/logging`) |
 | Redis cache store | ✅ (`@orbit/redis`) |
 | Cloudflare KV cache store | ✅ (`@orbit/kv-cache`) |
-| Postgres / Mongo adapters | ⬜ (`@orbit/postgres`, `@orbit/mongo`) |
+| Postgres adapter | ✅ (`@orbit/postgres` — parameterized WHERE, IN batching, create/update/delete) |
+| Mongo adapter | ⬜ (`@orbit/mongo`) |
 | Server wrappers | ✅ (`@orbit/hono`, `@orbit/express`, `@orbit/cloudflare-workers` — thin raw bridges / fetch handler + realtime on every host) |
 | Clients | ⬜ (`@orbit/client`, `@orbit/client-react`, defer) |
 
@@ -262,7 +271,7 @@ artifact on every push.
 | :- | :--- | :--- | :--- |
 | 1 | **`@orbit/redis` + `@orbit/kv-cache`** (SPEC §8 "Redis is planned") | ✅ | Shipped: the `CacheStore` contract was widened to sync-or-async, then `createRedisCacheStore` (injected node-redis client) and `createKvCacheStore` (injected KV binding) landed — 8 tests each. Unblocks multi-instance deploys + the B6/B9 story at scale. |
 | 2 | **`@orbit/auth`** | ✅ | Shipped: `createAuthPlugin({ authenticate, authorize?, scope? })` + `bearerAuth`/`apiKeyAuth` presets and `requireCaller`/`requireRole` helpers. Identity stamped in `onBeforeParse` reaches queries AND mutations; `authorize` also gates the mutation `return` re-query. 12 tests. |
-| 3 | **`@orbit/postgres` + `@orbit/mongo`** (0.1.x) | ⬜ | Flagship adapters: `filters` → `WHERE`/`$match`, real batching (IN-clauses), `mutate` mapping. Decide `delete`/`create` verb conventions first (contract is frozen — conventions are adapter-level). |
+| 3 | **`@orbit/postgres`** (0.1.x) | ✅ | Shipped: `filters` → parameterized `WHERE` (`eq`/`ne`/`gt`/`gte`/`lt`/`lte`/`like` operator overrides), real `IN`-clause batching, `create`/`update`/`delete` mutations (`RETURNING`), relation scoping via `parentKey`, validated `limit`, identifier validation + quoted identifiers (no SQL injection via filter key or value). 30 tests. **`@orbit/mongo`** remains ⬜ (next). |
 | 4 | **`@orbit/client`** (after 1.0 freeze) | ⬜ | First-party SDK: typed envelope helpers, WS client with reconnect/resume (the demos' `shared.js` `orbitSocket` is the prototype), client-side cache honoring `invalidates`. Today every consumer re-implements the socket. |
 | 5 | **Batch mutations (`ops`)** | ⬜ decision | One mutation per envelope today. An additive optional `ops: []` field would fit the SPEC §3 "additive only" rule — decide before 1.0 whether to ship. |
 | 6 | **GET query endpoint** | ⬜ decision | Envelope via query-string/headers for CDN-cacheable reads; currently the handler expects a body (POST). Optional, spec-additive. |

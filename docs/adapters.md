@@ -133,6 +133,60 @@ Behavior notes:
 
 See [`docs/ecosystem.md`](./ecosystem.md) for the package's roadmap context.
 
+### `postgresAdapter` — PostgreSQL behind the contract (`@orbit/postgres`)
+
+The flagship SQL adapter: verbatim string filters become **parameterized**
+`WHERE` clauses over a `pg` client you inject, siblings batch into one
+`IN (...)` query, and mutations map to `INSERT`/`UPDATE`/`DELETE … RETURNING`.
+
+```ts
+import { createOrbit } from '@orbit/core';
+import { Pool } from 'pg';
+import { createPostgresAdapter } from '@orbit/postgres';
+
+const orbit = createOrbit({
+  adapters: [
+    createPostgresAdapter({
+      entity: 'user',
+      client: new Pool({ connectionString: process.env.DATABASE_URL }),
+      table: 'users',
+      idColumn: 'user_id',
+      columns: { name: 'full_name' }, // OQS name → SQL column
+    }),
+  ],
+});
+```
+
+| Orbit concept | SQL translation |
+| :--- | :--- |
+| `user(id="42") { name }` | `SELECT * FROM "users" WHERE "user_id" = $1` (single record or `null`) |
+| `user(status="active")` | `SELECT * FROM "users" WHERE "status" = $1` (array) |
+| `posts(limit=20)` | `SELECT * FROM "posts" LIMIT $1` (`limit` validated `1..maxLimit`) |
+| Relation under a parent | `parentKey` scopes with `WHERE <parentKey> = <parent.id>` |
+| `do: user.create` / `.update` / `.delete` | `INSERT … RETURNING *` / `UPDATE … SET … RETURNING *` / `DELETE … RETURNING id` |
+| N sibling requests at one level | one `WHERE col IN ($1, $2, …)` query via `batch` |
+
+Behavior notes:
+
+- **Values travel only as bind parameters** — a payload like
+  `x'; DROP TABLE users; --` never enters the SQL text. Identifier positions
+  (`table`, `idColumn`, `columns`, `parentKey`, resolved filter columns) are
+  validated against a strict charset and quoted, so a malicious filter *key*
+  fails with `ORBIT_FILTER_INVALID` instead of injecting.
+- **An `id` filter means "one record"**; any other filter set means "many".
+- **`cursor` is not supported by default** (`ORBIT_FILTER_INVALID`) — keyset
+  pagination is app-specific. `limit` is the supported page-size convention
+  and is validated per the [pagination convention](#pagination-convention).
+- **`columns` re-keys rows** so field projection finds your OQS names, and the
+  primary key is exposed under `id`. The core projects requested fields
+  server-side, so unrequested columns never reach the wire.
+- **Mutations return `invalidates: [entity]`** for entity-scoped eviction.
+- Config typos fail fast (plain `Error` at construction); client-triggered
+  problems throw standard `OrbitError`s.
+
+See `packages/postgres/README.md` for the full option surface
+(`filters` operator overrides, `maxLimit`, custom `mutations` aliases).
+
 ## Writing your own in 5 minutes
 
 1. Pick an entity name.

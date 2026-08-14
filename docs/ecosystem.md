@@ -19,7 +19,8 @@ every package follows.
 packages/
   core/      @orbit/core            ✅ shipped — engine, hooks, OQS, envelope,
                                     memory adapter, cache plugin, realtime WS
-  adapters/  @orbit/postgres        ⬜ DataAdapter over `pg`
+  adapters/  @orbit/postgres        ✅ DataAdapter over an injected `pg` client
+                                    (parameterized WHERE, IN batching, CRUD)
              @orbit/mongo           ⬜ DataAdapter over `mongodb`
              @orbit/sqlite          ⬜ DataAdapter over `node:sqlite` (optional)
              @orbit/rest            ✅ shipped — fetch-based DataAdapter
@@ -174,7 +175,15 @@ Workers-native `WebSocketPair` upgrade over the same runtime-agnostic
    the (now sync-or-async) `CacheStore` contract re-exported by `@orbit/cache`
    and inject the client/namespace, so both stay dependency-free beyond
    `@orbit/core` (8 tests each against in-memory fakes — no network in CI).
-5. **`@orbit/postgres` + `@orbit/mongo`** — the flagship DB adapters.
+5. **`@orbit/postgres`** ✅ — the flagship SQL adapter: verbatim string
+   filters become **parameterized** `WHERE` clauses over an injected `pg`
+   client (operator overrides, `limit` validation, `parentKey` relation
+   scoping), sibling requests batch into one `IN (...)` query, and mutations
+   map to `INSERT`/`UPDATE`/`DELETE … RETURNING`. Identifier positions are
+   validated and quoted, so neither a filter value nor a filter key can
+   inject SQL. 30 tests against an in-memory fake — no network in CI.
+   **`@orbit/mongo`** ⬜ — the document-store counterpart (`filters` →
+   `$match`) is next.
 6. **Server wrappers** ✅ (`@orbit/hono`, `@orbit/express` — thin raw
    bridges, shipped with real end-to-end tests; `@orbit/cloudflare-workers`
    — fetch handler + Workers-native realtime, also shipped with end-to-end

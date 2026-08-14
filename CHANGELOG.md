@@ -31,6 +31,18 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
   injected KV binding: entries stored as JSON, optional `expirationTtl`,
   prefix invalidation + `clear()` paging through `list()`. 8 tests against an
   in-memory fake. README + `docs/ecosystem.md`.
+- **`@orbit/postgres`** — production PostgreSQL `DataAdapter`
+  (`createPostgresAdapter({ entity, client, table?, idColumn?, columns?,
+  filters?, parentKey?, maxLimit?, mutations? })`) over an injected `pg`
+  client: verbatim string filters become **parameterized** `WHERE` clauses
+  (`eq`/`ne`/`gt`/`gte`/`lt`/`lte`/`like` operator overrides), sibling
+  requests batch into one `IN (...)` query (the N+1 fix), `limit` is
+  validated, relations scope via `parentKey`, and mutations map to
+  `INSERT`/`UPDATE`/`DELETE … RETURNING` (`create`/`update`/`delete` + custom
+  aliases). Values travel only as bind parameters and identifier positions
+  are validated + quoted, so neither a filter value nor a filter key can
+  inject SQL. 30 tests against an in-memory fake — no database in CI.
+  README + `docs/adapters.md` + `docs/ecosystem.md` + ROADMAP §4/§7/§9/§10.
 
 ### Changed
 - **`CacheStore` widened to sync-or-async** — every method may now return a
