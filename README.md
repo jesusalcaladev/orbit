@@ -73,7 +73,55 @@ That's why the core has **zero runtime dependencies**: a contract layer should b
 - **Frozen contracts.** The `DataAdapter` interface (resolve/batch/mutate/subscribe) and the envelope are canonicalized in [`spec.md`](./spec.md) — realtime is designed into the adapter contract, and the WebSocket transport is shipped in v0.0.1.
 - **Framework-agnostic handler.** Works with `Request`/`Response` runtimes, or call `orbit.execute(envelope, ctx)` directly.
 - **Ecosystem packages.** `@orbit/rest` (fetch-based `DataAdapter`: queries → `GET`, mutations → `POST`/`PATCH`/`DELETE`), `@orbit/cache` (the cache plugin's dedicated distribution home, where the Redis/KV stores slot in) and the server wrappers `@orbit/express`, `@orbit/hono` and `@orbit/cloudflare-workers` (Workers-native WebSocket realtime included) ship alongside the frozen core — see [docs/ecosystem.md](./docs/ecosystem.md). Each package has its own README: [`@orbit/rest`](./packages/rest/README.md), [`@orbit/cache`](./packages/cache/README.md), [`@orbit/express`](./packages/express/README.md), [`@orbit/hono`](./packages/hono/README.md), [`@orbit/cloudflare-workers`](./packages/cloudflare-workers/README.md).
-- **Zero runtime dependencies.** `typescript` and `vitest` are dev-only. The whole protocol is a compact (~3 300 lines), typed ES2022 core — including the MessagePack codec and the WebSocket transport.
+- **Zero runtime dependencies.** `typescript` and `vitest` are dev-only. The whole protocol is a compact (~4 100 lines), typed ES2022 core — including the MessagePack codec and the WebSocket transport.
+
+## When to use Orbit — and when not to
+
+**Use it when:**
+
+- **API gateway / BFF aggregation** — one round-trip for a graph that spans
+  several backends (a REST API behind `@orbit/rest`, Postgres, a queue, a
+  cache), each behind its own adapter.
+- **You're fighting N+1** — same-entity siblings batch into one adapter call
+  per level of the graph; deep relations stop costing 1 + N + N×M requests.
+- **You want server-side caching with precise invalidation** — entity-scoped
+  eviction plus `invalidates` echoed to the client so client caches evict too.
+- **Clients need streaming or compact binary wire formats** — SSE delivers the
+  graph level by level (first byte in ~7 ms), MessagePack and gzip shrink the
+  payload, all negotiated from `Accept`/`Accept-Encoding`.
+- **Realtime feeds** — WebSocket subscriptions with per-client sequence
+  numbers, retention across disconnects and patch replay on `resume`: chat,
+  activity feeds, live dashboards.
+- **Uniform access to heterogeneous backends** — one endpoint, one query
+  language, one error contract in front of many systems.
+- **Auth-gated query layers** — the hook pipeline gates reads *and* mutation
+  `return` re-queries the same way (no authorization bypass).
+
+**Don't use it when:**
+
+- **Health checks / liveness probes** — a `GET /health` is one line; wrapping
+  it in an envelope + adapter is ceremony, not value.
+- **Schema validation or typed contract enforcement** — Orbit is "intent, not
+  schema": filters are verbatim strings and results are untyped at the
+  protocol level. If you need compile-time schema guarantees, put a schema'd
+  layer on top (or use GraphQL).
+- **Complex analytics / OLAP** — there is no query planner, no aggregation, no
+  cross-shape joins; heavy aggregation belongs in your database/warehouse, not
+  in adapter functions.
+- **High-throughput event streaming *between* services** — Orbit is
+  request/reply (HTTP + client subscriptions); it is not a pub/sub bus and
+  does not replace Kafka/NATS for service-to-service streams.
+- **Multi-service transactions / sagas** — mutations are single-adapter
+  calls; there is no distributed-transaction story.
+- **Replacing your database or ORM** — it is a contract layer *in front of*
+  them; the adapter is where your SQL/ORM lives.
+- **Simple CRUD on one table** — a plain REST endpoint already does this;
+  Orbit's value shows up when you compose graphs, cache, stream or subscribe.
+- **Huge binary transfers** — multipart uploads are supported (`ctx.files`),
+  but Orbit is not a blob store; serve large media from object storage.
+
+> Heuristic: if an endpoint answers one record from one table and is never
+> composed, cached, streamed or subscribed to, you don't need Orbit.
 
 ## Quick start
 
@@ -227,7 +275,7 @@ in as `packages/*`.
 
 ```bash
 pnpm install         # dev dependencies only (typescript, vitest)
-pnpm test            # 423 tests, Vitest (352 core + 14 express + 13 hono + 14 rest + 4 cache + 26 cloudflare-workers)
+pnpm test            # 429 tests, Vitest (356 core + 14 express + 13 hono + 16 rest + 4 cache + 26 cloudflare-workers)
 pnpm run test:coverage # ~95% stmts / ~90% branch / ~96% lines (see packages/core)
 pnpm run typecheck   # strict TypeScript (builds all packages, then checks examples/bench)
 pnpm run build       # ESM + .d.ts → dist/ in every package
