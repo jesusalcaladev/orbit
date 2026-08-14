@@ -85,7 +85,15 @@
   `WHERE …` over an injected `pg` client, with `IN`-clause batching, operator
   overrides and `create`/`update`/`delete` mutations. 30 tests against an
   in-memory fake (no network in CI).
-- [ ] **`@orbit/mongo`** — adapter mapping `filters` → `$match` via the `mongodb` driver.
+- [x] **`@orbit/mongo`** — adapter mapping `filters` → match documents over an
+  injected `mongodb` client: equality/`$ne`/`$gt`/`$gte`/`$lt`/`$lte`/`$regex`
+  operator overrides, `$in`-clause batching, `create`/`update`/`delete`
+  mutations, `toId`/`fromId` id conversion (ObjectId support), and a
+  no-operator-injection guarantee (field names are charset-validated, payload
+  values are walked recursively so `$`-keyed objects can never become query
+  operators). 38 tests against an in-memory fake, plus a compile-time
+  assertion that the real `mongodb` driver satisfies the injected-client
+  contract — no network in CI.
 - [ ] **`@orbit/sqlite`** *(optional)* — quick local/embedded adapter.
 - [ ] **Optional `schema` on `DataAdapter`** — mentioned for type-generation plugins; the spec does not define it yet (open decision). Not implemented.
 - [x] **Verb conventions decided** — `do: 'entity.create' | 'entity.update' |
@@ -140,7 +148,7 @@ Future structure (each as its own published package):
 @orbit/cloudflare-workers   ✅ thin fetch handler — the Orbit handler on Workers (incl. Workers-native realtime)
 @orbit/bun / @orbit/deno    ⬜ (if desired — handler already runs anywhere)
 @orbit/postgres             ✅ DataAdapter over an injected pg client (parameterized WHERE, IN batching, create/update/delete)
-@orbit/mongo                ⬜
+@orbit/mongo                ✅ DataAdapter over an injected mongodb client (filters→$match, $in batching, create/update/delete, ObjectId via toId/fromId)
 @orbit/sqlite               ⬜ (optional)
 @orbit/rest                 ✅ fetch-based adapter (queries→GET, mutations→POST/PATCH/DELETE)
 @orbit/cache                ✅ distribution home; impl stays in frozen core (see §9 note)
@@ -210,9 +218,12 @@ artifact on every push.
 5. ✅ **Ship `@orbit/redis`** (Redis `CacheStore`) + ✅ **`@orbit/kv-cache`**
    (Cloudflare KV) — done: the `CacheStore` contract was widened to
    sync-or-async to make real network stores possible.
-6. **Ship `@orbit/postgres`** ✅ (parameterized `WHERE`, `IN`-clause batching,
-   `create`/`update`/`delete` — 30 tests) **+ `@orbit/mongo`** ⬜ (implement
-   the frozen `DataAdapter` over the `mongodb` driver).
+6. ✅ **Ship `@orbit/postgres`** (parameterized `WHERE`, `IN`-clause
+   batching, `create`/`update`/`delete` — 30 tests) **+ ✅ `@orbit/mongo`**
+   (match documents, `$in` batching, `create`/`update`/`delete`, ObjectId
+   via `toId`/`fromId` — 38 tests; the real driver satisfies the injected
+   client contract, pinned by a compile-time assertion).
+   **`@orbit/sqlite`** stays ⬜ (optional).
 7. **Clients** (`@orbit/client`, `@orbit/client-react`) only once the protocol is stable.
 8. Optional stretch: field-level TTL, `@orbit/sqlite`, `@orbit/memcached`,
    type-generation via `adapter.schema`.
@@ -240,7 +251,7 @@ artifact on every push.
 | Redis cache store | ✅ (`@orbit/redis`) |
 | Cloudflare KV cache store | ✅ (`@orbit/kv-cache`) |
 | Postgres adapter | ✅ (`@orbit/postgres` — parameterized WHERE, IN batching, create/update/delete) |
-| Mongo adapter | ⬜ (`@orbit/mongo`) |
+| Mongo adapter | ✅ (`@orbit/mongo` — filters→match documents, `$in` batching, create/update/delete, ObjectId via `toId`/`fromId`, operator-injection-safe) |
 | Server wrappers | ✅ (`@orbit/hono`, `@orbit/express`, `@orbit/cloudflare-workers` — thin raw bridges / fetch handler + realtime on every host) |
 | Clients | ⬜ (`@orbit/client`, `@orbit/client-react`, defer) |
 
@@ -271,7 +282,7 @@ artifact on every push.
 | :- | :--- | :--- | :--- |
 | 1 | **`@orbit/redis` + `@orbit/kv-cache`** (SPEC §8 "Redis is planned") | ✅ | Shipped: the `CacheStore` contract was widened to sync-or-async, then `createRedisCacheStore` (injected node-redis client) and `createKvCacheStore` (injected KV binding) landed — 8 tests each. Unblocks multi-instance deploys + the B6/B9 story at scale. |
 | 2 | **`@orbit/auth`** | ✅ | Shipped: `createAuthPlugin({ authenticate, authorize?, scope? })` + `bearerAuth`/`apiKeyAuth` presets and `requireCaller`/`requireRole` helpers. Identity stamped in `onBeforeParse` reaches queries AND mutations; `authorize` also gates the mutation `return` re-query. 12 tests. |
-| 3 | **`@orbit/postgres`** (0.1.x) | ✅ | Shipped: `filters` → parameterized `WHERE` (`eq`/`ne`/`gt`/`gte`/`lt`/`lte`/`like` operator overrides), real `IN`-clause batching, `create`/`update`/`delete` mutations (`RETURNING`), relation scoping via `parentKey`, validated `limit`, identifier validation + quoted identifiers (no SQL injection via filter key or value). 30 tests. **`@orbit/mongo`** remains ⬜ (next). |
+| 3 | **`@orbit/postgres` + `@orbit/mongo`** (0.1.x) | ✅ | Postgres: parameterized `WHERE`, `IN`-clause batching, `create`/`update`/`delete` (`RETURNING`), `parentKey` scoping, validated `limit`, quoted identifiers — no SQL injection (30 tests). Mongo: `filters` → match documents (`eq`/`ne`/`gt`/`gte`/`lt`/`lte`/`regex`), `$in` batching, `create`/`update`/`delete`, `parentKey` scoping, validated `limit`, `toId`/`fromId` id conversion (ObjectId), and a no-operator-injection guarantee — field names charset-validated, payload values walked recursively (38 tests + a compile-time real-driver contract assertion). |
 | 4 | **`@orbit/client`** (after 1.0 freeze) | ⬜ | First-party SDK: typed envelope helpers, WS client with reconnect/resume (the demos' `shared.js` `orbitSocket` is the prototype), client-side cache honoring `invalidates`. Today every consumer re-implements the socket. |
 | 5 | **Batch mutations (`ops`)** | ⬜ decision | One mutation per envelope today. An additive optional `ops: []` field would fit the SPEC §3 "additive only" rule — decide before 1.0 whether to ship. |
 | 6 | **GET query endpoint** | ⬜ decision | Envelope via query-string/headers for CDN-cacheable reads; currently the handler expects a body (POST). Optional, spec-additive. |
@@ -291,7 +302,7 @@ artifact on every push.
 
 ### Milestones (SPEC §13)
 
-- **0.1.x** — P1 #1 (Redis/KV cache stores) + #3 (Postgres/Mongo adapters).
+- **0.1.x** — P1 #1 (Redis/KV cache stores) + #3 (Postgres/Mongo adapters) — ✅ complete.
 - **1.0** — P0 closed (all 7 shipped in v0.0.1+), P2 #1 audit green, envelope/error
   codes locked for backwards compatibility; `@orbit/client` work may start.
 - **2.0 🔮** — federated Orbit servers, native (WASM/C++) parser to close the B3

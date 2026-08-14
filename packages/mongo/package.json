@@ -1,0 +1,43 @@
+{
+  "name": "@orbit/mongo",
+  "version": "0.0.1",
+  "description": "MongoDB DataAdapter for @orbit/core — verbatim filters→$match, $in batching and create/update/delete mutations over an injected mongodb client.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "keywords": [
+    "orbit",
+    "mongodb",
+    "mongo",
+    "adapter",
+    "data-layer"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@orbit/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "mongodb": "^6.16.0",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}

@@ -19,9 +19,11 @@ every package follows.
 packages/
   core/      @orbit/core            ✅ shipped — engine, hooks, OQS, envelope,
                                     memory adapter, cache plugin, realtime WS
-  adapters/  @orbit/postgres        ✅ DataAdapter over an injected `pg` client
+  adapters/             @orbit/postgres        ✅ DataAdapter over an injected `pg` client
                                     (parameterized WHERE, IN batching, CRUD)
-             @orbit/mongo           ⬜ DataAdapter over `mongodb`
+             @orbit/mongo           ✅ DataAdapter over an injected `mongodb`
+                                    client (filters→$match, $in batching,
+                                    CRUD, ObjectId via toId/fromId)
              @orbit/sqlite          ⬜ DataAdapter over `node:sqlite` (optional)
              @orbit/rest            ✅ shipped — fetch-based DataAdapter
   caches/    @orbit/redis           ✅ shipped — CacheStore over Redis
@@ -50,8 +52,10 @@ packages/
    code.
 3. **Zero-dependency unless the job requires it.** `@orbit/redis` and
    `@orbit/kv-cache` inject the client/namespace, so they need nothing beyond
-   `@orbit/core`; `@orbit/postgres` needs `pg`. A *plugin* like `@orbit/auth`
-   should need nothing beyond `@orbit/core`.
+   `@orbit/core`; `@orbit/postgres` and `@orbit/mongo` inject the driver too
+   (the user installs `pg` / `mongodb`; the packages depend only on
+   `@orbit/core` and typecheck against the real driver via devDependencies).
+   A *plugin* like `@orbit/auth` should need nothing beyond `@orbit/core`.
 4. **Tests** in `packages/<name>/test/`, Vitest, exercising the real frozen
    contract against a fake/embedded dependency (an in-process Redis, a stub
    `pg` pool) — no network in CI.
@@ -113,11 +117,16 @@ export interface DataAdapter {
 }
 ```
 
-Database packages (`@orbit/postgres`, `@orbit/mongo`, `@orbit/sqlite`)
-translate **verbatim string filters** into their query language and
-implement `batch` (the N+1 fix: one query per level via `WHERE … IN` /
-`$in`). `@orbit/rest` is shipped: queries become `GET` calls (filters as
-query params, `/:id` when an `id` filter is present), mutations become
+Database packages translate **verbatim string filters** into their query
+language and implement `batch` (the N+1 fix: one query per level via
+`WHERE … IN` / `$in`). **`@orbit/postgres` and `@orbit/mongo` are shipped**
+— parameterized SQL (quoted identifiers, no injection) and match documents
+(charset-validated field names + recursively-safe payload values, so `$`-keyed
+client objects can never become query operators; `toId`/`fromId` handle
+ObjectId ids), each with `create`/`update`/`delete` mutations and
+`parentKey` relation scoping. **`@orbit/sqlite`** stays ⬜ (optional).
+`@orbit/rest` is shipped too: queries become `GET` calls (filters as query
+params, `/:id` when an `id` filter is present), mutations become
 `POST`/`PATCH`/`DELETE` — see [docs/adapters.md](./adapters.md).
 
 ### `OrbitPlugin` (frozen — spec §11)
@@ -175,15 +184,22 @@ Workers-native `WebSocketPair` upgrade over the same runtime-agnostic
    the (now sync-or-async) `CacheStore` contract re-exported by `@orbit/cache`
    and inject the client/namespace, so both stay dependency-free beyond
    `@orbit/core` (8 tests each against in-memory fakes — no network in CI).
-5. **`@orbit/postgres`** ✅ — the flagship SQL adapter: verbatim string
-   filters become **parameterized** `WHERE` clauses over an injected `pg`
-   client (operator overrides, `limit` validation, `parentKey` relation
-   scoping), sibling requests batch into one `IN (...)` query, and mutations
-   map to `INSERT`/`UPDATE`/`DELETE … RETURNING`. Identifier positions are
-   validated and quoted, so neither a filter value nor a filter key can
-   inject SQL. 30 tests against an in-memory fake — no network in CI.
-   **`@orbit/mongo`** ⬜ — the document-store counterpart (`filters` →
-   `$match`) is next.
+5. **`@orbit/postgres`** ✅ + **`@orbit/mongo`** ✅ — the two flagship
+   database adapters, both over injected clients (no driver dependency in
+   the package). Postgres turns verbatim string filters into
+   **parameterized** `WHERE` clauses (operator overrides, `limit`
+   validation, `parentKey` relation scoping), batches siblings into one
+   `IN (...)` query and maps mutations to `INSERT`/`UPDATE`/`DELETE …
+   RETURNING`; identifiers are validated and quoted, so neither a filter
+   value nor a filter key can inject SQL (30 tests). Mongo translates the
+   same filters into **match documents** (`eq`/`ne`/`gt`/`gte`/`lt`/`lte`/
+   `regex`), batches into `$in`, maps mutations to `insertOne`/`updateOne`/
+   `deleteOne`, converts ids through `toId`/`fromId` (ObjectId support),
+   and guarantees no operator injection — field names are
+   charset-validated and payload values are walked recursively, so a `$`-keyed
+   object value can never become a query operator. 38 tests against an
+   in-memory fake plus a compile-time assertion that the real `mongodb`
+   driver satisfies the injected-client contract — no network in CI.
 6. **Server wrappers** ✅ (`@orbit/hono`, `@orbit/express` — thin raw
    bridges, shipped with real end-to-end tests; `@orbit/cloudflare-workers`
    — fetch handler + Workers-native realtime, also shipped with end-to-end

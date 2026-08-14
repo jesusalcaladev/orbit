@@ -44,6 +44,27 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
   inject SQL. 30 tests against an in-memory fake — no database in CI.
   README + `docs/adapters.md` + `docs/ecosystem.md` + ROADMAP §4/§7/§9/§10.
 
+- **`@orbit/mongo`** — production MongoDB `DataAdapter`
+  (`createMongoAdapter({ entity, client, collection?, idField?, columns?,
+  filters?, parentKey?, maxLimit?, mutations?, toId?, fromId? })`) over an
+  injected `mongodb` client (the driver's `Db` satisfies the contract as-is,
+  pinned by a compile-time assertion): verbatim string filters become match
+  documents (`eq`/`ne`/`gt`/`gte`/`lt`/`lte`/`regex` operator overrides),
+  sibling requests batch into one `$in` query (the N+1 fix), `limit` is
+  validated, relations scope via `parentKey`, mutations map to
+  `insertOne`/`updateOne`/`deleteOne` (`create`/`update`/`delete` + custom
+  aliases), and `toId`/`fromId` convert client ids at every boundary
+  (ObjectId support; default identity, so 24-hex `_id` strings work through
+  the driver's native coercion). **No operator injection**: field names are
+  charset-validated (a filter/payload key can never start with `$` or
+  contain `.`) and payload values are walked recursively, so a `$`-keyed
+  object value fails with `ORBIT_MUTATION_FAILED` instead of becoming a
+  query operator — Mongo's counterpart of the postgres parameterization
+  guarantee. Read results alias the primary key under `id` and re-key
+  mapped columns. 38 tests against an in-memory fake — no database in CI.
+  README + `docs/ecosystem.md` + ROADMAP §4/§7/§9/§10 (0.1.x milestone
+  complete).
+
 ### Changed
 - **`CacheStore` widened to sync-or-async** — every method may now return a
   `Promise` (`get`/`set`/`delete`/`clear`) and `keys()` may be a sync or
