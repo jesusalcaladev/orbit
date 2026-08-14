@@ -54,17 +54,26 @@ describe('toOrbitError', () => {
     expect(toOrbitError(original)).toBe(original);
   });
 
-  it('wraps plain Errors as ORBIT_INTERNAL', () => {
+  it('wraps plain Errors as a sanitized ORBIT_INTERNAL', () => {
     const error = toOrbitError(new Error('db blew up'));
     expect(error.code).toBe(ErrorCode.INTERNAL);
-    expect(error.message).toBe('db blew up');
+    // The internal message never reaches the wire — it may embed secrets
+    // (tokens, connection strings). The original rides as `cause` for logs.
+    expect(error.message).toBe('Internal server error');
     expect(error.cause).toBeInstanceOf(Error);
+    expect((error.cause as Error).message).toBe('db blew up');
+  });
+
+  it('never leaks the original message through the wire shape', () => {
+    const error = toOrbitError(new Error('token=secret-123 leaked'));
+    expect(JSON.stringify(error.toJSON())).not.toContain('secret-123');
   });
 
   it('wraps non-Error values', () => {
     const error = toOrbitError('weird');
     expect(error.code).toBe(ErrorCode.INTERNAL);
-    expect(error.message).toContain('weird');
+    expect(error.message).toBe('Internal server error');
+    expect(error.cause).toBe('weird');
   });
 
   it('wraps undefined/null', () => {

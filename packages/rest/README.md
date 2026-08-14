@@ -82,9 +82,16 @@ spec rejects with `ORBIT_MUTATION_FAILED`.
 
 - **Upstream `404` resolves to `null`** ("no record"); other failures become
   `OrbitError`s that preserve the upstream status on the wire (a 401/429 is
-  never flattened into a misleading 400).
+  never flattened into a misleading 400). Upstream `401`/`403` map to
+  `ORBIT_PERMISSION_DENIED` (with the original status, so a 401 stays 401);
+  `400`/`422` map to `ORBIT_FILTER_INVALID`; everything else is
+  `ORBIT_INTERNAL`.
 - **Mutation failures always use `ORBIT_MUTATION_FAILED`** (with the
   upstream status preserved via `details`/`options.status`).
+- **A payload on a `GET`/`DELETE` mutation is rejected**, not silently
+  dropped: `ORBIT_MUTATION_FAILED` with the mapped method named — a
+  mutation that "succeeded" while its data went nowhere is worse than a
+  loud error.
 - **No `batch`** — REST round-trips can't be merged, so a deep graph is one
   parallel request per sibling (the engine's `Promise.all` per level). For
   N+1 relief you'd write a `batch` adapter against your own API.

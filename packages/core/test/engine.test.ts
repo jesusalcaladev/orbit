@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createOrbit } from '../src/engine.js';
+import { createCachePlugin } from '../src/plugins/cache.js';
 import { ErrorCode, OrbitError } from '../src/errors.js';
 import { memoryAdapter } from '../src/adapters/memory.js';
 import type { DataAdapter } from '../src/adapters/types.js';
@@ -464,6 +465,46 @@ describe('mutations', () => {
       orbit.execute({ do: 'user.update', args: { filter: { id: 'zzz' }, payload: {} } }),
     ).rejects.toMatchObject({ code: ErrorCode.FILTER_INVALID });
   });
+
+  it('wraps a plain adapter mutation rejection as a sanitized MUTATION_FAILED', async () => {
+    const orbit = createOrbit({
+      adapters: memoryAdapter([
+        {
+          entity: 'user',
+          resolve: () => null,
+          mutate: () => {
+            throw new Error('s3://bucket with key token=AKIA… exploded');
+          },
+        },
+      ]),
+    });
+    await expect(orbit.execute({ do: 'user.update', args: {} })).rejects.toMatchObject({
+      code: ErrorCode.MUTATION_FAILED,
+      status: 500,
+      message: 'Mutation failed',
+    });
+    // The secret-bearing original never leaks through the wire shape.
+    const caught = await orbit.execute({ do: 'user.update', args: {} }).catch((e) => e);
+    expect(JSON.stringify(caught.toJSON())).not.toContain('AKIA');
+  });
+
+  it('keeps precise OrbitError codes from adapter mutations', async () => {
+    const orbit = createOrbit({
+      adapters: memoryAdapter([
+        {
+          entity: 'user',
+          resolve: () => null,
+          mutate: () => {
+            throw new OrbitError(ErrorCode.PERMISSION_DENIED, 'Admins only');
+          },
+        },
+      ]),
+    });
+    await expect(orbit.execute({ do: 'user.update', args: {} })).rejects.toMatchObject({
+      code: ErrorCode.PERMISSION_DENIED,
+      message: 'Admins only',
+    });
+  });
 });
 
 describe('short-circuit & context', () => {
@@ -484,6 +525,29 @@ describe('short-circuit & context', () => {
     expect(result.data).toEqual({ stubbed: true });
     expect(result.fromCache).toBe(true);
     expect(resolve).not.toHaveBeenCalled();
+  });
+
+  it('enforces cache-after-transformers at startup', () => {
+    const transformer = {
+      name: 'mask',
+      hooks: {
+        onBeforeSerialize: ({ data }: { data: unknown }) => data,
+      },
+    };
+    // Cache registered BEFORE a transformer: the documented footgun — a hit
+    // short-circuits before onBeforeSerialize, so the transformer would be
+    // skipped. Must fail loudly at createOrbit time.
+    expect(() =>
+      createOrbit({ adapters: blogAdapters(), plugins: [createCachePlugin(), transformer] }),
+    ).toThrow(/registered after the cache plugin/);
+    // Correct order — transformer first, cache second — is accepted.
+    expect(() =>
+      createOrbit({ adapters: blogAdapters(), plugins: [transformer, createCachePlugin()] }),
+    ).not.toThrow();
+    // The config.cache option appends the cache plugin last — always valid.
+    expect(() =>
+      createOrbit({ adapters: blogAdapters(), plugins: [transformer], cache: {} }),
+    ).not.toThrow();
   });
 
   it('shares plugin state through the context', async () => {

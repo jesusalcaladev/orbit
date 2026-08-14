@@ -113,7 +113,10 @@ export function buildBookOrbit(): Orbit {
   const cache = createCachePlugin({ headerName: 'x-orbit-cache' });
 
   return createOrbit({
-    plugins: [cache, policyPlugin(), timingPlugin()],
+    // Spec §11: the cache plugin must be registered AFTER every plugin with
+    // an onBeforeSerialize hook (enforced at createOrbit) so cached values
+    // are the final payload — timing runs first, then the cache stores.
+    plugins: [policyPlugin(), timingPlugin(), cache],
     adapters: memoryAdapter([
       {
         entity: 'authors',

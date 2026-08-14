@@ -100,9 +100,11 @@ function upstreamError(
   const code =
     kind === 'mutate'
       ? ErrorCode.MUTATION_FAILED
-      : status === 400 || status === 422
-        ? ErrorCode.FILTER_INVALID
-        : ErrorCode.INTERNAL;
+      : status === 401 || status === 403
+        ? ErrorCode.PERMISSION_DENIED
+        : status === 400 || status === 422
+          ? ErrorCode.FILTER_INVALID
+          : ErrorCode.INTERNAL;
   return new OrbitError(code, `REST ${method} ${url} → ${status} (${entity})`, {
     status,
     details: { status, method, url, entity },
@@ -170,6 +172,17 @@ export function restAdapter(options: RestAdapterOptions): DataAdapter {
       const id = args.filter?.id;
       const base = joinUrl(options.baseUrl, path);
       const url = id !== undefined ? `${base}/${encodeURIComponent(String(id))}` : base;
+
+      // A payload with GET/DELETE would previously be dropped SILENTLY — the
+      // mutation "succeeded" while the data went nowhere. Fail loudly instead:
+      // the caller sees ORBIT_MUTATION_FAILED and knows the mapping is wrong.
+      if (args.payload !== undefined && (method === 'GET' || method === 'DELETE')) {
+        throw new OrbitError(
+          ErrorCode.MUTATION_FAILED,
+          `REST mutation '${action}' maps to ${method}, which cannot carry a payload`,
+          { details: { action, method } },
+        );
+      }
 
       const hasBody = args.payload !== undefined && method !== 'GET' && method !== 'DELETE';
       const response = await doFetch(url, {

@@ -82,15 +82,26 @@ export function isOrbitError(error: unknown): error is OrbitError {
 }
 
 /**
+ * Generic client-safe message for unexpected errors. The real cause stays
+ * available to logs/observability via `cause`, but its text — which may
+ * embed secrets (tokens, credentials, SQL, stack internals) — never reaches
+ * the wire.
+ */
+export const INTERNAL_ERROR_MESSAGE = 'Internal server error';
+
+/**
  * Normalize any thrown value into an OrbitError.
  *
  * Adapters can throw `OrbitError` directly with precise codes (e.g.
- * `ORBIT_FILTER_INVALID`); unknown values become `ORBIT_INTERNAL`.
+ * `ORBIT_FILTER_INVALID`) — those messages are protocol-authored and travel
+ * unchanged. Everything else becomes a sanitized `ORBIT_INTERNAL`: the
+ * original error is preserved as `cause` for server-side logs only, and its
+ * message is never echoed to the client (an adapter that throws a plain
+ * `Error` may have embedded a token, a connection string or internal
+ * details). Adapters that need a precise client-facing message must throw an
+ * `OrbitError` explicitly.
  */
 export function toOrbitError(error: unknown, _ctx?: OrbitContext): OrbitError {
   if (isOrbitError(error)) return error;
-  if (error instanceof Error) {
-    return new OrbitError(ErrorCode.INTERNAL, error.message, { cause: error });
-  }
-  return new OrbitError(ErrorCode.INTERNAL, `Unexpected error: ${String(error)}`, { cause: error });
+  return new OrbitError(ErrorCode.INTERNAL, INTERNAL_ERROR_MESSAGE, { cause: error });
 }

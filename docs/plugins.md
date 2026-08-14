@@ -193,6 +193,12 @@ plugins: [maskPlugin, createCachePlugin()]  // ✓ cached value is final
 plugins: [createCachePlugin(), maskPlugin]  // ✗ cached value is pre-transform
 ```
 
+This rule is **enforced at `createOrbit` time**: mounting a cache plugin before
+a plugin with an `onBeforeSerialize` hook throws with the offending plugin
+named — the mistake surfaces at boot, not as corrupted cache entries in
+production. (The `cache` config option always appends the cache plugin last,
+so it can never trip the check.)
+
 ### Invalidation
 
 Server-side eviction is **automatic and entity-scoped** (spec §8): every

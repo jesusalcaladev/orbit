@@ -78,6 +78,27 @@ describe('restAdapter.resolve', () => {
     });
   });
 
+  it('maps upstream 401/403 to PERMISSION_DENIED (status preserved)', async () => {
+    const adapter = restAdapter({
+      entity: 'user',
+      baseUrl: 'https://api.example.com',
+      fetchFn: async () => new Response('nope', { status: 401 }),
+    });
+    await expect(adapter.resolve({}, {})).rejects.toMatchObject({
+      code: ErrorCode.PERMISSION_DENIED,
+      status: 401,
+    });
+    const forbidden = restAdapter({
+      entity: 'user',
+      baseUrl: 'https://api.example.com',
+      fetchFn: async () => new Response('nope', { status: 403 }),
+    });
+    await expect(forbidden.resolve({}, {})).rejects.toMatchObject({
+      code: ErrorCode.PERMISSION_DENIED,
+      status: 403,
+    });
+  });
+
   it('passes the upstream status through on other 4xx (no flattening to 400)', async () => {
     const fetchFn = async () => new Response('slow down', { status: 429 });
     const adapter = restAdapter({ entity: 'user', baseUrl: 'https://api.example.com', fetchFn });
@@ -192,6 +213,32 @@ describe('restAdapter.mutate', () => {
     await expect(adapter.mutate!('user.explode', {}, {})).rejects.toMatchObject({
       code: ErrorCode.MUTATION_FAILED,
     });
+  });
+
+  it('rejects a payload on a GET/DELETE mutation instead of dropping it silently', async () => {
+    const calls: FetchCall[] = [];
+    const adapter = restAdapter({
+      entity: 'user',
+      baseUrl: 'https://api.example.com',
+      mutations: { touch: { method: 'GET' } },
+      fetchFn: mockFetch(new Map(), calls),
+    });
+    await expect(
+      adapter.mutate!('user.touch', { filter: { id: '42' }, payload: { name: 'Ada' } }, {}),
+    ).rejects.toMatchObject({
+      code: ErrorCode.MUTATION_FAILED,
+      message: expect.stringContaining('GET'),
+    });
+    // The payload is not silently dropped: no request ever goes out.
+    expect(calls).toHaveLength(0);
+    // DELETE with a payload is equally rejected.
+    await expect(
+      adapter.mutate!('user.delete', { filter: { id: '42' }, payload: { reason: 'x' } }, {}),
+    ).rejects.toMatchObject({ code: ErrorCode.MUTATION_FAILED });
+    // Without a payload, DELETE still works (regression guard).
+    await expect(
+      adapter.mutate!('user.delete', { filter: { id: '42' } }, {}),
+    ).resolves.toMatchObject({ id: '42' });
   });
 
   it('throws MUTATION_FAILED on upstream failure (status preserved)', async () => {

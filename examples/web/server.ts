@@ -650,9 +650,13 @@ const server = createServer(async (req, res) => {
     res.writeHead(405, { 'content-type': 'text/plain' });
     res.end('Method not allowed');
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    // Log the real cause server-side; never echo internal details (which may
+    // embed secrets) to the client — the wire carries the generic shape.
+    console.error('[orbit:web] unhandled error:', error);
     res.writeHead(500, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ error: { code: 'ORBIT_INTERNAL', message } }));
+    res.end(
+      JSON.stringify({ error: { code: 'ORBIT_INTERNAL', message: 'Internal server error' } }),
+    );
   }
 });
 

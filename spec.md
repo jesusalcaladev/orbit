@@ -54,7 +54,7 @@ transports are all just *adapters* and *plugins* you mount.
 4. **Everything else is a plugin.** Auth, cache, logging, custom serializers — hooks, in order, no magic. ✅
 5. **Zero dependencies.** The entire core ships with `npm install`-free. ✅
 6. **Best-in-class wire.** Binary serialization, compression, and streaming are part of the protocol, not an afterthought. ✅ (msgpack/gzip/SSE + zero-dependency WebSocket realtime)
-7. **Realtime is a first-class citizen.** Subscriptions and delta sync are designed into the adapter contract now, not bolted on later. 🔜 (transport)
+7. **Realtime is a first-class citizen.** Subscriptions and delta sync are designed into the adapter contract now, not bolted on later. ✅ (zero-dependency WebSocket transport, §10)
 
 ---
 
@@ -228,7 +228,9 @@ non-file fields other than `envelope` are rejected. See
 | `application/*`, `*/*` | JSON (safe default — the client may not have a binary decoder). |
 | `text/*` | SSE (a client narrowing to text formats wants streaming). |
 
-Explicit types always beat wildcards; highest `q`-value wins.
+Explicit types always beat wildcards; highest `q`-value wins. At equal
+`q`-values, ties resolve in favor of the most specific format:
+**MessagePack > SSE > JSON** (pinned by `test/negotiate.test.ts`).
 
 ### Compression
 
@@ -522,7 +524,7 @@ Measured on real hardware by `npm run bench` (see `docs/benchmarks.md`).
 
 | Version | Contents | Status |
 | --- | --- | --- |
-| **0.0.1** | Core engine, OQS, envelope, errors, JSON/msgpack/SSE, gzip, caching, plugin pipeline, frozen `DataAdapter` + envelope, memoryAdapter, WebSocket realtime transport + security suite, prototype-pollution hardening, 11 node examples + 5 interactive web demos + the layered book API, benchmark suite (B1–B9) incl. real-HTTP wire path + cache-vs-DataLoader head-to-heads, CI (GitHub Actions matrix), frozen public API surface (spec §13), spec. | ✅ shipped |
+| **0.0.1** | Core engine, OQS, envelope, errors, JSON/msgpack/SSE, gzip, caching, plugin pipeline, frozen `DataAdapter` + envelope, memoryAdapter, WebSocket realtime transport + security suite, prototype-pollution hardening, 12 node examples + 5 interactive web demos + the layered book API, benchmark suite (B1–B9) incl. real-HTTP wire path + cache-vs-DataLoader head-to-heads, CI (GitHub Actions matrix), frozen public API surface (spec §13), spec. | ✅ shipped |
 | **0.1.x** | First real adapters (Postgres, Redis cache store), federation-friendly relation semantics. | 🔜 |
 | **1.0** | Envelope & error codes locked for backwards compatibility; audit of every section in this spec. | 🔜 |
 | **2.0 🔮** | Federated Orbit servers, native (WASM/C++) parsers to close the B3 wire-path gap (engine core already exceeds the goal), first-party client SDKs. | 🔜 |

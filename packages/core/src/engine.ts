@@ -519,8 +519,22 @@ export class Orbit {
       );
     }
 
-    const result = await adapter.mutate(verb, envelope.args ?? {}, ctx);
-    const mutation: MutationResult = isRecord(result) ? result : {};
+    // A rejected mutation is ORBIT_MUTATION_FAILED (spec §5), not an
+    // unclassified internal error. An adapter that throws an `OrbitError`
+    // keeps its precise code (e.g. FILTER_INVALID for a bad payload); a
+    // plain Error — whose message may embed internals — becomes a sanitized
+    // MUTATION_FAILED with the original kept as `cause` for logs.
+    let raw: unknown;
+    try {
+      raw = await adapter.mutate(verb, envelope.args ?? {}, ctx);
+    } catch (error) {
+      if (isOrbitError(error)) throw error;
+      throw new OrbitError(ErrorCode.MUTATION_FAILED, 'Mutation failed', {
+        cause: error,
+        details: { entity, action: envelope.do },
+      });
+    }
+    const mutation: MutationResult = isRecord(raw) ? raw : {};
     const invalidates =
       Array.isArray(mutation.invalidates) && mutation.invalidates.length > 0
         ? mutation.invalidates
@@ -946,6 +960,8 @@ export function createOrbit(config: OrbitConfig = {}): Orbit {
     plugins.register(cachePlugin);
   }
 
+  assertCacheAfterTransformers(plugins);
+
   return new Orbit({
     adapters,
     plugins,
@@ -965,6 +981,35 @@ export function createOrbit(config: OrbitConfig = {}): Orbit {
 interface EntityEvictingCache {
   invalidateEntity(entity: string): void;
   invalidate(key: string): void;
+}
+
+/**
+ * Enforce the spec §11 registration rule at startup instead of letting it
+ * silently corrupt cached values: the cache plugin must be registered
+ * AFTER every transformer, because a cache hit short-circuits before
+ * `onBeforeSerialize` ever runs — a transformer registered after the cache
+ * would be skipped on hits (and the stored value on misses would be the
+ * pre-transform payload). Fail loudly at `createOrbit` time, with the exact
+ * offending plugin named, so the mistake surfaces at boot, not in
+ * production traffic.
+ */
+function assertCacheAfterTransformers(plugins: PluginRegistry): void {
+  let sawCache = false;
+  for (const plugin of plugins.list) {
+    const isCache =
+      typeof (plugin as OrbitPlugin & Partial<EntityEvictingCache>).invalidateEntity === 'function';
+    if (!sawCache) {
+      if (isCache) sawCache = true;
+      continue;
+    }
+    if (plugin.hooks.onBeforeSerialize) {
+      throw new Error(
+        `Plugin '${plugin.name}' is registered after the cache plugin but transforms data in ` +
+          'onBeforeSerialize — cache hits would serve the untransformed value. Register every ' +
+          'transformer BEFORE the cache plugin (spec §11).',
+      );
+    }
+  }
 }
 
 /** Find the first mounted plugin that can evict cache entries by entity. */

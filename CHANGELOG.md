@@ -150,6 +150,38 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
   fails CI. The contract is now two-tier — protocol shapes pinned by
   `test/contract.test.ts`, the import surface pinned by the new test.
 
+### Security
+- **`ORBIT_INTERNAL` is sanitized** — `toOrbitError` no longer echoes a plain
+  `Error`'s message to the client: unexpected failures answer the generic
+  `"Internal server error"` and the original error (which may embed tokens,
+  connection strings or stack internals) stays server-side as `cause`.
+  Adapters that want a precise client-facing message must throw an
+  `OrbitError` explicitly. The demo server's catch-all was sanitized the
+  same way. Tests assert the wire shape never contains the original text.
+
+### Changed
+- **Plain mutation rejections are `ORBIT_MUTATION_FAILED` (spec §5)** — an
+  adapter `mutate` that throws a plain `Error` is wrapped as a sanitized
+  `ORBIT_MUTATION_FAILED` (original preserved as `cause`) instead of leaking
+  as an unclassified `ORBIT_INTERNAL`; thrown `OrbitError`s keep their
+  precise code and message.
+- **Cache plugin ordering is enforced at `createOrbit`** (spec §11) —
+  mounting a cache plugin before a plugin with an `onBeforeSerialize` hook
+  now throws with the offending plugin named, instead of silently serving
+  pre-transform cached values.
+- **`@orbit/rest` hardening** — a payload on a `GET`/`DELETE` mutation is
+  rejected with `ORBIT_MUTATION_FAILED` (previously dropped silently), and
+  upstream `401`/`403` now map to `ORBIT_PERMISSION_DENIED` (status
+  preserved) instead of `ORBIT_INTERNAL`.
+
+### Docs
+- **Spec truthfulness** — §2 principle 7 badge corrected (`🔜 (transport)` →
+  `✅`, realtime shipped in v0.0.1); §7 pins the equal-`q` tie-break
+  (MessagePack > SSE > JSON, already covered by `negotiate.test.ts`); §13
+  example count corrected (11 → 12 node examples). `docs/plugins.md` notes
+  the enforced cache ordering; `packages/rest/README.md` documents the new
+  payload/status behavior; README coverage figures refreshed (~90% branch).
+
 ### Added
 - **B9 · Deep-nest warm replay vs DataLoader** — the same 5-level graph from
   B2 through graphql-js + DataLoader (devDependency of the bench harness
