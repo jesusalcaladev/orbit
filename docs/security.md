@@ -57,8 +57,11 @@ they are infrastructure concerns, not protocol concerns:
   token-bucket plugin (per IP or any `keyOf`) that gates queries AND
   mutations in `onBeforeParse`.
 - **Authentication / authorization** — that is a plugin's job (`onBeforeParse`
-  / `onBeforeResolve`), demonstrated by `examples/node/authentication/03-auth-plugin.ts`. The core
-  ships no identity assumptions.
+  / `onBeforeResolve`). For a first-party start,
+  [`@orbit/auth`](../packages/auth/README.md) resolves a caller from headers
+  (`bearerAuth`/`apiKeyAuth`), gates reads via `authorize`, scopes rows via
+  `scope`, and reaches mutations through `onBeforeParse`. The core ships no
+  identity assumptions.
 - **Request smuggling** — the `node:http` demo server and any framework wrapper
   must keep their own HTTP-layer hygiene (header size limits, `CL:TE`/`TE:CL`
   handling). The handler consumes a well-formed `Request`.

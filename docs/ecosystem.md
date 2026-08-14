@@ -26,8 +26,8 @@ packages/
   caches/    @orbit/redis           ⬜ CacheStore over Redis
              @orbit/kv-cache        ⬜ CacheStore over Cloudflare KV
              @orbit/memcached       ⬜ CacheStore over Memcached (optional)
-  plugins/   @orbit/auth            ⬜ OrbitPlugin — authn/authz hooks
-             @orbit/logging         ⬜ OrbitPlugin — span timing / observability
+  plugins/   @orbit/auth            ✅ shipped — authn/authz hooks (authenticate/authorize/scope)
+             @orbit/logging         ✅ shipped — request-timing / observability
              @orbit/rate-limit      ✅ shipped — token-bucket OrbitPlugin (queries + mutations)
              @orbit/cache           ✅ shipped — distribution home (impl stays in frozen core)
   servers/   @orbit/hono            ✅ shipped — thin handler wrapper for Hono
@@ -159,7 +159,10 @@ Workers-native `WebSocketPair` upgrade over the same runtime-agnostic
    re-exports the plugin + `CacheStore` contract — and is the home of the
    Redis/KV/Memcached stores next. The code-level split is a deliberate
    breaking change reserved for a future major.
-3. **`@orbit/auth`** — hooks already exist; an easy, dependency-free win.
+3. **`@orbit/auth`** ✅ + **`@orbit/logging`** ✅ — the two hooks-only plugin
+   packages: authn/authz (`authenticate`/`authorize`/`scope` + bearer/api-key
+   presets, 12 tests) and request timing/observability (5 tests). Both are
+   dependency-free — nothing beyond `@orbit/core`.
 4. **`@orbit/redis`**, then **`@orbit/kv-cache`** — the two `CacheStore`
    backends that make the B6/B9 cache story production-ready. They implement
    the `CacheStore` contract re-exported by `@orbit/cache`.

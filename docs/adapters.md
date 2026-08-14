@@ -144,6 +144,40 @@ See [`docs/ecosystem.md`](./ecosystem.md) for the package's roadmap context.
 createOrbit({ adapters: [{ entity: 'inventory', resolve: myInventoryLookup }] });
 ```
 
+## Pagination convention
+
+Orbit adds **no new syntax** for pagination — filters are verbatim by design
+(spec §4), so a list is just a node whose filters the adapter interprets. The
+convention is two reserved filter keys:
+
+| Filter | Meaning |
+| :--- | :--- |
+| `limit` | Max records to return, e.g. `posts(status="live", limit=20)`. Values are strings on the wire (`"20"`); the adapter coerces and validates them. |
+| `cursor` | Opaque continuation token from the previous page, e.g. `posts(cursor="eyJvZmZzZXQiOjQwfQ")`. |
+
+```ts
+posts(status="live", limit=20) { id, title }
+posts(cursor="<opaque>", limit=20) { id, title }
+```
+
+- **The adapter owns the cursor.** It can be an offset, a keyset id, or a
+  base64 payload — the core never inspects it. Prefer keyset/seek pagination
+  over `OFFSET` for deep pages.
+- **Return a page shape** so the client knows there is more. The engine
+  projects leaf fields; include the cursor as a field or use a wrapper:
+
+  ```ts
+  resolve: async ({ limit, cursor }) => {
+    const page = await db.posts.list({ limit: Number(limit) ?? 20, after: cursor });
+    return { items: page.items, nextCursor: page.nextCursor };
+  },
+  // posts(limit=20) { items { id, title }, nextCursor }
+  ```
+
+- **Validate the limit** in the adapter and throw `ORBIT_FILTER_INVALID` for
+  out-of-range values (`limit=0`, `limit=10000`, non-numeric) — never trust a
+  verbatim filter to be a sane number.
+
 ## Error conventions
 
 - Throw `OrbitError` with a precise code when you know it: `ORBIT_FILTER_INVALID` for bad filters, `ORBIT_PERMISSION_DENIED` for auth, etc.

@@ -5,6 +5,31 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
 ## [Unreleased]
 
 ### Added
+- **`@orbit/auth`** — first-party authentication & authorization plugin
+  (`createAuthPlugin`) with `authenticate`/`authorize`/`scope` and
+  `bearerAuth`/`apiKeyAuth` presets plus `requireCaller`/`requireRole`
+  helpers. Identity is stamped in `onBeforeParse` (reaching queries AND
+  mutations and a mutation's `return` re-query); a caller already seeded on
+  `ctx.state.caller` (a realtime `authorize` session) short-circuits
+  re-authentication; `authorize` gates the `return` re-query too (no
+  authorization bypass). `apiKeyAuth` lookups use `Object.hasOwn`, so a
+  `__proto__`/`constructor` header can never pass authentication. 12 tests.
+- **`@orbit/logging`** — first-party request-timing plugin
+  (`createLoggingPlugin`): one structured `LogEntry` per resolved query
+  (`onBeforeParse` → `onBeforeSerialize`) and per error (queries + mutations
+  via `onError`, with the standard code/status/message). Documented
+  non-timed paths: cache-hit short-circuits and successful mutations (no
+  serialize hook in the mutation pipeline). 5 tests.
+
+### Docs
+- **Pagination convention** (`docs/adapters.md`) — reserved `limit`/`cursor`
+  filter keys, a page shape example, and validate-the-limit guidance. No
+  syntax change (filters are verbatim by design — spec §4).
+- `docs/ecosystem.md` + ROADMAP §1/§7/§10 mark `@orbit/auth` and
+  `@orbit/logging` shipped; README ecosystem list + test count (483)
+  refreshed.
+
+### Added
 - **Response headers channel** — plugins and adapters can now set
   `ctx.responseHeaders` (a `Record<string, string | string[]>`) anywhere in
   the pipeline and the handler merges it into every response format (JSON,

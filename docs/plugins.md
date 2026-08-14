@@ -55,7 +55,9 @@ point: an auth plugin that stamps `ctx.state.caller` here covers writes as
 well as reads, and a gate that throws (e.g. `ORBIT_PERMISSION_DENIED`)
 rejects the mutation. This is also why the first-party
 [`@orbit/rate-limit`](../packages/rate-limit/README.md) token-bucket plugin
-needs only this one hook to rate-limit queries **and** mutations.
+needs only this one hook to rate-limit queries **and** mutations, and why
+[`@orbit/auth`](../packages/auth/README.md) stamps `ctx.state.caller` here —
+so identity reaches queries, mutations and a mutation's `return` re-query.
 
 ### `onAfterParse` — enrich or replace the parsed tree
 

@@ -32,11 +32,11 @@
 | Plugin registry + duplicate-name rejection | ✅ | `src/plugins/registry.ts` |
 | Strict pipeline order (introspectable) | ✅ | `src/plugins/types.ts` `HOOK_ORDER` |
 
-**⬜ First-party plugin packages** (the "brains", shipped as `@orbit/<target>`):  - [ ] **`@orbit/auth`** — hooks `onBeforeResolve`/`onBeforeExecute` with role checks. *Only a hand-written example exists today: `examples/node/authentication/03-auth-plugin.ts`.*
+**⬜ First-party plugin packages** (the "brains", shipped as `@orbit/<target>`):  - [x] **`@orbit/auth`** — shipped: `authenticate`/`authorize`/`scope` + `bearerAuth`/`apiKeyAuth` presets and `requireCaller`/`requireRole` helpers (identity stamped in `onBeforeParse` reaches mutations too). 12 tests.
 - [x] **`@orbit/cache`** — shipped as a distribution package that re-exports the plugin from the frozen core (one-way dependency, no `core → cache` cycle). The code-level split is a deliberate breaking change reserved for a future major — see §9.
 - [ ] **`@orbit/redis`** — a `RedisCacheStore` implementing the `CacheStore` contract (contract is done and swappable; only the store impl is missing). Supports TTL/SWR and prefix invalidation.
 - [ ] **`@orbit/kv-cache`** — Cloudflare Workers KV `CacheStore`, same contract as `@orbit/redis` (see below). (`@orbit/cloudflare-workers` is the *server wrapper* package — see §7.)
-- [ ] **`@orbit/logging`** — observability/span-timing around hooks; will help with benchmark B3.
+- [x] **`@orbit/logging`** — shipped: dependency-free request-timing plugin (one structured `LogEntry` per resolved query or error). 5 tests.
 
 ---
 
@@ -138,8 +138,8 @@ Future structure (each as its own published package):
 @orbit/redis                ⬜ (CacheStore for Redis — cache + optional feature store)
 @orbit/kv-cache             ⬜ (CacheStore for Cloudflare KV)
 @orbit/memcached            ⬜ (optional)
-@orbit/auth                 ⬜
-@orbit/logging              ⬜
+@orbit/auth                 ✅ authn/authz hooks (authenticate/authorize/scope + presets)
+@orbit/logging              ✅ request-timing / observability
 @orbit/client               ⬜ core frontend client — protocol must be frozen first
 @orbit/client-react         ⬜ cache-aware React bindings
 ```
@@ -223,7 +223,8 @@ artifact on every push.
 | In-memory adapter | ✅ (keep in `@orbit/core`) |
 | REST/fetch adapter | ✅ (`@orbit/rest` — queries→GET, mutations→POST/PATCH/DELETE) |
 | Benchmarks | ✅ (B1–B9 goals met) |
-| Auth plugin | ⬜ (`@orbit/auth`) |
+| Auth plugin | ✅ (`@orbit/auth`) |
+| Logging plugin | ✅ (`@orbit/logging`) |
 | Redis cache store | ⬜ (`@orbit/redis`) |
 | Cloudflare KV cache store | ⬜ (`@orbit/kv-cache`) |
 | Postgres / Mongo adapters | ⬜ (`@orbit/postgres`, `@orbit/mongo`) |
@@ -256,13 +257,13 @@ artifact on every push.
 | # | Item | Status | Notes |
 | :- | :--- | :--- | :--- |
 | 1 | **`@orbit/redis` + `@orbit/kv-cache`** (SPEC §8 "Redis is planned") | ⬜ | The `CacheStore` contract is shipped; only the production store impls are missing. Unblocks multi-instance deploys + the B6/B9 story at scale. |
-| 2 | **`@orbit/auth`** | ⬜ | `policyPlugin` in `examples/node/book/engine.ts` is the working prototype; package it (role checks, token helpers — scrypt pattern already in the demos). |
+| 2 | **`@orbit/auth`** | ✅ | Shipped: `createAuthPlugin({ authenticate, authorize?, scope? })` + `bearerAuth`/`apiKeyAuth` presets and `requireCaller`/`requireRole` helpers. Identity stamped in `onBeforeParse` reaches queries AND mutations; `authorize` also gates the mutation `return` re-query. 12 tests. |
 | 3 | **`@orbit/postgres` + `@orbit/mongo`** (0.1.x) | ⬜ | Flagship adapters: `filters` → `WHERE`/`$match`, real batching (IN-clauses), `mutate` mapping. Decide `delete`/`create` verb conventions first (contract is frozen — conventions are adapter-level). |
 | 4 | **`@orbit/client`** (after 1.0 freeze) | ⬜ | First-party SDK: typed envelope helpers, WS client with reconnect/resume (the demos' `shared.js` `orbitSocket` is the prototype), client-side cache honoring `invalidates`. Today every consumer re-implements the socket. |
 | 5 | **Batch mutations (`ops`)** | ⬜ decision | One mutation per envelope today. An additive optional `ops: []` field would fit the SPEC §3 "additive only" rule — decide before 1.0 whether to ship. |
 | 6 | **GET query endpoint** | ⬜ decision | Envelope via query-string/headers for CDN-cacheable reads; currently the handler expects a body (POST). Optional, spec-additive. |
-| 7 | **Pagination convention** | ⬜ | No new syntax needed — document a `limit`/`cursor` convention for adapters (filters are verbatim by design). |
-| 8 | **`@orbit/logging`** | ⬜ | Span-timing around hooks (already listed in §1); `onBeforeExecute`/`onAfterResolve` give the anchor points. |
+| 7 | **Pagination convention** | ✅ | Documented in `docs/adapters.md` — reserved `limit`/`cursor` filter keys, page shape, and validate-the-limit guidance. No syntax change (filters are verbatim by design). |
+| 8 | **`@orbit/logging`** | ✅ | Shipped: `createLoggingPlugin({ logger?, now?, maxLabelLength? })` — times queries from `onBeforeParse`→`onBeforeSerialize` and logs every error (queries + mutations). Cache hits / successful mutations are documented non-timed paths. 5 tests. |
 | 9 | **`@orbit/fastify` wrapper** *(optional)* | ⬜ | Express/Hono/CF ship; Fastify is the remaining major host. |
 
 ### P2 — Quality & architecture (the road to 1.0)
@@ -277,7 +278,7 @@ artifact on every push.
 
 ### Milestones (SPEC §13)
 
-- **0.1.x** — P1 #1–#3 (real adapters + stores).
+- **0.1.x** — P1 #1 (Redis/KV cache stores) + #3 (Postgres/Mongo adapters).
 - **1.0** — P0 closed (all 7 shipped in v0.0.1+), P2 #1 audit green, envelope/error
   codes locked for backwards compatibility; `@orbit/client` work may start.
 - **2.0 🔮** — federated Orbit servers, native (WASM/C++) parser to close the B3
