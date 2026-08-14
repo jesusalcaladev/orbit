@@ -250,7 +250,10 @@ export function createCachePlugin(options: CachePluginOptions = {}): CachePlugin
     invalidatePrefix: (prefix) => {
       if (!store.keys) return;
       for (const key of store.keys()) {
-        if (key.startsWith(prefix)) {
+        // Store contract says keys are strings — a buggy/hostile store that
+        // yields non-string keys (Buffers, numbers) must not crash the
+        // mutation that triggered eviction.
+        if (typeof key === 'string' && key.startsWith(prefix)) {
           store.delete(key);
           unindexKey(key);
         }
@@ -292,6 +295,14 @@ export function createCachePlugin(options: CachePluginOptions = {}): CachePlugin
         }
 
         const age = (Date.now() - entry.createdAt) / 1000;
+
+        // Fail-safe: a corrupted entry (missing/non-finite `createdAt` from
+        // a buggy store) must not be served as perpetually fresh — treat it
+        // as expired and fall through to a fresh resolve.
+        if (!Number.isFinite(age)) {
+          store.delete(key);
+          return;
+        }
 
         // Model: `ttl` is hard freshness; `stale` extends it as an SWR window
         // during which we keep serving while revalidating in the background.

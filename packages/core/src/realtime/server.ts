@@ -26,6 +26,8 @@ import type { Socket } from 'node:net';
 import type { Duplex } from 'node:stream';
 import { ErrorCode, toOrbitError } from '../errors.js';
 import type { Orbit } from '../engine.js';
+import type { OrbitContext } from '../types.js';
+import { isRecord } from '../utils.js';
 import { decodeMsgpack, encodeMsgpack } from '../serialize/msgpack.js';
 import {
   CloseCode,
@@ -55,8 +57,19 @@ export interface RealtimeServerOptions {
   retentionMs?: number;
   /** Message wire format. Defaults to `'json'`. */
   serialize?: 'json' | 'msgpack';
-  /** Optional request-time authorization gate (e.g. token validation). */
-  authorize?: (request: IncomingMessage) => boolean | Promise<boolean>;
+  /**
+   * Optional request-time authorization gate (spec §10). Return `false` to
+   * deny the upgrade (403). Return `true` to allow with an empty context.
+   * Return an `OrbitContext` to allow AND seed the session's context: it
+   * flows into every `{ query }`/`{ do }` envelope executed over the socket
+   * (so `ctx.state.caller` reaches `mutate` and the auth pipeline) and into
+   * the subscription gates (a subscription whose OQS the pipeline denies is
+   * rejected with the plugin's error, e.g. ORBIT_PERMISSION_DENIED). The
+   * adapter `subscribe` hook itself stays stateless (frozen contract).
+   */
+  authorize?: (
+    request: IncomingMessage,
+  ) => boolean | OrbitContext | Promise<boolean | OrbitContext>;
   /** Optional allowed Origin header(s) — rejected otherwise. */
   origin?: string | string[];
 }
@@ -158,15 +171,19 @@ export class RealtimeServer {
       .then(() => (this.#authorize ? this.#authorize(request) : true))
       .then(
         (allowed) => {
+          // `authorize` returns a boolean (deny/allow) OR a context: an
+          // object seeds the session's auth context (spec §10) that rides
+          // into socket envelope executions and subscription gates.
           if (!allowed) {
             socket.end('HTTP/1.1 403 Forbidden\r\n\r\n');
             return;
           }
+          const authCtx: OrbitContext = isRecord(allowed) ? allowed : {};
           // WebSocket traffic is many small frames — disable Nagle so a burst
           // (fan-out, resume replay) is not held back by delayed-ACK waits.
           (socket as Socket).setNoDelay(true);
           socket.write(upgradeResponse(key));
-          const session = new Session(socket, this.#orbit, this.#hub, this.#options);
+          const session = new Session(socket, this.#orbit, this.#hub, this.#options, authCtx);
           this.#sessions.add(session);
           socket.on('data', (chunk) => session.onData(chunk));
           socket.on('close', () => {
@@ -211,6 +228,7 @@ class Session {
   readonly #socket: Duplex;
   readonly #hub: SubscriptionHub;
   readonly #options: SessionOptions;
+  readonly #authCtx: OrbitContext;
   readonly #decoder: FrameDecoder;
   readonly #driver: RealtimeSessionDriver;
   readonly #heartbeat: NodeJS.Timeout;
@@ -219,15 +237,25 @@ class Session {
   #lastPong = Date.now();
   #closing = false;
 
-  constructor(socket: Duplex, orbit: Orbit, hub: SubscriptionHub, options: SessionOptions) {
+  constructor(
+    socket: Duplex,
+    orbit: Orbit,
+    hub: SubscriptionHub,
+    options: SessionOptions,
+    authCtx: OrbitContext = {},
+  ) {
     this.#socket = socket;
     this.#hub = hub;
     this.#options = options;
+    this.#authCtx = authCtx;
     this.#decoder = new FrameDecoder(options.maxMessageBytes);
     // The shared session driver owns the frame-level protocol (subscribe/
-    // unsubscribe/resume/envelope requests). On attach we cancel any pending
-    // retention-release timer — the client re-attached before expiry.
+    // unsubscribe/resume/envelope requests) and threads the session's auth
+    // context into every envelope execution and subscription gate. On
+    // attach we cancel any pending retention-release timer — the client
+    // re-attached before expiry.
     this.#driver = createSessionDriver(orbit, hub, (message) => this.#send(this.#encode(message)), {
+      ctx: this.#authCtx,
       onAttach: (clientId) => this.#cancelRelease(clientId),
     });
     this.#heartbeat = setInterval(() => this.#tickHeartbeat(), options.heartbeatMs);
@@ -405,10 +433,19 @@ class Session {
     }
     // The shared driver dispatches (async — `{ query }` / `{ do }` envelopes
     // execute on the engine, spec §10 request/response). Subscription-control
-    // rejections keep the exact same `{ error }` wire shape as before.
+    // rejections keep the exact same `{ error }` wire shape as before, and
+    // echo the client's correlation `id` when the message carried one — a
+    // denied subscription (e.g. PERMISSION_DENIED from the auth pipeline)
+    // must be correlatable to the subscribe that caused it.
     this.#driver.dispatch(message).catch((error) => {
       const orbitError = toOrbitError(error);
-      this.#send(this.#encode({ error: orbitError.toJSON().error }));
+      const id = isRecord(message) && typeof message.id === 'string' ? message.id : undefined;
+      this.#send(
+        this.#encode({
+          ...(id !== undefined ? { id } : {}),
+          error: orbitError.toJSON().error,
+        }),
+      );
     });
   }
 

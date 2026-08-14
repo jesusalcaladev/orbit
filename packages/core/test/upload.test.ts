@@ -13,7 +13,7 @@ import type { MutationArgs } from '../src/types.js';
 // ctx)`; plugins see them on ctx.
 // ---------------------------------------------------------------------------
 
-function uploadOrbit(options: { maxPayloadBytes?: number } = {}) {
+function uploadOrbit(options: { maxPayloadBytes?: number; maxMultipartFields?: number } = {}) {
   const received: { args: MutationArgs; files: Record<string, File> | undefined }[] = [];
   const orbit = createOrbit({
     adapters: memoryAdapter([
@@ -151,6 +151,47 @@ describe('file uploads — multipart handler', () => {
     });
     const response = await orbit.handler(request);
     expect(response.status).toBe(413);
+  });
+
+  it('caps the number of multipart fields (default 64)', async () => {
+    const { orbit } = uploadOrbit();
+    const form = new FormData();
+    form.set('envelope', JSON.stringify({ do: 'user.uploadAvatar' }));
+    // 65 fields beyond the envelope → over the default cap.
+    for (let i = 0; i < 65; i += 1) {
+      form.set(`f${i}`, new File(['x'], `f${i}.bin`), `f${i}.bin`);
+    }
+    const response = await orbit.handler(
+      new Request('http://localhost/orbit', { method: 'POST', body: form }),
+    );
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error.code).toBe(ErrorCode.INVALID_QUERY);
+    expect(body.error.details.maxFields).toBe(64);
+  });
+
+  it('respects a custom maxMultipartFields cap', async () => {
+    const { orbit, received } = uploadOrbit({ maxMultipartFields: 2 });
+    // At the cap (envelope + 1 file): allowed.
+    let form = new FormData();
+    form.set('envelope', JSON.stringify({ do: 'user.uploadAvatar' }));
+    form.set('one', new File(['a'], 'a.bin'), 'a.bin');
+    let response = await orbit.handler(
+      new Request('http://localhost/orbit', { method: 'POST', body: form }),
+    );
+    expect(response.status).toBe(200);
+    expect(received).toHaveLength(1);
+
+    // Over the cap (envelope + 2 files): rejected.
+    form = new FormData();
+    form.set('envelope', JSON.stringify({ do: 'user.uploadAvatar' }));
+    form.set('one', new File(['a'], 'a.bin'), 'a.bin');
+    form.set('two', new File(['b'], 'b.bin'), 'b.bin');
+    response = await orbit.handler(
+      new Request('http://localhost/orbit', { method: 'POST', body: form }),
+    );
+    expect(response.status).toBe(400);
+    expect((await response.json()).error.details.maxFields).toBe(2);
   });
 
   it('serves queries with SSE negotiation for multipart too', async () => {

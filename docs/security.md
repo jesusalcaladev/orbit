@@ -18,6 +18,12 @@ how each defense is tested.
 | Realtime transport | Handshake / frame protocol abuse | Full RFC 6455 validation (masking, RSV, opcodes, fragmentation, lengths, close codes) → correct close codes | `test/realtime-security.test.ts` (32 tests) |
 | Realtime transport | Slow-loris, fragmented floods, declared-length DoS | Byte caps + fragment-count cap (1000) → 1009; `socket.setNoDelay` | `test/realtime-security.test.ts` |
 | Realtime transport | Unauthorized connections | `authorize()` gate (403 on sync throw / async reject) + optional `origin` allow-list | `test/realtime-security.test.ts` |
+| Realtime transport | Authenticated sockets running with no identity | `authorize` may return an `OrbitContext` seeding the session — it rides into socket envelopes and subscription gates (a denied subscribe is rejected with the plugin's error + the correlation `id`) | `test/realtime-request.test.ts` |
+| Engine | Hanging adapters | `requestTimeoutMs` (opt-in) + caller `AbortSignal` on `ctx.signal` — a hung upstream rejects with a sanitized timeout error | `test/engine.test.ts` |
+| Multipart | Thousands-of-fields DoS | `maxMultipartFields` (default 64) → `ORBIT_INVALID_QUERY` + `details.maxFields` (byte cap bounds the body, count cap bounds the parse) | `test/upload.test.ts` |
+| msgpack codec | Truncated fixed-width reads | Bounds-checked DataView reads (`need()` before every float/bigint/int read) — never a `RangeError` | `test/fuzz.test.ts` |
+| msgpack codec | Nesting bombs (deep arrays/maps) | `MAX_NESTING` (512) → fast-fail codec error, not a JS stack overflow | `test/fuzz.test.ts` |
+| Whole pipeline | Unknown adversarial input | **Deterministic fuzz suite** (fixed seeds, CI-stable) across parser, msgpack, envelope, cache spec, negotiation and the engine — invariants: only protocol errors, no crash, no hang | `test/fuzz.test.ts` |
 
 ## Prototype pollution — the fix in detail
 
@@ -46,7 +52,10 @@ they are infrastructure concerns, not protocol concerns:
   balancer). The handler speaks HTTP; nothing in the protocol assumes plaintext.
 - **Rate limiting / DoS at scale** — connection-level throttling, IP bans and
   request budgets belong in the server wrapper. The core defends per-request
-  (size, depth, protocol), not per-IP.
+  (size, depth, protocol), not per-IP. For a first-party, one-line start:
+  [`@orbit/rate-limit`](../packages/rate-limit/README.md) is a zero-dep
+  token-bucket plugin (per IP or any `keyOf`) that gates queries AND
+  mutations in `onBeforeParse`.
 - **Authentication / authorization** — that is a plugin's job (`onBeforeParse`
   / `onBeforeResolve`), demonstrated by `examples/node/authentication/03-auth-plugin.ts`. The core
   ships no identity assumptions.

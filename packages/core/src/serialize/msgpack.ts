@@ -176,6 +176,12 @@ export function decodeMsgpack(bytes: Uint8Array): unknown {
     for (let i = 0; i < len; i += 1) value = value * 256 + u8();
     return value;
   };
+  // Bounds check before a raw DataView read (floats, big ints, fixed-width
+  // ints). A truncated payload must fail with the codec's own error — never
+  // a RangeError from the DataView (fuzz-caught: `0xca` alone is 1 byte).
+  const need = (len: number): void => {
+    if (pos + len > bytes.byteLength) fail();
+  };
   const readBytes = (len: number): Uint8Array => {
     if (pos + len > bytes.byteLength) fail();
     const slice = bytes.slice(pos, pos + len);
@@ -201,85 +207,108 @@ export function decodeMsgpack(bytes: Uint8Array): unknown {
     return out;
   };
 
-  function readValue(): unknown {
-    const b = u8();
-    if (b <= 0x7f) return b; // positive fixint
-    if (b >= 0xe0) return b - 256; // negative fixint
-    if (b >= 0xa0 && b <= 0xbf) return readString(b & 0x1f); // fixstr
-    if (b >= 0x90 && b <= 0x9f) return readArray(b & 0x0f); // fixarray
-    if (b >= 0x80 && b <= 0x8f) return readMap(b & 0x0f); // fixmap
+  // Nesting-depth cap (P0 fuzz hardening): a crafted payload of deeply
+  // nested arrays/maps — e.g. 100k `0x91` fixarrays, ~100 KB of bytes —
+  // would otherwise recurse until the JS call stack blows (RangeError).
+  // A tiny hostile body must fail with a normal codec error, not crash.
+  const MAX_NESTING = 512;
+  let depth = 0;
 
-    switch (b) {
-      case 0xc0:
-        return null;
-      case 0xc2:
-        return false;
-      case 0xc3:
-        return true;
-      case 0xc4:
-        return readBytes(read(1)); // bin8
-      case 0xc5:
-        return readBytes(read(2)); // bin16
-      case 0xc6:
-        return readBytes(read(4)); // bin32
-      case 0xca: {
-        const value = view.getFloat32(pos, false);
-        pos += 4;
-        return value;
+  function readValue(): unknown {
+    depth += 1;
+    if (depth > MAX_NESTING) {
+      depth -= 1;
+      fail();
+    }
+    try {
+      const b = u8();
+      if (b <= 0x7f) return b; // positive fixint
+      if (b >= 0xe0) return b - 256; // negative fixint
+      if (b >= 0xa0 && b <= 0xbf) return readString(b & 0x1f); // fixstr
+      if (b >= 0x90 && b <= 0x9f) return readArray(b & 0x0f); // fixarray
+      if (b >= 0x80 && b <= 0x8f) return readMap(b & 0x0f); // fixmap
+
+      switch (b) {
+        case 0xc0:
+          return null;
+        case 0xc2:
+          return false;
+        case 0xc3:
+          return true;
+        case 0xc4:
+          return readBytes(read(1)); // bin8
+        case 0xc5:
+          return readBytes(read(2)); // bin16
+        case 0xc6:
+          return readBytes(read(4)); // bin32
+        case 0xca: {
+          need(4);
+          const value = view.getFloat32(pos, false);
+          pos += 4;
+          return value;
+        }
+        case 0xcb: {
+          need(8);
+          const value = view.getFloat64(pos, false);
+          pos += 8;
+          return value;
+        }
+        case 0xcc:
+          return read(1); // uint8
+        case 0xcd:
+          return read(2); // uint16
+        case 0xce:
+          return read(4); // uint32
+        case 0xcf: {
+          need(8);
+          const value = view.getBigUint64(pos, false);
+          pos += 8;
+          return Number(value);
+        }
+        case 0xd0: {
+          need(1);
+          const value = view.getInt8(pos);
+          pos += 1;
+          return value;
+        }
+        case 0xd1: {
+          need(2);
+          const value = view.getInt16(pos, false);
+          pos += 2;
+          return value;
+        }
+        case 0xd2: {
+          need(4);
+          const value = view.getInt32(pos, false);
+          pos += 4;
+          return value;
+        }
+        case 0xd3: {
+          need(8);
+          const value = view.getBigInt64(pos, false);
+          pos += 8;
+          return Number(value);
+        }
+        case 0xd9:
+          return readString(read(1)); // str8
+        case 0xda:
+          return readString(read(2)); // str16
+        case 0xdb:
+          return readString(read(4)); // str32
+        case 0xdc:
+          return readArray(read(2)); // array16
+        case 0xdd:
+          return readArray(read(4)); // array32
+        case 0xde:
+          return readMap(read(2)); // map16
+        case 0xdf:
+          return readMap(read(4)); // map32
+        default:
+          // Extension types (0xc7–0xc9, 0xd4–0xd8) are not part of the protocol.
+          throw new Error(`Unsupported MessagePack type 0x${b.toString(16)}`);
       }
-      case 0xcb: {
-        const value = view.getFloat64(pos, false);
-        pos += 8;
-        return value;
-      }
-      case 0xcc:
-        return read(1); // uint8
-      case 0xcd:
-        return read(2); // uint16
-      case 0xce:
-        return read(4); // uint32
-      case 0xcf: {
-        const value = view.getBigUint64(pos, false);
-        pos += 8;
-        return Number(value);
-      }
-      case 0xd0: {
-        const value = view.getInt8(pos);
-        pos += 1;
-        return value;
-      }
-      case 0xd1: {
-        const value = view.getInt16(pos, false);
-        pos += 2;
-        return value;
-      }
-      case 0xd2: {
-        const value = view.getInt32(pos, false);
-        pos += 4;
-        return value;
-      }
-      case 0xd3: {
-        const value = view.getBigInt64(pos, false);
-        pos += 8;
-        return Number(value);
-      }
-      case 0xd9:
-        return readString(read(1)); // str8
-      case 0xda:
-        return readString(read(2)); // str16
-      case 0xdb:
-        return readString(read(4)); // str32
-      case 0xdc:
-        return readArray(read(2)); // array16
-      case 0xdd:
-        return readArray(read(4)); // array32
-      case 0xde:
-        return readMap(read(2)); // map16
-      case 0xdf:
-        return readMap(read(4)); // map32
-      default:
-        // Extension types (0xc7–0xc9, 0xd4–0xd8) are not part of the protocol.
-        throw new Error(`Unsupported MessagePack type 0x${b.toString(16)}`);
+    } finally {
+      depth -= 1;
     }
   }
 

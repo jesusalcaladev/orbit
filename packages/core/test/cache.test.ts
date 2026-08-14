@@ -364,3 +364,116 @@ describe('precise server-side eviction (spec §8)', () => {
     expect(after.fromCache).toBe(false);
   });
 });
+
+describe('cache store hardening (P0)', () => {
+  it('treats a malformed stored entry as a miss instead of crashing', async () => {
+    // A buggy/hostile store returns a garbage entry (missing timestamps,
+    // wrong shapes). The plugin must serve a fresh resolve, not throw.
+    const poisoned = {
+      // A structurally valid entry with a CORRUPTED timestamp — the store
+      // contract is satisfied, the data is garbage (a buggy KV adapter).
+      get: (): import('../src/plugins/cache.js').CacheEntry | undefined => ({
+        value: 'poison',
+        createdAt: Number.NaN,
+        query: '',
+      }),
+      set: () => {},
+      delete: () => {},
+      clear: () => {},
+      keys: (): IterableIterator<string> => new Set<string>().keys(),
+    } satisfies import('../src/plugins/cache.js').CacheStore;
+    const cache = createCachePlugin({ store: poisoned });
+    const orbit = createOrbit({
+      adapters: memoryAdapter([
+        {
+          entity: 'user',
+          resolve: vi.fn(({ id }: { id?: string }) => users.find((u) => u.id === id)),
+        },
+      ]),
+      plugins: [cache],
+    });
+    const result = await orbit.execute(baseEnvelope());
+    expect(result.data).toEqual({ name: 'Ana' });
+  });
+
+  it('serves a stale entry whose createdAt is in the future without crashing', async () => {
+    const store = createMemoryCacheStore();
+    store.set('whatever', { value: 'x', createdAt: Date.now() + 60_000, query: '' });
+    const cache = createCachePlugin({ store });
+    const orbit = createOrbit({
+      adapters: memoryAdapter([{ entity: 'user', resolve: vi.fn(() => users[0]) }]),
+      plugins: [cache],
+    });
+    const result = await orbit.execute(baseEnvelope());
+    expect(result.data).toEqual({ name: 'Ana' });
+  });
+
+  it('survives a store whose keys() yields non-string keys', async () => {
+    // The plugin's invalidatePrefix guards against hostile stores that emit
+    // non-string keys — a mutation triggering eviction must not crash.
+    const store = createMemoryCacheStore();
+    const cache = createCachePlugin({ store });
+    const orbit = createOrbit({
+      adapters: memoryAdapter([
+        {
+          entity: 'user',
+          resolve: () => ({ id: '1', name: 'Ana' }),
+          mutate: () => ({ success: true }),
+        },
+      ]),
+      plugins: [cache],
+    });
+    await orbit.execute(baseEnvelope());
+    // Poison the store's key enumeration (a buggy KV adapter returning
+    // Buffers or numbers, for example).
+    (store as { keys: () => IterableIterator<unknown> }).keys = () =>
+      (function* () {
+        yield 'orbit:123';
+        yield 42;
+        yield Buffer.from('orbit:456');
+      })();
+    const result = await orbit.execute({ do: 'user.update' });
+    expect(result.data).toEqual({ success: true });
+  });
+
+  it('maxEntries eviction keeps the newest entries', async () => {
+    const store = createMemoryCacheStore({ maxEntries: 3 });
+    for (const key of ['a', 'b', 'c', 'd']) {
+      store.set(key, { value: key, createdAt: 0, query: '' });
+    }
+    // Capacity 3: inserting 'd' evicts the oldest ('a'); b, c, d remain.
+    expect(store.get('a')).toBeUndefined();
+    expect(store.get('b')?.value).toBe('b');
+    expect(store.get('c')?.value).toBe('c');
+    expect(store.get('d')?.value).toBe('d');
+    // Re-inserting 'c' refreshes its position (order: b, d, c).
+    store.set('c', { value: 'c2', createdAt: 0, query: '' });
+    store.set('e', { value: 'e', createdAt: 0, query: '' });
+    // Now 'b' is the oldest — evicted; d, c, e remain.
+    expect(store.get('b')).toBeUndefined();
+    expect(store.get('c')?.value).toBe('c2');
+    expect(store.get('d')?.value).toBe('d');
+    expect(store.get('e')?.value).toBe('e');
+  });
+
+  it('a store that throws on set fails the request closed (sanitized)', async () => {
+    const exploding = {
+      get: () => undefined,
+      set: () => {
+        throw new Error('connection refused: redis:6379');
+      },
+      delete: () => {},
+      clear: () => {},
+    };
+    const cache = createCachePlugin({ store: exploding });
+    const orbit = createOrbit({
+      adapters: memoryAdapter([{ entity: 'user', resolve: () => ({ id: '1', name: 'Ana' }) }]),
+      plugins: [cache],
+    });
+    const failure = await orbit.execute(baseEnvelope()).catch((error: unknown) => error);
+    // The store's error — whose message may embed credentials — must not
+    // reach the client: sanitized ORBIT_INTERNAL.
+    expect(failure).toMatchObject({ code: ErrorCode.INTERNAL });
+    expect(String((failure as Error).message)).not.toContain('redis');
+  });
+});

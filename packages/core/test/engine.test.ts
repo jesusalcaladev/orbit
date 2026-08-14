@@ -576,3 +576,111 @@ describe('short-circuit & context', () => {
     await orbit.execute({ query: 'user(id="1") { name }' });
   });
 });
+
+describe('request timeout & cancellation (P0)', () => {
+  /** An adapter that never settles — the hung-upstream case. */
+  function hangingOrbit(requestTimeoutMs?: number) {
+    const orbit = createOrbit({
+      adapters: memoryAdapter([
+        {
+          entity: 'user',
+          resolve: () => new Promise(() => {}),
+        },
+      ]),
+      requestTimeoutMs,
+    });
+    return orbit;
+  }
+
+  it('rejects with a sanitized timeout error when the adapter hangs', async () => {
+    const orbit = hangingOrbit(20);
+    await expect(orbit.execute({ query: 'user { id }' })).rejects.toMatchObject({
+      code: ErrorCode.INTERNAL,
+      message: 'Request timed out',
+      status: 500,
+      details: { timeoutMs: 20 },
+    });
+  });
+
+  it('honors the caller AbortSignal', async () => {
+    const orbit = hangingOrbit();
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      orbit.execute({ query: 'user { id }' }, { signal: controller.signal }),
+    ).rejects.toMatchObject({
+      code: ErrorCode.INTERNAL,
+      message: 'Request aborted by the caller',
+    });
+  });
+
+  it('aborting mid-flight rejects instead of hanging forever', async () => {
+    const orbit = hangingOrbit();
+    const controller = new AbortController();
+    const pending = orbit
+      .execute({ query: 'user { id }' }, { signal: controller.signal })
+      .catch((error) => error);
+    controller.abort();
+    const error = await pending;
+    expect(error.code).toBe(ErrorCode.INTERNAL);
+    expect(error.message).toBe('Request aborted by the caller');
+  });
+
+  it('a caller abort wins over the engine timeout', async () => {
+    const orbit = hangingOrbit(10_000);
+    const controller = new AbortController();
+    const pending = orbit
+      .execute({ query: 'user { id }' }, { signal: controller.signal })
+      .catch((error) => error);
+    controller.abort();
+    const error = await pending;
+    expect(error.message).toBe('Request aborted by the caller');
+  });
+
+  it('passes a live, non-aborted signal to adapters on success', async () => {
+    let seen: AbortSignal | undefined;
+    const orbit = createOrbit({
+      adapters: memoryAdapter([
+        {
+          entity: 'user',
+          resolve: (_filters, ctx) => {
+            seen = ctx.signal;
+            return { id: '1' };
+          },
+        },
+      ]),
+    });
+    await orbit.execute({ query: 'user { id }' });
+    expect(seen).toBeDefined();
+    expect(seen!.aborted).toBe(false);
+  });
+
+  it('adapters observe the aborted signal when the timeout fires', async () => {
+    let seen: AbortSignal | undefined;
+    const orbit = createOrbit({
+      adapters: memoryAdapter([
+        {
+          entity: 'user',
+          resolve: (_filters, ctx) => {
+            seen = ctx.signal;
+            // Simulate an adapter that respects the signal and bails.
+            return new Promise((resolve) => {
+              ctx.signal?.addEventListener('abort', () => resolve(null));
+            });
+          },
+        },
+      ]),
+      requestTimeoutMs: 15,
+    });
+    await expect(orbit.execute({ query: 'user { id }' })).rejects.toMatchObject({
+      code: ErrorCode.INTERNAL,
+    });
+    expect(seen?.aborted).toBe(true);
+  });
+
+  it('does not leak the timeout into normal requests', async () => {
+    const orbit = makeOrbit({ requestTimeoutMs: 1_000 });
+    const result = await orbit.execute({ query: 'user(id="1") { name }' });
+    expect(result.status).toBe(200);
+  });
+});

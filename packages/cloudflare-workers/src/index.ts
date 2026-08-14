@@ -63,15 +63,24 @@ export interface OrbitWorker<Env = unknown, Ctx = unknown> {
 
 /** Options for the WebSocket upgrade handler (spec §10). */
 export interface WebSocketHandlerOptions<Env = unknown, Ctx = unknown>
-  extends RealtimeSessionOptions {
+  extends Omit<RealtimeSessionOptions, 'ctx'> {
   /** Upgrade path. Defaults to `/realtime`. */
   path?: string;
   /** Workers bindings, surfaced to the authorize gate. */
   env?: Env;
   /** The Workers execution context, surfaced to the authorize gate. */
   ctx?: Ctx;
-  /** Request-time authorization gate — deny closes the upgrade with 403. */
-  authorize?: (request: Request, env: Env, ctx: Ctx) => boolean | Promise<boolean>;
+  /**
+   * Request-time authorization gate (spec §10). Return `false` to deny the
+   * upgrade with 403; return `true` to allow with an empty context; return
+   * an `OrbitContext` to allow AND seed the session's context, which flows
+   * into every socket envelope execution and the subscription gates.
+   */
+  authorize?: (
+    request: Request,
+    env: Env,
+    ctx: Ctx,
+  ) => boolean | OrbitContext | Promise<boolean | OrbitContext>;
 }
 
 /** Options for {@link createWorker}. */
@@ -269,10 +278,21 @@ export async function handleWebSocket<Env = unknown, Ctx = unknown>(
   if ((request.headers.get('upgrade') ?? '').toLowerCase() !== 'websocket') {
     return new Response('Bad request', { status: 400 });
   }
+  // Session options: the wire format caps come from the handler options;
+  // the session AUTH context is seeded from the authorize gate's return
+  // value (spec §10). The handler's own `ctx` is the WORKERS execution
+  // context (waitUntil etc.) — it is never mixed into the orbit session.
+  const sessionOptions: RealtimeSessionOptions = {
+    serialize: options.serialize,
+    maxMessageBytes: options.maxMessageBytes,
+  };
   if (options.authorize) {
     try {
       const allowed = await options.authorize(request, options.env as Env, options.ctx as Ctx);
       if (!allowed) return new Response('Forbidden', { status: 403 });
+      if (typeof allowed === 'object' && allowed !== null) {
+        sessionOptions.ctx = { ...allowed };
+      }
     } catch {
       return new Response('Forbidden', { status: 403 });
     }
@@ -288,6 +308,10 @@ export async function handleWebSocket<Env = unknown, Ctx = unknown>(
   const pair = new ctor();
   const client = pair[0];
   const server = pair[1];
-  createRealtimeSession(server as unknown as import('./websocket.js').WsSocket, orbit, options);
+  createRealtimeSession(
+    server as unknown as import('./websocket.js').WsSocket,
+    orbit,
+    sessionOptions,
+  );
   return new Response(null, { status: 101, webSocket: client } as WorkersResponseInit);
 }

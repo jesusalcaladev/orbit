@@ -48,6 +48,15 @@ hooks: {
 }
 ```
 
+**Mutations run `onBeforeParse` too** (spec §5/§11 additive rule): the engine
+invokes it once before the adapter's `mutate`. The return value is ignored for
+mutations (there is no query to rewrite) — the hook's *side effects* are the
+point: an auth plugin that stamps `ctx.state.caller` here covers writes as
+well as reads, and a gate that throws (e.g. `ORBIT_PERMISSION_DENIED`)
+rejects the mutation. This is also why the first-party
+[`@orbit/rate-limit`](../packages/rate-limit/README.md) token-bucket plugin
+needs only this one hook to rate-limit queries **and** mutations.
+
 ### `onAfterParse` — enrich or replace the parsed tree
 
 Receives the parsed `QueryNode`. Return a node to replace it, or mutate/`ctx.state` for later hooks.

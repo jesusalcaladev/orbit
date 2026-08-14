@@ -42,7 +42,7 @@ import {
   encodeMsgpack,
   toOrbitError,
 } from '@orbit/core';
-import type { Orbit } from '@orbit/core';
+import type { Orbit, OrbitContext } from '@orbit/core';
 
 /** Default maximum incoming message size (bytes). */
 export const DEFAULT_MAX_MESSAGE_BYTES = 1024 * 1024;
@@ -73,6 +73,12 @@ export interface RealtimeSessionOptions {
   serialize?: 'json' | 'msgpack';
   /** Max incoming message size in bytes. Defaults to 1 MiB. */
   maxMessageBytes?: number;
+  /**
+   * The session's auth context (spec §10): rides into every `{ query }` /
+   * `{ do }` envelope executed over the socket and into the subscription
+   * gates (a denied subscription is rejected with the plugin's error).
+   */
+  ctx?: OrbitContext;
 }
 
 /** A live realtime session — call `close()` to release every subscription. */
@@ -114,16 +120,25 @@ export interface RealtimeSession {
     }
   };
 
-  const encodeError = (error: unknown): void => {
+  const encodeError = (error: unknown, message: unknown): void => {
     const orbitError = toOrbitError(error);
-    send({ error: orbitError.toJSON().error });
+    // Echo the client's correlation id when the message carried one — a
+    // denied subscription must be correlatable to the subscribe that caused it.
+    send({
+      ...(typeof (message as { id?: unknown } | null)?.id === 'string'
+        ? { id: (message as { id: string }).id }
+        : {}),
+      error: orbitError.toJSON().error,
+    });
   };
 
   // The frame-level protocol (subscribe/ack, unsubscribe, resume, and the
   // `{ query }` / `{ do }` envelope request/response) lives in the core's
   // runtime-agnostic session driver — the exact same code the Node transport
-  // drives, so the frame contract cannot drift between runtimes.
-  const driver = createSessionDriver(orbit, hub, send);
+  // drives, so the frame contract cannot drift between runtimes. The
+  // session's auth context threads into envelope executions and the
+  // subscription gates.
+  const driver = createSessionDriver(orbit, hub, send, { ctx: options.ctx });
 
   server.addEventListener('message', (event) => {
     if (closed) return;
@@ -167,7 +182,7 @@ export interface RealtimeSession {
       send({ error: { code: ErrorCode.INVALID_QUERY, message: 'Message must be text or bytes' } });
       return;
     }
-    driver.dispatch(message).catch(encodeError);
+    driver.dispatch(message).catch((error) => encodeError(error, message));
   });
 
   server.addEventListener('close', () => close());

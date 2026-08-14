@@ -151,6 +151,11 @@ posts(status="published", limit="10") { title, author { name } }
   the client so it can evict its own cache too.
 - With `return`, the engine re-queries the sub-graph through the same pipeline (hooks included) and returns it as `data`.
 - Without `return`, the response is `{ data: { success: true, id? } }`.
+- Mutations run the pipeline's `onBeforeParse` hooks **once** before the
+  adapter (§11 additive rule) — an auth plugin that stamps
+  `ctx.state.caller` from the request headers here sees mutations too, so
+  identity always reaches `mutate`. The hook's return value is ignored: a
+  mutation has no query to rewrite.
 - Mutations are **not** streamable.
 
 Error codes: `ORBIT_MUTATION_FAILED` (500) when the adapter rejects; `ORBIT_ENTITY_UNREGISTERED` (404) for unknown entities.
@@ -215,7 +220,10 @@ other) plus one field per file. Files are delivered to the adapter's
 `mutate(action, args, ctx)` via `ctx.files` (keyed by field name) — the
 envelope contract is untouched. `maxPayloadBytes` caps the whole multipart
 body (early 413 via `content-length`, then again on the buffered bytes);
-non-file fields other than `envelope` are rejected. See
+non-file fields other than `envelope` are rejected. A field-count cap
+(`maxMultipartFields`, default **64**) rejects a thousands-of-tiny-fields
+DoS outright — the byte cap bounds the body, the count cap bounds the parse
+(`ORBIT_INVALID_QUERY` with `details.maxFields`). See
 [docs/server.md](./docs/server.md#file-uploads-multipartform-data).
 
 ### Response — negotiated from `Accept`
@@ -416,9 +424,15 @@ forwards `mutate`/`subscribe` when provided.
 
 - Server pings every 30 s (`ping` frame); a missed ping closes the connection.
 - Subscriptions are tied to the connection; reconnection + resume re-establishes them.
-- The transport's `authorize` option gates upgrades (token/header checks). Passing
-  request context *into* a subscription's adapter hook is 🔜 planned — v0.0.1
-  authorizes at the handshake only.
+- The transport's `authorize` option gates upgrades (token/header checks) and
+  may **return an `OrbitContext`** to seed the session (additive opt-in): it
+  rides into every `{ query }`/`{ do }` envelope executed over the socket
+  (so `ctx.state.caller` reaches `mutate` and the auth pipeline) and into
+  the subscription gates — a subscription whose OQS the pipeline denies is
+  rejected with the plugin's error (e.g. `ORBIT_PERMISSION_DENIED`) and the
+  client's correlation `id` is echoed on the error frame. The adapter
+  `subscribe` hook itself stays stateless (frozen contract §9);
+  authorization happens at subscribe time.
 
 ---
 
@@ -492,6 +506,11 @@ Every hook may also return a `Promise` of its return type. Rules (frozen):
 - `onBeforeParse`, `onAfterParse` and `onBeforeResolve` run once per query (on
   the root node); `onBeforeExecute` / `onAfterResolve` run per node, per level.
 - A mutation's `return` re-query runs the full pipeline — hooks included (§5).
+- Mutations run `onBeforeParse` once before the adapter (additive rule — see
+  §5) so identity-stamping and rate-limit gates cover writes too.
+- `ctx.signal` (an `AbortSignal`) is set by the engine from the caller's
+  `ctx.signal` plus the optional `requestTimeoutMs` — adapters/plugins may
+  cancel their own work when a request times out or is aborted.
 
 Pinned by `test/contract.test.ts` in the core package.
 

@@ -269,6 +269,54 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
 - **New docs**: `docs/serialization.md`, `docs/benchmarks.md` (with chart), `docs/examples.md`.
 - Engine fixes from review: negative-integer double-encoding in the msgpack codec, pre-buffer `content-length` check for early 413s, wildcard `Accept` maps to JSON.
 
+### Security — P0 hardening (all seven items closed)
+- **Auth context into WebSocket subscriptions & socket envelopes** (spec §10
+  🔜 → ✅) — the transport's `authorize` may now return an `OrbitContext`
+  that seeds the session: it rides into every `{ query }`/`{ do }` envelope
+  executed over the socket (so `ctx.state.caller` reaches `mutate` and the
+  auth pipeline) and into the subscription gates — `authorizedSubscribe`
+  runs the full pipeline (`onBeforeParse` rewrite + identity stamping,
+  `onAfterParse`, `onBeforeResolve`) with the session ctx, so a denied
+  subscription is rejected with the plugin's error (e.g.
+  `ORBIT_PERMISSION_DENIED`) before any adapter hook is registered.
+  Subscription-control failures now echo the client's correlation `id` on
+  the error frame (Node + Cloudflare Workers transports). Previously an
+  authenticated socket could run mutations with **no identity** — the top
+  gap in `docs/protocol-audit.md`. 3 tests in `realtime-request.test.ts`.
+- **Deterministic fuzz suite** (`test/fuzz.test.ts`, fixed seeds, CI-stable)
+  — 2000 OQS strings, 2000 msgpack byte payloads, 1500 envelopes, 1000
+  cache specs, 1000 `Accept` headers, 500 engine envelopes + 300
+  wire-msgpack envelopes. Invariants: only protocol errors, no hang, no
+  crash. **Fuzz-caught and fixed:** unguarded DataView reads in the msgpack
+  codec (truncated floats/fixed-width ints threw `RangeError`) and a
+  nesting bomb (100k fixarrays → JS stack overflow) — the codec now
+  bounds-checks every raw read (`need()`) and caps nesting at 512,
+  fast-failing with its own error.
+- **Per-request timeout / cancellation** — `requestTimeoutMs` on
+  `createOrbit` (opt-in, `unref`'d timer) plus the caller's `AbortSignal`
+  on `OrbitContext.signal`: a hanging adapter now rejects with a sanitized
+  timeout/abort error instead of hanging the handler forever, and
+  adapters/plugins observe the aborted signal to cancel their own work. 7
+  tests in `engine.test.ts`.
+- **`@orbit/rate-limit`** — first zero-dep token-bucket plugin package: one
+  `onBeforeParse` hook gates queries AND mutations (spec §11 additive
+  rule); per-IP buckets by default (`x-forwarded-for`/`x-real-ip`), any
+  `keyOf` for real identity; exceeded limits are `ORBIT_PERMISSION_DENIED`
+  with status **429** and `details.retryAfterMs`; injectable clock, 8
+  tests. README + `docs/security.md` + `docs/ecosystem.md` + ROADMAP P0 #4.
+- **Multipart field-count cap** — `maxMultipartFields` (default 64) rejects
+  the thousands-of-fields DoS with `ORBIT_INVALID_QUERY` +
+  `details.maxFields` (the byte cap bounds the body, the count cap bounds
+  the parse). 2 tests in `upload.test.ts`.
+- **Cache-store hardening** — a corrupted entry (non-finite `createdAt`)
+  fails safe to a miss instead of being served as perpetually fresh;
+  `invalidatePrefix` skips non-string keys from a buggy store; a store that
+  throws on `set` fails the request closed (sanitized). 5 tests in
+  `cache.test.ts`.
+- **`details` audit** — every internal error path emits only structural
+  payloads (entities, byte counts, field names); raw error messages never
+  appear in `details`.
+
 ## [0.0.1] — 2026-08-11
 
 ### Added

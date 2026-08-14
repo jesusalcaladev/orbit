@@ -16,6 +16,7 @@ import {
   createRealtimeServer,
   decodeMsgpack,
   encodeMsgpack,
+  memoryAdapter,
 } from '../src/index.js';
 import type { RealtimeServer, RealtimeServerOptions } from '../src/index.js';
 import type { Filters, MutationArgs, SubscriptionEvent } from '../src/types.js';
@@ -343,6 +344,118 @@ describe('RealtimeServer — envelope request/response (spec §10)', () => {
     expect(messages.find((m) => m.id === 'sub-1')).toMatchObject({
       event: { type: 'created', id: 'p1' },
     });
+    ws.close();
+  });
+});
+
+describe('RealtimeServer — authorize context (P0.1b)', () => {
+  let server: Server;
+  let realtime: RealtimeServer;
+  let port: number;
+
+  afterEach(() => {
+    realtime?.close();
+    server?.close();
+  });
+
+  async function start(orbit: import('../src/engine.js').Orbit, options?: RealtimeServerOptions) {
+    server = createServer();
+    realtime = createRealtimeServer(orbit, options);
+    realtime.attach(server);
+    await new Promise<void>((resolve) => server.listen(0, resolve));
+    port = (server.address() as { port: number }).port;
+  }
+
+  async function connect() {
+    const ws = new WebSocket(`ws://localhost:${port}/realtime`);
+    const messages: Array<Record<string, unknown>> = [];
+    ws.onmessage = (event) =>
+      messages.push(JSON.parse(String(event.data)) as Record<string, unknown>);
+    await new Promise<void>((resolve, reject) => {
+      ws.onopen = () => resolve();
+      ws.onerror = () => reject(new Error('websocket failed to open'));
+    });
+    return { ws, messages };
+  }
+
+  it('threads the authorize context into socket mutations (identity reaches mutate)', async () => {
+    let seenCaller: unknown;
+    const orbit = createOrbit({
+      adapters: memoryAdapter([
+        {
+          entity: 'post',
+          resolve: () => [],
+          mutate: (_action, _args, ctx) => {
+            seenCaller = ctx.state?.caller;
+            return { id: 'p1' };
+          },
+        },
+      ]),
+    });
+    await start(orbit, { authorize: () => ({ state: { caller: 'admin' } }) });
+    const { ws, messages } = await connect();
+    ws.send(JSON.stringify({ do: 'post.create', args: {}, id: 'm1' }));
+    await waitFor(() => messages.some((m) => m.id === 'm1'), 'mutation reply');
+    expect(messages.find((m) => m.id === 'm1')).toMatchObject({ status: 200 });
+    expect(seenCaller).toBe('admin');
+    ws.close();
+  });
+
+  it('denies subscriptions the auth pipeline rejects (gate runs with the session ctx)', async () => {
+    const orbit = createOrbit({
+      adapters: memoryAdapter([{ entity: 'post', resolve: () => [], subscribe: () => () => {} }]),
+      plugins: [
+        {
+          name: 'auth',
+          hooks: {
+            onBeforeResolve({ ctx }) {
+              if (ctx.state?.caller !== 'admin') {
+                throw new OrbitError(
+                  ErrorCode.PERMISSION_DENIED,
+                  'Only admins may subscribe to posts',
+                );
+              }
+            },
+          },
+        },
+      ],
+    });
+    await start(orbit, { authorize: () => ({ state: { caller: 'viewer' } }) });
+    const { ws, messages } = await connect();
+    ws.send(JSON.stringify({ subscribe: 'post { id }', id: 'sub-x' }));
+    await waitFor(
+      () =>
+        messages.some(
+          (m) =>
+            (m.error as { code?: unknown } | undefined)?.code === ErrorCode.PERMISSION_DENIED &&
+            m.id === 'sub-x',
+        ),
+      'denied subscription',
+    );
+    // No ack — the subscription never attached.
+    expect(messages.some((m) => m.ack === 'sub-x')).toBe(false);
+    ws.close();
+  });
+
+  it('an authorize returning true yields an empty context (no state leak)', async () => {
+    let seenState: unknown;
+    const orbit = createOrbit({
+      adapters: memoryAdapter([
+        {
+          entity: 'post',
+          resolve: () => [],
+          mutate: (_action, _args, ctx) => {
+            seenState = ctx.state;
+            return { id: 'p1' };
+          },
+        },
+      ]),
+    });
+    await start(orbit, { authorize: () => true });
+    const { ws, messages } = await connect();
+    ws.send(JSON.stringify({ do: 'post.create', args: {}, id: 'm2' }));
+    await waitFor(() => messages.some((m) => m.id === 'm2'), 'mutation reply');
+    expect(seenState).toBeUndefined();
     ws.close();
   });
 });

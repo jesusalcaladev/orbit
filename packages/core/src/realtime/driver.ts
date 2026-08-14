@@ -21,7 +21,7 @@
 import { validateEnvelope } from '../envelope.js';
 import { ErrorCode, OrbitError, toOrbitError } from '../errors.js';
 import type { Orbit } from '../engine.js';
-import type { SubscriptionEvent } from '../types.js';
+import type { OrbitContext, SubscriptionEvent } from '../types.js';
 import { isRecord } from '../utils.js';
 import type { SubscriptionHub } from './hub.js';
 
@@ -30,6 +30,13 @@ export type SessionSend = (message: Record<string, unknown>) => void;
 
 /** Transport hooks the driver calls as subscriptions attach. */
 export interface SessionDriverHooks {
+  /**
+   * The session's auth context (spec §10): the object returned by the
+   * transport's `authorize` gate. Merged into every `{ query }`/`{ do }`
+   * envelope execution (so `ctx.state.caller` reaches `mutate` and the auth
+   * pipeline) and passed to the subscription gates. Defaults to `{}`.
+   */
+  ctx?: OrbitContext;
   /**
    * Called after a client subscription is (re)attached — a retention-aware
    * transport (Node) cancels the pending release timer here.
@@ -91,7 +98,9 @@ export function createSessionDriver(
       // `id`), and enforces the `query` XOR `do` rule — identical semantics,
       // one source of truth. Validation failures carry the `id` too.
       const envelope = validateEnvelope(message);
-      const result = await orbit.execute(envelope);
+      // The session's auth context (from `authorize`) rides into the engine,
+      // so socket envelopes hit the same identity-stamped pipeline as HTTP.
+      const result = await orbit.execute(envelope, { ...(hooks.ctx ?? {}) });
       send({
         ...(id !== undefined ? { id } : {}),
         status: result.status,
@@ -147,7 +156,11 @@ export function createSessionDriver(
         }
         const onEvent = (seq: number, event: SubscriptionEvent) =>
           send({ id: clientId, seq, event });
-        hub.subscribe(message.subscribe, clientId, onEvent);
+        // Subscription gates run the query pipeline with the session ctx:
+        // auth plugins that deny a query throw here, rejecting the
+        // subscription (e.g. ORBIT_PERMISSION_DENIED) before any adapter
+        // hook is registered (spec §10).
+        await hub.authorizedSubscribe(message.subscribe, clientId, onEvent, hooks.ctx ?? {});
         clientSubs.set(clientId, { onEvent });
         hooks.onAttach?.(clientId);
         send({ ack: clientId });

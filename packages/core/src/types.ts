@@ -105,6 +105,12 @@ export interface OrbitContext {
    */
   files?: Record<string, File>;
   /**
+   * Effective cancellation signal for this execution — set by the engine
+   * from the caller's `ctx.signal` plus the optional `requestTimeoutMs`
+   * deadline. Adapters/plugins may listen to it to cancel their own work.
+   */
+  signal?: AbortSignal;
+  /**
    * Response headers to merge into the handler's `Response` — set by plugins
    * or adapters during the pipeline (e.g. `set-cookie` for session login,
    * CORS, custom `cache-control`). Array values append multiple header lines

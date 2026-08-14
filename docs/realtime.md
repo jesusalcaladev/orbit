@@ -126,8 +126,29 @@ the fan-out happens in memory inside the hub.
 | `heartbeatMs` | 30 000 | Server ping interval. |
 | `retentionMs` | 60 000 | How long a detached subscription survives for resume. |
 | `serialize` | `json` | `'json'` or `'msgpack'`. |
-| `authorize` | — | `(request) => boolean \| Promise<boolean>` gate before upgrade. |
+| `authorize` | — | Gate before upgrade: `(request) => boolean \| OrbitContext \| Promise<…>`. `false` denies (403); an **`OrbitContext` allows AND seeds the session** — it rides into every `{ query }`/`{ do }` envelope executed over the socket (so `ctx.state.caller` reaches `mutate`) and into the subscription gates (a subscription the auth pipeline denies is rejected with the plugin's error, e.g. `ORBIT_PERMISSION_DENIED`). |
 | `origin` | — | Allowed `Origin` header(s); others get 403. |
+
+### Auth context (spec §10)
+
+`authorize` returning a context is the additive, opt-in identity story:
+
+```ts
+const realtime = createRealtimeServer(orbit, {
+  authorize: (request) => {
+    const token = request.headers['x-orbit-token'];
+    if (!token) return false;                    // deny the upgrade
+    return { state: { caller: verify(token) } }; // allow + seed the session
+  },
+});
+```
+
+The context flows into socket envelope executions **and** subscription gates —
+a policy plugin that denies on HTTP denies on the socket too, and an
+authenticated socket can no longer run mutations with no identity (the P0
+hardening). Subscription-control failures (including a denied subscribe) echo
+the client's correlation `id` on the error frame, so every rejection is
+correlatable to the request that caused it.
 
 ## Error codes
 

@@ -10,7 +10,7 @@
 import type { Orbit } from '../engine.js';
 import { ErrorCode, OrbitError } from '../errors.js';
 import { parseOQS } from '../parser.js';
-import type { Filters, SubscriptionEvent } from '../types.js';
+import type { Filters, OrbitContext, QueryNode, SubscriptionEvent } from '../types.js';
 
 /** How many events each subscription keeps for `resume` replay (ring buffer). */
 export const RESUME_LOG_MAX = 512;
@@ -125,6 +125,45 @@ export class SubscriptionHub {
       id: clientId,
       unsubscribe: () => this.unsubscribe(clientId),
     };
+  }
+
+  /**
+   * Subscribe with the session's auth context (spec §10): the query gates
+   * (`onBeforeParse` rewrite + identity stamping, `onAfterParse` enrichment,
+   * `onBeforeResolve` — auth plugins throw here to deny) run against the
+   * parsed subscription BEFORE any adapter hook is registered. A plugin that
+   * denies the query rejects the subscription with its own error (e.g.
+   * `ORBIT_PERMISSION_DENIED`). The adapter `subscribe` hook stays
+   * stateless — the frozen contract is untouched; authorization happens at
+   * subscribe time. A `shortCircuit` return is ignored (a subscription does
+   * not resolve a payload); thrown errors reject.
+   */
+  async authorizedSubscribe(
+    oqs: string,
+    clientId: string,
+    onEvent: (seq: number, event: SubscriptionEvent) => void,
+    ctx: OrbitContext,
+  ): Promise<RealtimeSubscription> {
+    let query = oqs;
+    for (const plugin of this.#orbit.plugins.list) {
+      const result = await plugin.hooks.onBeforeParse?.({ query, ctx });
+      if (typeof result === 'string') query = result;
+    }
+    const parse = (raw: string): QueryNode =>
+      parseOQS(raw, {
+        maxDepth: this.#orbit.maxQueryDepth,
+        maxKeyLength: this.#orbit.maxKeyLength,
+        maxValueLength: this.#orbit.maxValueLength,
+      });
+    let parsed = parse(query);
+    for (const plugin of this.#orbit.plugins.list) {
+      const result = await plugin.hooks.onAfterParse?.({ parsed, ctx });
+      if (result !== undefined) parsed = result;
+    }
+    for (const plugin of this.#orbit.plugins.list) {
+      await plugin.hooks.onBeforeResolve?.({ parsed, ctx });
+    }
+    return this.subscribe(query, clientId, onEvent);
   }
 
   /**

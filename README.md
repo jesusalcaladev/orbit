@@ -72,7 +72,7 @@ That's why the core has **zero runtime dependencies**: a contract layer should b
 - **Realtime subscriptions.** A zero-dependency WebSocket transport (`createRealtimeServer`) streams adapter `subscribe` events to clients with per-subscription sequence numbers, retention across disconnects, and patch replay on `resume` — 100 clients share one adapter hook.
 - **Frozen contracts.** The `DataAdapter` interface (resolve/batch/mutate/subscribe) and the envelope are canonicalized in [`spec.md`](./spec.md) — realtime is designed into the adapter contract, and the WebSocket transport is shipped in v0.0.1.
 - **Framework-agnostic handler.** Works with `Request`/`Response` runtimes, or call `orbit.execute(envelope, ctx)` directly.
-- **Ecosystem packages.** `@orbit/rest` (fetch-based `DataAdapter`: queries → `GET`, mutations → `POST`/`PATCH`/`DELETE`), `@orbit/cache` (the cache plugin's dedicated distribution home, where the Redis/KV stores slot in) and the server wrappers `@orbit/express`, `@orbit/hono` and `@orbit/cloudflare-workers` (Workers-native WebSocket realtime included) ship alongside the frozen core — see [docs/ecosystem.md](./docs/ecosystem.md). Each package has its own README: [`@orbit/rest`](./packages/rest/README.md), [`@orbit/cache`](./packages/cache/README.md), [`@orbit/express`](./packages/express/README.md), [`@orbit/hono`](./packages/hono/README.md), [`@orbit/cloudflare-workers`](./packages/cloudflare-workers/README.md).
+- **Ecosystem packages.** `@orbit/rest` (fetch-based `DataAdapter`: queries → `GET`, mutations → `POST`/`PATCH`/`DELETE`), `@orbit/cache` (the cache plugin's dedicated distribution home, where the Redis/KV stores slot in), `@orbit/rate-limit` (a zero-dep token-bucket plugin gating queries **and** mutations) and the server wrappers `@orbit/express`, `@orbit/hono` and `@orbit/cloudflare-workers` (Workers-native WebSocket realtime included) ship alongside the frozen core — see [docs/ecosystem.md](./docs/ecosystem.md). Each package has its own README: [`@orbit/rest`](./packages/rest/README.md), [`@orbit/cache`](./packages/cache/README.md), [`@orbit/rate-limit`](./packages/rate-limit/README.md), [`@orbit/express`](./packages/express/README.md), [`@orbit/hono`](./packages/hono/README.md), [`@orbit/cloudflare-workers`](./packages/cloudflare-workers/README.md).
 - **Zero runtime dependencies.** `typescript` and `vitest` are dev-only. The whole protocol is a compact (~4 100 lines), typed ES2022 core — including the MessagePack codec and the WebSocket transport.
 
 ## When to use Orbit — and when not to
@@ -275,7 +275,7 @@ in as `packages/*`.
 
 ```bash
 pnpm install         # dev dependencies only (typescript, vitest)
-pnpm test            # 429 tests, Vitest (356 core + 14 express + 13 hono + 16 rest + 4 cache + 26 cloudflare-workers)
+pnpm test            # 466 tests, Vitest (385 core + 14 express + 13 hono + 16 rest + 4 cache + 26 cloudflare-workers + 8 rate-limit)
 pnpm run test:coverage # ~95% stmts / ~90% branch / ~96% lines (see packages/core)
 pnpm run typecheck   # strict TypeScript (builds all packages, then checks examples/bench)
 pnpm run build       # ESM + .d.ts → dist/ in every package

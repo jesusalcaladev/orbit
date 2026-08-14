@@ -70,6 +70,20 @@ export interface OrbitConfig {
    *  `createCachePlugin` with these options and integrates caching into the
    *  handler (reads cache spec from `envelope.cache` or `x-orbit-cache` header). */
   cache?: import('./plugins/cache.js').CachePluginOptions;
+  /**
+   * Hard deadline for `execute()` (non-streaming requests), in ms. When the
+   * pipeline exceeds it, the request rejects with `ORBIT_INTERNAL` and a
+   * timeout message. Default: off (no timeout). Streaming/SSE is exempt by
+   * design — streams are long-lived. The effective `AbortSignal` is exposed
+   * on `ctx.signal` so adapters/plugins can cancel their own work.
+   */
+  requestTimeoutMs?: number;
+  /**
+   * Maximum number of fields accepted in a `multipart/form-data` upload
+   * (the `envelope` field plus one field per file). Default 64 — bounds the
+   * per-request object count even when the byte cap is not reached.
+   */
+  maxMultipartFields?: number;
 }
 
 interface OrbitOptions {
@@ -79,6 +93,8 @@ interface OrbitOptions {
   maxPayloadBytes: number;
   maxKeyLength: number;
   maxValueLength: number;
+  requestTimeoutMs: number | undefined;
+  maxMultipartFields: number;
 }
 
 interface SerializeOutcome {
@@ -192,15 +208,47 @@ export class Orbit {
   async execute(envelope: OrbitEnvelope, ctx: OrbitContext = {}): Promise<OrbitResult> {
     const valid = validateEnvelope(envelope);
     const fullCtx: OrbitContext = { ...ctx, envelope: valid, orbit: this };
+
+    // Effective cancellation: the caller's AbortSignal (if any) plus the
+    // optional engine timeout. The signal rides on ctx so adapters/plugins
+    // can cancel their own work; the race below guarantees the promise
+    // rejects even if an adapter never settles. (The hung promise itself is
+    // unreachable from JS — documented limitation; a request that aborts
+    // mid-resolution stops consuming the event loop once its work settles.)
+    const controller = new AbortController();
+    const external = ctx.signal;
+    const onExternalAbort = () => controller.abort(external?.reason);
+    if (external !== undefined) {
+      if (external.aborted) controller.abort(external.reason);
+      else external.addEventListener('abort', onExternalAbort, { once: true });
+    }
+    const timeoutMs = this.#options.requestTimeoutMs;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    if (timeoutMs !== undefined && timeoutMs > 0) {
+      timer = setTimeout(() => controller.abort(), timeoutMs);
+      if (typeof timer.unref === 'function') timer.unref();
+    }
+    fullCtx.signal = controller.signal;
+
     try {
-      const result =
+      const run =
         valid.do !== undefined
-          ? await this.#executeMutation(valid, fullCtx)
-          : await this.#consumeQuery(valid, fullCtx);
+          ? this.#executeMutation(valid, fullCtx)
+          : this.#consumeQuery(valid, fullCtx);
+      const result = await raceWithAbort(run, controller.signal);
       return result;
     } catch (error) {
+      if (controller.signal.aborted) {
+        throw new OrbitError(
+          ErrorCode.INTERNAL,
+          external?.aborted ? 'Request aborted by the caller' : 'Request timed out',
+          { details: { timeoutMs } },
+        );
+      }
       throw await this.#normalizeError(error, fullCtx);
     } finally {
+      if (timer !== undefined) clearTimeout(timer);
+      external?.removeEventListener('abort', onExternalAbort);
       // Response headers set by plugins/adapters on the pipeline context ride
       // back to the caller, so the handler (which owns the Response) can
       // merge them — on SUCCESS and on ERROR (a login mutation that issues a
@@ -379,8 +427,21 @@ export class Orbit {
       throw new OrbitError(ErrorCode.INVALID_QUERY, "The 'envelope' field is not valid JSON");
     }
 
+    // Field-count cap (P0 hardening): the byte cap bounds the BODY, but a
+    // request with thousands of tiny fields is cheap to send and expensive
+    // to parse — bound the object count too.
+    const maxFields = this.#options.maxMultipartFields;
+    let fields = 0;
     const files: Record<string, File> = {};
     for (const [name, value] of form.entries()) {
+      fields += 1;
+      if (fields > maxFields) {
+        throw new OrbitError(
+          ErrorCode.INVALID_QUERY,
+          `multipart upload exceeds the maximum of ${maxFields} fields`,
+          { details: { maxFields, received: fields } },
+        );
+      }
       if (name === 'envelope') continue;
       if (value instanceof File) {
         files[name] = value;
@@ -500,6 +561,18 @@ export class Orbit {
     }
     const entity = action.slice(0, separator);
     const verb = action.slice(separator + 1);
+
+    // Spec §11 (additive rule): mutations run `onBeforeParse` once before
+    // the adapter. The hook's SIDE EFFECTS are the point — auth plugins stamp
+    // `ctx.state.caller` from the request headers here, and a gate that
+    // throws (e.g. PERMISSION_DENIED) rejects the mutation. The returned
+    // string is ignored: a mutation has no query to rewrite. Without this,
+    // mutations ran zero pipeline hooks, so identity never reached `mutate`
+    // and query-gated auth silently skipped mutations — an authorization
+    // hole.
+    for (const plugin of this.#options.plugins.list) {
+      await plugin.hooks.onBeforeParse?.({ query: action, ctx });
+    }
 
     const adapter = this.#options.adapters.get(entity);
     if (!adapter) {
@@ -969,6 +1042,8 @@ export function createOrbit(config: OrbitConfig = {}): Orbit {
     maxPayloadBytes: config.maxPayloadBytes ?? DEFAULT_MAX_PAYLOAD_BYTES,
     maxKeyLength: config.maxKeyLength ?? DEFAULT_MAX_KEY_LENGTH,
     maxValueLength: config.maxValueLength ?? DEFAULT_MAX_VALUE_LENGTH,
+    requestTimeoutMs: config.requestTimeoutMs,
+    maxMultipartFields: config.maxMultipartFields ?? 64,
   });
 }
 
@@ -1041,6 +1116,34 @@ function finalHeaders(base: Record<string, string>, ctx: OrbitContext): Headers 
     }
   }
   return headers;
+}
+
+/**
+ * Race a promise against an AbortSignal: settles with the promise's value,
+ * or rejects with an `AbortError` (DOMException-like) the moment the signal
+ * aborts — even if the promise never settles. Used by `execute` for the
+ * caller signal + engine timeout.
+ */
+async function raceWithAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) {
+    throw new DOMException('Aborted', 'AbortError');
+  }
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      cleanup();
+      reject(new DOMException('Aborted', 'AbortError'));
+    };
+    const onSettle = () => {
+      cleanup();
+      promise.then(resolve, reject);
+    };
+    const cleanup = () => {
+      signal.removeEventListener('abort', onAbort);
+      promise.then(undefined, () => undefined);
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    void promise.then(onSettle, onSettle);
+  });
 }
 
 /** gzip a byte payload via the web-standard CompressionStream. */

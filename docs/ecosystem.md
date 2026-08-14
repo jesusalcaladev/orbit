@@ -28,6 +28,7 @@ packages/
              @orbit/memcached       ⬜ CacheStore over Memcached (optional)
   plugins/   @orbit/auth            ⬜ OrbitPlugin — authn/authz hooks
              @orbit/logging         ⬜ OrbitPlugin — span timing / observability
+             @orbit/rate-limit      ✅ shipped — token-bucket OrbitPlugin (queries + mutations)
              @orbit/cache           ✅ shipped — distribution home (impl stays in frozen core)
   servers/   @orbit/hono            ✅ shipped — thin handler wrapper for Hono
              @orbit/express         ✅ shipped — thin handler wrapper for Express
