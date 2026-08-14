@@ -6,11 +6,19 @@
  * import surface is pinned by `api-surface.test.ts`); this package is the
  * stable, dedicated import path for it — and the home of the `CacheStore`
  * backends that live outside the core: Redis, Cloudflare KV, Memcached, …
+ * and the new `createKvCachePlugin` KV-cache plugin.
  *
  * ```ts
- * import { createCachePlugin, createMemoryCacheStore } from '@orbit/cache';
+ * import { createCachePlugin, createMemoryCacheStore, parseCacheSpec } from '@orbit/cache';
  *
  * const cache = createCachePlugin({ store: createMemoryCacheStore() });
+ * ```
+ *
+ * ```ts
+ * import { createKvCachePlugin } from '@orbit/cache';
+ * import { createRedisStore } from '@orbit/redis';
+ *
+ * const kvCache = createKvCachePlugin({ store: createRedisStore() });
  * ```
  *
  * The `CacheStore` contract this package (and the core) implements:
@@ -26,3 +34,12 @@ export type {
   CacheEntry,
   MemoryCacheStoreOptions,
 } from '@orbit/core';
+
+/** KV-cache plugin for external key-value stores (Redis, Cloudflare KV, Memcached, …). */
+export { createKvCachePlugin } from './kvCachePlugin.js';
+export type {
+  KvCachePluginOptions,
+  CacheSpec as KvCacheCacheSpec,
+  CacheEntry as KvCacheCacheEntry,
+  CacheStore as KvCacheCacheStore,
+} from './kvCachePlugin.js';

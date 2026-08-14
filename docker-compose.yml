@@ -1,0 +1,58 @@
+services:
+  orbit:
+    build:
+      context: ./orbit
+      target: builder
+    ports:
+      - "3000:3000"
+    environment:
+      - ORBIT_CACHE_HEADER=x-orbit-cache
+      - ORBIT_CACHE_DEFAULT_TTL=300
+      - ORBIT_REDIS_URL=redis://redis:6379
+      - ORBIT_KV_BACKEND=redis
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./examples:/app/examples:ro
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  cloudflare-kv:
+    image: cloudflare/kwazi:latest
+    environment:
+      - CF_API_TOKEN=${CF_API_TOKEN}
+      - CF_ACCOUNT_ID=${CF_ACCOUNT_ID}
+    ports:
+      - "8787:8787"
+
+  mongodb:
+    image: mongo:7-rs
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_ROOT_USERNAME:-admin}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_ROOT_PASSWORD:-password}
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.runCommand('ping')"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  sqlite:
+    image: kitchenpi/sqlite:latest
+    volumes:
+      - sqlite-data:/data/db
+    ports:
+      - "3306:3306"  # Using SQLite HTTP interface example
+
+volumes:
+  sqlite-data:
