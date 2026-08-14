@@ -300,8 +300,10 @@ adapter's `invalidates` may additionally name entities (`['user']`) or exact
 store keys (`cache.keyFor(node)`); it is **echoed to the client** so
 client-side caches can evict too. Eviction stops at entity granularity on
 purpose: per-record precision would require data semantics, and the core
-knows no databases (principle 3). The store is pluggable (a zero-dep memory
-store ships; Redis is planned).
+knows no databases (principle 3). The store is pluggable: a zero-dep memory
+store ships, and production Redis / Cloudflare KV stores ship as
+`@orbit/redis` and `@orbit/kv-cache` (the `CacheStore` contract is
+sync-or-async, so network-backed stores plug in unchanged).
 
 ---
 

@@ -34,8 +34,8 @@
 
 **⬜ First-party plugin packages** (the "brains", shipped as `@orbit/<target>`):  - [x] **`@orbit/auth`** — shipped: `authenticate`/`authorize`/`scope` + `bearerAuth`/`apiKeyAuth` presets and `requireCaller`/`requireRole` helpers (identity stamped in `onBeforeParse` reaches mutations too). 12 tests.
 - [x] **`@orbit/cache`** — shipped as a distribution package that re-exports the plugin from the frozen core (one-way dependency, no `core → cache` cycle). The code-level split is a deliberate breaking change reserved for a future major — see §9.
-- [ ] **`@orbit/redis`** — a `RedisCacheStore` implementing the `CacheStore` contract (contract is done and swappable; only the store impl is missing). Supports TTL/SWR and prefix invalidation.
-- [ ] **`@orbit/kv-cache`** — Cloudflare Workers KV `CacheStore`, same contract as `@orbit/redis` (see below). (`@orbit/cloudflare-workers` is the *server wrapper* package — see §7.)
+- [x] **`@orbit/redis`** — shipped: `createRedisCacheStore({ client, prefix?, ttlSeconds? })` — a `CacheStore` over an injected node-redis client (dependency-free beyond `@orbit/core`). TTL/SWR, prefix invalidation via `SCAN`, `clear()` via `SCAN`+`DEL` (never `FLUSHDB`). 8 tests against an in-memory fake (no network).
+- [x] **`@orbit/kv-cache`** — shipped: `createKvCacheStore({ namespace, prefix?, expirationTtl? })` — a `CacheStore` over an injected Workers KV binding. `clear()`/prefix invalidation page through `list()`. 8 tests against an in-memory fake. (`@orbit/cloudflare-workers` is the *server wrapper* package — see §7.)
 - [x] **`@orbit/logging`** — shipped: dependency-free request-timing plugin (one structured `LogEntry` per resolved query or error). 5 tests.
 
 ---
@@ -101,8 +101,11 @@
 
 **⬜ Not yet:**
 - [ ] **Field-level TTL** (`field:price=ttl=60, field:name=ttl=3600`) — `parseCacheSpec` only parses `ttl`/`stale` today; field-scoped cache keys don't exist.
-- [ ] **Redis-backed store** → **`@orbit/redis`** (implements `CacheStore`).
-- [ ] **Cloudflare KV store** → **`@orbit/kv-cache`** (implements `CacheStore` for Workers; distinct from the `@orbit/cloudflare-workers` *server wrapper*).
+- [x] **Redis-backed store** → **`@orbit/redis`** (implements `CacheStore`).
+- [x] **Cloudflare KV store** → **`@orbit/kv-cache`** (implements `CacheStore` for Workers; distinct from the `@orbit/cloudflare-workers` *server wrapper*).
+- **`CacheStore` is now sync-or-async** — every method may return a `Promise`
+  (the plugin `await`s each call), which is what lets Redis/KV stores exist;
+  `createMemoryCacheStore` stays synchronous and is a `CacheStore` subtype.
 - [ ] **Memcached store** → **`@orbit/memcached`** *(optional)*.
 
 ---
@@ -135,8 +138,8 @@ Future structure (each as its own published package):
 @orbit/sqlite               ⬜ (optional)
 @orbit/rest                 ✅ fetch-based adapter (queries→GET, mutations→POST/PATCH/DELETE)
 @orbit/cache                ✅ distribution home; impl stays in frozen core (see §9 note)
-@orbit/redis                ⬜ (CacheStore for Redis — cache + optional feature store)
-@orbit/kv-cache             ⬜ (CacheStore for Cloudflare KV)
+@orbit/redis                ✅ (CacheStore for Redis — cache + optional feature store)
+@orbit/kv-cache             ✅ (CacheStore for Cloudflare KV)
 @orbit/memcached            ⬜ (optional)
 @orbit/auth                 ✅ authn/authz hooks (authenticate/authorize/scope + presets)
 @orbit/logging              ✅ request-timing / observability
@@ -198,8 +201,9 @@ artifact on every push.
    untouched (full protocol fidelity, see `docs/server.md`), with 14
    (express) + 13 (hono) real end-to-end tests and a layered book-API example (`examples/node/frameworks/10-express.ts`, `examples/node/frameworks/11-hono.ts`). **`@orbit/cloudflare-workers`** ships the same book API behind a plain `fetch` handler with Workers bindings on the OrbitContext and Workers-native WebSocket realtime (`examples/node/frameworks/12-cloudflare-workers.ts`).
 4. **Ship `@orbit/auth`** (easy — hooks already exist).
-5. **Ship `@orbit/redis`** (Redis `CacheStore`), then **`@orbit/kv-cache`**
-   (Cloudflare KV).
+5. ✅ **Ship `@orbit/redis`** (Redis `CacheStore`) + ✅ **`@orbit/kv-cache`**
+   (Cloudflare KV) — done: the `CacheStore` contract was widened to
+   sync-or-async to make real network stores possible.
 6. **Ship `@orbit/postgres` + `@orbit/mongo`** (implement the frozen `DataAdapter`).
 7. **Clients** (`@orbit/client`, `@orbit/client-react`) only once the protocol is stable.
 8. Optional stretch: field-level TTL, `@orbit/sqlite`, `@orbit/memcached`,
@@ -225,8 +229,8 @@ artifact on every push.
 | Benchmarks | ✅ (B1–B9 goals met) |
 | Auth plugin | ✅ (`@orbit/auth`) |
 | Logging plugin | ✅ (`@orbit/logging`) |
-| Redis cache store | ⬜ (`@orbit/redis`) |
-| Cloudflare KV cache store | ⬜ (`@orbit/kv-cache`) |
+| Redis cache store | ✅ (`@orbit/redis`) |
+| Cloudflare KV cache store | ✅ (`@orbit/kv-cache`) |
 | Postgres / Mongo adapters | ⬜ (`@orbit/postgres`, `@orbit/mongo`) |
 | Server wrappers | ✅ (`@orbit/hono`, `@orbit/express`, `@orbit/cloudflare-workers` — thin raw bridges / fetch handler + realtime on every host) |
 | Clients | ⬜ (`@orbit/client`, `@orbit/client-react`, defer) |
@@ -256,7 +260,7 @@ artifact on every push.
 
 | # | Item | Status | Notes |
 | :- | :--- | :--- | :--- |
-| 1 | **`@orbit/redis` + `@orbit/kv-cache`** (SPEC §8 "Redis is planned") | ⬜ | The `CacheStore` contract is shipped; only the production store impls are missing. Unblocks multi-instance deploys + the B6/B9 story at scale. |
+| 1 | **`@orbit/redis` + `@orbit/kv-cache`** (SPEC §8 "Redis is planned") | ✅ | Shipped: the `CacheStore` contract was widened to sync-or-async, then `createRedisCacheStore` (injected node-redis client) and `createKvCacheStore` (injected KV binding) landed — 8 tests each. Unblocks multi-instance deploys + the B6/B9 story at scale. |
 | 2 | **`@orbit/auth`** | ✅ | Shipped: `createAuthPlugin({ authenticate, authorize?, scope? })` + `bearerAuth`/`apiKeyAuth` presets and `requireCaller`/`requireRole` helpers. Identity stamped in `onBeforeParse` reaches queries AND mutations; `authorize` also gates the mutation `return` re-query. 12 tests. |
 | 3 | **`@orbit/postgres` + `@orbit/mongo`** (0.1.x) | ⬜ | Flagship adapters: `filters` → `WHERE`/`$match`, real batching (IN-clauses), `mutate` mapping. Decide `delete`/`create` verb conventions first (contract is frozen — conventions are adapter-level). |
 | 4 | **`@orbit/client`** (after 1.0 freeze) | ⬜ | First-party SDK: typed envelope helpers, WS client with reconnect/resume (the demos' `shared.js` `orbitSocket` is the prototype), client-side cache honoring `invalidates`. Today every consumer re-implements the socket. |

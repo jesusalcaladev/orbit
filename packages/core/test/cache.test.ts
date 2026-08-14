@@ -5,6 +5,7 @@ import {
   memoryAdapter,
   parseCacheSpec,
 } from '../src/index.js';
+import type { CacheEntry, CacheStore } from '../src/index.js';
 import { createOrbit } from '../src/engine.js';
 import { ErrorCode } from '../src/errors.js';
 
@@ -137,7 +138,7 @@ describe('cache plugin', () => {
       relations: {},
       origin: 'client' as const,
     };
-    cache.invalidate(cache.keyFor(node));
+    await cache.invalidate(cache.keyFor(node));
     await orbit.execute(baseEnvelope());
     expect(resolve).toHaveBeenCalledTimes(2);
   });
@@ -148,7 +149,7 @@ describe('cache plugin', () => {
     await orbit.execute(baseEnvelope());
     expect(resolve).toHaveBeenCalledTimes(1);
 
-    cache.invalidatePrefix('orbit:');
+    await cache.invalidatePrefix('orbit:');
     await orbit.execute(baseEnvelope());
     expect(resolve).toHaveBeenCalledTimes(2);
   });
@@ -257,7 +258,7 @@ describe('cache plugin', () => {
     expect(bookResolve).toHaveBeenCalledTimes(1);
     expect(reviewResolve).toHaveBeenCalledTimes(1);
 
-    cache.invalidateEntity('book');
+    await cache.invalidateEntity('book');
     await orbit.execute(bookEnv);
     expect(bookResolve).toHaveBeenCalledTimes(2);
     await orbit.execute(reviewEnv);
@@ -454,6 +455,42 @@ describe('cache store hardening (P0)', () => {
     expect(store.get('c')?.value).toBe('c2');
     expect(store.get('d')?.value).toBe('d');
     expect(store.get('e')?.value).toBe('e');
+  });
+
+  it('works with an async store (Redis/KV shape): the plugin awaits every op', async () => {
+    const map = new Map<string, CacheEntry>();
+    const store: CacheStore = {
+      get: async (key) => map.get(key),
+      set: async (key, entry) => {
+        map.set(key, entry);
+      },
+      delete: async (key) => {
+        map.delete(key);
+      },
+      clear: async () => {
+        map.clear();
+      },
+      keys: async function* () {
+        for (const key of map.keys()) yield key;
+      },
+    };
+    const resolve = vi.fn(() => ({ id: '1', name: 'Ana' }));
+    const cache = createCachePlugin({ store });
+    const orbit = createOrbit({
+      adapters: memoryAdapter([{ entity: 'user', resolve }]),
+      plugins: [cache],
+    });
+
+    const first = await orbit.execute(baseEnvelope());
+    expect(first.fromCache).toBe(false);
+    const second = await orbit.execute(baseEnvelope());
+    expect(second.fromCache).toBe(true);
+    expect(resolve).toHaveBeenCalledTimes(1);
+
+    await cache.invalidatePrefix('orbit:');
+    const third = await orbit.execute(baseEnvelope());
+    expect(third.fromCache).toBe(false);
+    expect(resolve).toHaveBeenCalledTimes(2);
   });
 
   it('a store that throws on set fails the request closed (sanitized)', async () => {

@@ -20,6 +20,29 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
   via `onError`, with the standard code/status/message). Documented
   non-timed paths: cache-hit short-circuits and successful mutations (no
   serialize hook in the mutation pipeline). 5 tests.
+- **`@orbit/redis`** — production Redis `CacheStore`
+  (`createRedisCacheStore({ client, prefix?, ttlSeconds? })`) over an
+  injected node-redis client: entries stored as JSON, optional server-side
+  `EX` TTL, prefix invalidation + `clear()` via `SCAN` (never `FLUSHDB`),
+  corrupted values are misses while transport errors fail closed. 8 tests
+  against an in-memory fake — no network in CI. README + `docs/ecosystem.md`.
+- **`@orbit/kv-cache`** — production Cloudflare Workers KV `CacheStore`
+  (`createKvCacheStore({ namespace, prefix?, expirationTtl? })`) over an
+  injected KV binding: entries stored as JSON, optional `expirationTtl`,
+  prefix invalidation + `clear()` paging through `list()`. 8 tests against an
+  in-memory fake. README + `docs/ecosystem.md`.
+
+### Changed
+- **`CacheStore` widened to sync-or-async** — every method may now return a
+  `Promise` (`get`/`set`/`delete`/`clear`) and `keys()` may be a sync or
+  async iterable, which is what lets Redis/KV stores exist. The cache plugin
+  `await`s each call and its imperative methods (`invalidate`,
+  `invalidatePrefix`, `invalidateEntity`, `clear`) now return `Promise<void>`;
+  the engine awaits entity eviction after a mutation so the post-mutation
+  `return` re-query is fresh even against an async store.
+  `createMemoryCacheStore` stays synchronous and is a `CacheStore` subtype —
+  existing sync stores still satisfy the contract unchanged. `docs/plugins.md`,
+  `docs/ecosystem.md` and the cache READMEs updated.
 
 ### Docs
 - **Pagination convention** (`docs/adapters.md`) — reserved `limit`/`cursor`

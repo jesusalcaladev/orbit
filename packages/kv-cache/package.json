@@ -1,0 +1,43 @@
+{
+  "name": "@orbit/kv-cache",
+  "version": "0.0.1",
+  "description": "Cloudflare Workers KV-backed CacheStore for @orbit/core — TTL, SWR and prefix invalidation on the edge.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "keywords": [
+    "orbit",
+    "cloudflare",
+    "workers",
+    "kv",
+    "cache",
+    "stale-while-revalidate"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@orbit/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}

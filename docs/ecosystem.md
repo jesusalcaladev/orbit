@@ -23,8 +23,8 @@ packages/
              @orbit/mongo           ⬜ DataAdapter over `mongodb`
              @orbit/sqlite          ⬜ DataAdapter over `node:sqlite` (optional)
              @orbit/rest            ✅ shipped — fetch-based DataAdapter
-  caches/    @orbit/redis           ⬜ CacheStore over Redis
-             @orbit/kv-cache        ⬜ CacheStore over Cloudflare KV
+  caches/    @orbit/redis           ✅ shipped — CacheStore over Redis
+             @orbit/kv-cache        ✅ shipped — CacheStore over Cloudflare KV
              @orbit/memcached       ⬜ CacheStore over Memcached (optional)
   plugins/   @orbit/auth            ✅ shipped — authn/authz hooks (authenticate/authorize/scope)
              @orbit/logging         ✅ shipped — request-timing / observability
@@ -47,8 +47,9 @@ packages/
    `dist/`, `.d.ts` alongside, `sideEffects: false`, `engines.node >= 20`.
    Peer-depend on `@orbit/core` (`"@orbit/core": "0.x"`); never vendor core
    code.
-3. **Zero-dependency unless the job requires it.** `@orbit/redis` needs the
-   redis client; `@orbit/postgres` needs `pg`. A *plugin* like `@orbit/auth`
+3. **Zero-dependency unless the job requires it.** `@orbit/redis` and
+   `@orbit/kv-cache` inject the client/namespace, so they need nothing beyond
+   `@orbit/core`; `@orbit/postgres` needs `pg`. A *plugin* like `@orbit/auth`
    should need nothing beyond `@orbit/core`.
 4. **Tests** in `packages/<name>/test/`, Vitest, exercising the real frozen
    contract against a fake/embedded dependency (an in-process Redis, a stub
@@ -62,15 +63,17 @@ packages/
 ### `CacheStore` (frozen — `@orbit/core` `src/plugins/cache.ts`)
 
 Five methods (four required, `keys()` optional). This is the ONLY contract a
-cache backend implements:
+cache backend implements. Every method may be **sync or async**
+(`Promise`-returning) — the in-memory store is sync, Redis/KV stores are
+async, and the plugin `await`s each call:
 
 ```ts
 export interface CacheStore {
-  get(key: string): CacheEntry | undefined;      // CacheEntry = { value, createdAt, query }
-  set(key: string, entry: CacheEntry): void;
-  delete(key: string): void;
-  clear(): void;
-  keys?(): IterableIterator<string>;             // optional — powers prefix invalidation
+  get(key: string): CacheEntry | undefined | Promise<CacheEntry | undefined>;
+  set(key: string, entry: CacheEntry): void | Promise<void>;
+  delete(key: string): void | Promise<void>;
+  clear(): void | Promise<void>;
+  keys?(): IterableIterator<string> | AsyncIterableIterator<string>; // optional — powers prefix invalidation
 }
 ```
 
@@ -87,11 +90,14 @@ Key facts for implementers:
 - **`keys()` is optional** but recommended: it powers
   `invalidatePrefix` — the main cache-busting tool after a mutation.
 - **Reentrancy matters.** The plugin calls `get` on every request and `set`
-  after every miss; a store that blocks (slow network) directly adds latency.
-  Use pipelined/multi commands for the hot path.
+  after every miss, and `await`s both — an async store's latency lands on the
+  hot path, so keep round-trips tight.
+- **Failures fail closed, corruption fails open.** A store that throws on
+  `get`/`set` rejects the request (sanitized `ORBIT_INTERNAL`); a *corrupted
+  value* is a miss. The shipped stores implement exactly that split.
 
-Status: **`@orbit/redis`** and **`@orbit/kv-cache`** are the first two
-implementations on the roadmap. `memoryAdapter`'s sibling,
+Status: **`@orbit/redis`** and **`@orbit/kv-cache`** are **shipped** — the
+first two production backends. `memoryAdapter`'s sibling,
 `createMemoryCacheStore`, is the reference implementation in core.
 
 ### `DataAdapter` (frozen — spec §9)
@@ -163,9 +169,11 @@ Workers-native `WebSocketPair` upgrade over the same runtime-agnostic
    packages: authn/authz (`authenticate`/`authorize`/`scope` + bearer/api-key
    presets, 12 tests) and request timing/observability (5 tests). Both are
    dependency-free — nothing beyond `@orbit/core`.
-4. **`@orbit/redis`**, then **`@orbit/kv-cache`** — the two `CacheStore`
+4. **`@orbit/redis`** ✅ + **`@orbit/kv-cache`** ✅ — the two `CacheStore`
    backends that make the B6/B9 cache story production-ready. They implement
-   the `CacheStore` contract re-exported by `@orbit/cache`.
+   the (now sync-or-async) `CacheStore` contract re-exported by `@orbit/cache`
+   and inject the client/namespace, so both stay dependency-free beyond
+   `@orbit/core` (8 tests each against in-memory fakes — no network in CI).
 5. **`@orbit/postgres` + `@orbit/mongo`** — the flagship DB adapters.
 6. **Server wrappers** ✅ (`@orbit/hono`, `@orbit/express` — thin raw
    bridges, shipped with real end-to-end tests; `@orbit/cloudflare-workers`

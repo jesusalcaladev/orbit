@@ -620,11 +620,13 @@ export class Orbit {
     // the `return` re-query below so a post-mutation read is always fresh.
     const entityCache = findEntityEvictingCache(this.#options.plugins);
     if (entityCache) {
-      entityCache.invalidateEntity(entity);
+      // Stores may be async (Redis/KV) — eviction must settle before the
+      // `return` re-query below so a post-mutation read is always fresh.
+      await entityCache.invalidateEntity(entity);
       if (invalidates) {
         for (const key of invalidates) {
-          entityCache.invalidateEntity(key);
-          entityCache.invalidate(key);
+          await entityCache.invalidateEntity(key);
+          await entityCache.invalidate(key);
         }
       }
     }
@@ -1054,8 +1056,8 @@ export function createOrbit(config: OrbitConfig = {}): Orbit {
  * future cache implementations can too.
  */
 interface EntityEvictingCache {
-  invalidateEntity(entity: string): void;
-  invalidate(key: string): void;
+  invalidateEntity(entity: string): void | Promise<void>;
+  invalidate(key: string): void | Promise<void>;
 }
 
 /**

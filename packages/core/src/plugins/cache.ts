@@ -21,14 +21,19 @@ export interface CacheEntry {
 /**
  * The storage contract for the cache plugin. Implement this to plug in Redis,
  * Memcached, Cloudflare KV, or anything else — the plugin stays identical.
+ *
+ * Every method may be synchronous (the in-memory store) **or** asynchronous
+ * (Redis, KV — network-backed stores cannot answer synchronously). The plugin
+ * `await`s each call, so both shapes work; `keys()` may be a sync or async
+ * iterable and is what powers prefix invalidation.
  */
 export interface CacheStore {
-  get(key: string): CacheEntry | undefined;
-  set(key: string, entry: CacheEntry): void;
-  delete(key: string): void;
-  clear(): void;
+  get(key: string): CacheEntry | undefined | Promise<CacheEntry | undefined>;
+  set(key: string, entry: CacheEntry): void | Promise<void>;
+  delete(key: string): void | Promise<void>;
+  clear(): void | Promise<void>;
   /** Optional enumeration — powers prefix invalidation. */
-  keys?(): IterableIterator<string>;
+  keys?(): IterableIterator<string> | AsyncIterableIterator<string>;
 }
 
 export interface MemoryCacheStoreOptions {
@@ -36,11 +41,20 @@ export interface MemoryCacheStoreOptions {
   maxEntries?: number;
 }
 
+/** The in-memory store's precise, synchronous shape (a `CacheStore` subtype). */
+interface MemoryCacheStore extends CacheStore {
+  get(key: string): CacheEntry | undefined;
+  set(key: string, entry: CacheEntry): void;
+  delete(key: string): void;
+  clear(): void;
+  keys(): IterableIterator<string>;
+}
+
 /**
  * Simple in-memory cache store with insertion-order eviction.
  * Perfect for demos, tests and single-instance deployments.
  */
-export function createMemoryCacheStore(options: MemoryCacheStoreOptions = {}): CacheStore {
+export function createMemoryCacheStore(options: MemoryCacheStoreOptions = {}): MemoryCacheStore {
   const maxEntries = options.maxEntries ?? 10_000;
   const entries = new Map<string, CacheEntry>();
   return {
@@ -171,17 +185,17 @@ export interface CachePluginOptions {
 export interface CachePlugin extends OrbitPlugin {
   readonly store: CacheStore;
   /** Invalidate one cache key (e.g. one returned in `invalidates`). */
-  invalidate(key: string): void;
+  invalidate(key: string): Promise<void>;
   /** Invalidate every key starting with a prefix. */
-  invalidatePrefix(prefix: string): void;
+  invalidatePrefix(prefix: string): Promise<void>;
   /**
    * Evict every entry whose query reads this entity — root or relation
    * (precise server-side invalidation, spec §8). The engine calls this
    * automatically after every mutation on the mutated entity.
    */
-  invalidateEntity(entity: string): void;
+  invalidateEntity(entity: string): Promise<void>;
   /** Clear the whole store. */
-  clear(): void;
+  clear(): Promise<void>;
   /** Compute the cache key for a parsed query node. */
   keyFor(node: QueryNode): string;
 }
@@ -243,30 +257,33 @@ export function createCachePlugin(options: CachePluginOptions = {}): CachePlugin
   const plugin: CachePlugin = {
     name: 'orbit-cache',
     store,
-    invalidate: (key) => {
-      store.delete(key);
+    invalidate: async (key) => {
+      await store.delete(key);
       unindexKey(key);
     },
-    invalidatePrefix: (prefix) => {
-      if (!store.keys) return;
-      for (const key of store.keys()) {
+    invalidatePrefix: async (prefix) => {
+      const keys = store.keys;
+      if (!keys) return;
+      // `for await` handles both a sync iterable (memory store) and an async
+      // one (Redis SCAN / KV list).
+      for await (const key of keys()) {
         // Store contract says keys are strings — a buggy/hostile store that
         // yields non-string keys (Buffers, numbers) must not crash the
         // mutation that triggered eviction.
         if (typeof key === 'string' && key.startsWith(prefix)) {
-          store.delete(key);
+          await store.delete(key);
           unindexKey(key);
         }
       }
     },
-    invalidateEntity: (entity) => {
+    invalidateEntity: async (entity) => {
       const keys = entityIndex.get(entity);
       if (!keys) return;
-      for (const key of [...keys]) store.delete(key);
+      for (const key of [...keys]) await store.delete(key);
       entityIndex.delete(entity);
     },
-    clear: () => {
-      store.clear();
+    clear: async () => {
+      await store.clear();
       entityIndex.clear();
     },
     keyFor: (node) => cacheKeyFor(node),
@@ -286,7 +303,7 @@ export function createCachePlugin(options: CachePluginOptions = {}): CachePlugin
         if (spec.ttl === undefined && spec.stale === undefined) return;
 
         const key = cacheKeyFor(parsed);
-        const entry = store.get(key);
+        const entry = await store.get(key);
         if (!entry) {
           // Cache miss: remember to store the fresh value after resolution.
           const state = (ctx.state ??= {});
@@ -300,7 +317,7 @@ export function createCachePlugin(options: CachePluginOptions = {}): CachePlugin
         // a buggy store) must not be served as perpetually fresh — treat it
         // as expired and fall through to a fresh resolve.
         if (!Number.isFinite(age)) {
-          store.delete(key);
+          await store.delete(key);
           return;
         }
 
@@ -311,7 +328,7 @@ export function createCachePlugin(options: CachePluginOptions = {}): CachePlugin
         //   ttl=300,stale=60   → fresh < 300 s, serve+refresh 300–360 s, refetch ≥ 360 s
         const hardExpired = spec.ttl !== undefined && age >= spec.ttl + (spec.stale ?? 0);
         if (hardExpired) {
-          store.delete(key); // fall through to a fresh resolve
+          await store.delete(key); // fall through to a fresh resolve
           return;
         }
 
@@ -332,7 +349,7 @@ export function createCachePlugin(options: CachePluginOptions = {}): CachePlugin
         if (ctx.state?.[SKIP_KEY]) return;
         const miss = ctx.state?.[MISS_KEY] as { key: string; query: string } | undefined;
         if (!miss) return;
-        store.set(miss.key, { value: data, createdAt: Date.now(), query: miss.query });
+        await store.set(miss.key, { value: data, createdAt: Date.now(), query: miss.query });
         indexKey(miss.key, node);
         delete ctx.state![MISS_KEY];
       },
@@ -357,7 +374,7 @@ export function createCachePlugin(options: CachePluginOptions = {}): CachePlugin
         },
       );
       if (result.body === undefined) {
-        store.set(key, { value: result.data, createdAt: Date.now(), query });
+        await store.set(key, { value: result.data, createdAt: Date.now(), query });
       }
     } catch {
       // Keep the stale value on failure — SWR tolerates upstream hiccups.

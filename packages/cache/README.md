@@ -68,15 +68,17 @@ too.
 
 ## The `CacheStore` contract
 
-The only contract a cache backend implements:
+The only contract a cache backend implements. Every method may be **sync or
+async** (`Promise`-returning) — the in-memory store is sync, Redis/KV stores
+are async, and the plugin `await`s each call:
 
 ```ts
 interface CacheStore {
-  get(key: string): CacheEntry | undefined;   // CacheEntry = { value, createdAt, query }
-  set(key: string, entry: CacheEntry): void;
-  delete(key: string): void;
-  clear(): void;
-  keys?(): IterableIterator<string>;          // optional — powers prefix invalidation
+  get(key: string): CacheEntry | undefined | Promise<CacheEntry | undefined>;
+  set(key: string, entry: CacheEntry): void | Promise<void>;
+  delete(key: string): void | Promise<void>;
+  clear(): void | Promise<void>;
+  keys?(): IterableIterator<string> | AsyncIterableIterator<string>; // optional — powers prefix invalidation
 }
 ```
 
@@ -92,11 +94,15 @@ Key facts for implementers:
   read `createdAt` (store the whole entry).
 - **`keys()` is optional but recommended** — it powers `invalidatePrefix`.
 - **Reentrancy matters** — `get` runs on every request and `set` after every
-  miss; a blocking store adds latency directly.
+  miss, and the plugin `await`s both, so an async store's latency lands on
+  the hot path.
+- **Failures fail closed, corruption fails open** — a throwing store rejects
+  the request (sanitized `ORBIT_INTERNAL`); a corrupted value is a miss.
 
 `createMemoryCacheStore` (from this package or `@orbit/core`) is the
 reference implementation. `@orbit/redis` and `@orbit/kv-cache` are the first
-two backends on the roadmap (see `docs/ecosystem.md`).
+two shipped backends — see [`@orbit/redis`](../redis/README.md),
+[`@orbit/kv-cache`](../kv-cache/README.md) and `docs/ecosystem.md`.
 
 ## Exports
 
