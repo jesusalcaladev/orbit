@@ -1,21 +1,17 @@
-import { esc, fmtMs, orbit, orbitSocket, statsOf, timeOf, toast } from '../shared.js';
+import { chatHistory, esc, orbit, orbitSocket, timeOf, toast } from '../shared.js';
 
 const nameInput = document.getElementById('name');
 const textInput = document.getElementById('text');
 const sendBtn = document.getElementById('send');
 const clearBtn = document.getElementById('clear');
 const chat = document.getElementById('chat');
-const statusEl = document.getElementById('status');
-const connDot = document.getElementById('conn-dot');
 const connPill = document.getElementById('conn-pill');
-const connLabel = document.getElementById('conn-label');
 const countEl = document.getElementById('count');
 
 // ---- state ----
 
 let loaded = false; // history loaded at least once
 const seen = new Set(); // rendered message ids (dedupe)
-const samples = []; // round-trip latencies (mine), capped
 const colors = new Map();
 const palette = ['#6ee7b7', '#38bdf8', '#a78bfa', '#f5b544', '#f15d6c', '#f472b6', '#34d399'];
 
@@ -46,7 +42,7 @@ function clearFeed() {
   renderEmpty();
 }
 
-function addMessage(message, { mine = false, latency } = {}) {
+function addMessage(message, { mine = false } = {}) {
   if (!message || message.id == null || seen.has(String(message.id))) return null;
   seen.add(String(message.id));
 
@@ -78,15 +74,6 @@ function system(line) {
   chat.scrollTop = chat.scrollHeight;
 }
 
-// ---- latency stats ----
-
-function pushLatency(ms) {
-  samples.push(ms);
-  if (samples.length > 200) samples.shift();
-  const s = statsOf(samples);
-  // Don't render per-message latency in this style; keep it simple
-}
-
 // ---- connection status ----
 
 function setStatus(state) {
@@ -96,8 +83,6 @@ function setStatus(state) {
     reconnecting: ['reconnecting…', 'err'],
   };
   const [label, cls] = map[state] ?? ['…', ''];
-  connLabel.textContent = label;
-  connDot.className = `dot ${cls}`;
   connPill.className = `pill ${cls}`;
   connPill.textContent = label;
 }
@@ -141,14 +126,8 @@ void orbitSocket({
     const message = event.data;
     if (!message) return;
     const isMine = pending.has(message.clientId);
-    let latency;
-    if (isMine) {
-      const t0 = pending.get(message.clientId);
-      pending.delete(message.clientId);
-      latency = performance.now() - t0;
-      pushLatency(latency);
-    }
-    addMessage(message, { mine: isMine, latency });
+    if (isMine) pending.delete(message.clientId);
+    addMessage(message, { mine: isMine });
   },
   onError: (error) => toast(`${error.code}: ${error.message}`, true),
 });
@@ -179,11 +158,18 @@ async function clearRoom() {
     seen.clear();
     clearFeed();
     countEl.textContent = '0';
-    samples.length = 0;
   } catch (error) {
     toast(error.message, true);
   }
 }
+
+// ---- wiring ----
+
+sendBtn.addEventListener('click', send);
+clearBtn.addEventListener('click', clearRoom);
+textInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') send();
+});
 
 // ---- first paint ----
 

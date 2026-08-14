@@ -413,7 +413,7 @@ describe('createWorker — the fetch handler', () => {
           entity: 'upload',
           resolve: () => null,
           mutate: async (_action, _args, ctx) => {
-            const file = ctx.files?.['avatar'];
+            const file = ctx.files?.avatar;
             if (file) received.push({ name: file.name, size: file.size });
             return { success: true };
           },

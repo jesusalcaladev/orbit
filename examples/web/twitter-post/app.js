@@ -1,4 +1,4 @@
-import { esc, fmtBytes, orbit, toast } from '../shared.js';
+import { esc, orbit, toast } from '../shared.js';
 
 const textInput = document.getElementById('text');
 const fileInput = document.getElementById('file');
@@ -6,11 +6,11 @@ const sendBtn = document.getElementById('send');
 const clearBtn = document.getElementById('clear');
 const timeline = document.getElementById('timeline');
 const statusEl = document.getElementById('status');
+const connPill = document.getElementById('conn-pill');
 const countEl = document.getElementById('count');
 
 // ---- state ----
 
-let loaded = false;
 const seen = new Set();
 
 // ---- rendering ----
@@ -30,7 +30,7 @@ function clearFeed() {
   renderEmpty();
 }
 
-function addPost(post, { latency } = {}) {
+function addPost(post) {
   if (!post || seen.has(String(post.id))) return null;
   seen.add(String(post.id));
 
@@ -78,7 +78,6 @@ function setStatus(state) {
   };
   const [label, cls] = map[state] ?? ['…', ''];
   statusEl.textContent = label;
-  connDot.className = `dot ${cls}`;
   connPill.className = `pill ${cls}`;
   connPill.textContent = label;
 }
@@ -88,7 +87,6 @@ function setStatus(state) {
 async function loadHistory() {
   try {
     const { data } = await orbit({ query: 'posts { id, text, authorName, authorId, ts }' });
-    loaded = true;
     seen.clear();
     clearFeed();
     const posts = Array.isArray(data) ? data : [];
@@ -190,6 +188,17 @@ async function clearRoom() {
     toast(error.message, true);
   }
 }
+
+// ---- wiring ----
+
+const attachBtn = document.getElementById('attach');
+
+sendBtn.addEventListener('click', send);
+clearBtn.addEventListener('click', clearRoom);
+attachBtn.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', () => {
+  if (fileInput.files?.[0]) send();
+});
 
 // ---- first paint ----
 

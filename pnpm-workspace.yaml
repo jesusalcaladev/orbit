@@ -1,4 +1,4 @@
 packages:
   - packages/*
-allowBuilds:
-  esbuild: set this to true or false
+# No allowBuilds entries: the toolchain (vite 8/rolldown, vitest 4) installs
+# platform binaries via optional dependencies and needs no build scripts.
