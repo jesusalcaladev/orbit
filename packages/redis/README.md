@@ -72,6 +72,10 @@ const orbit = createOrbit({
 - **Atomic by construction** — each `consume` is one Lua `EVAL` (refill +
   check + decrement inside Redis), so N instances can never double-spend a
   token. A read-modify-write in JS would be racy by design.
+- **Header-ready verdicts** — `consume` returns `{ ok, remaining,
+  resetAfterMs }` (and `retryAfterMs` on denial), which
+  `@orbit/rate-limit` turns into the standard `RateLimit-*` / `Retry-After`
+  response headers.
 - **Buckets are hashes** `{ tokens, last }` under `prefix` (default
   `'orbit:rate-limit:'`); every `consume` refreshes a server-side `EXPIRE`
   (default `2 × windowMs`, override with `ttlSeconds`), so idle buckets

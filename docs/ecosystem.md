@@ -136,7 +136,9 @@ params, `/:id` when an `id` filter is present), mutations become
 ### `RateLimitBucketStore` (shipped — `@orbit/rate-limit`, first-party)
 
 ```ts
-export type ConsumeResult = { ok: true } | { ok: false; retryAfterMs: number };
+export type ConsumeResult =
+  | { ok: true; remaining?: number; resetAfterMs?: number }
+  | { ok: false; retryAfterMs: number; remaining?: number; resetAfterMs?: number };
 
 export interface RateLimitBucketStore {
   consume(key: string, params: { limit: number; rate: number; windowMs: number }, now: number):
@@ -152,9 +154,12 @@ bucket in a single step inside the store, so N instances sharing a store can
 never double-spend a token — that is what makes multi-instance limits real.
 Sync-or-async; the plugin `await`s each call. Implementations:
 `createMemoryRateLimitStore` (reference, synchronous, the default) and
-`createRedisRateLimitStore` (`@orbit/redis` — a Lua `EVAL`). The plugin also
-injects a `RateLimiter` handle on `ctx.providers.rateLimiter` (🧪 provides
-channel) so adapters/plugins consume the same shared buckets imperatively.
+`createRedisRateLimitStore` (`@orbit/redis` — a Lua `EVAL`). Verdicts carry
+`remaining`/`resetAfterMs`, which the plugin emits as the standard
+`RateLimit-*` response headers (plus `Retry-After` on the 429). The plugin
+also injects a `RateLimiter` handle on `ctx.providers.rateLimiter` (🧪
+provides channel) so adapters/plugins consume the same shared buckets
+imperatively.
 
 ### `OrbitPlugin` (frozen — spec §11)
 

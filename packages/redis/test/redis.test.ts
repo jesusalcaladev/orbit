@@ -179,10 +179,15 @@ class FakeRateLimitRedis implements RedisRateLimitClient {
     bucket.last = now;
     bucket.tokens = Math.min(limit, bucket.tokens + elapsed * rate);
     if (bucket.tokens < 1) {
-      return [0, Math.ceil((1 - bucket.tokens) / rate)];
+      return [
+        0,
+        Math.ceil((1 - bucket.tokens) / rate),
+        Math.ceil((limit - bucket.tokens) / rate),
+        0,
+      ];
     }
     bucket.tokens -= 1;
-    return [1, 0];
+    return [1, 0, Math.ceil((limit - bucket.tokens) / rate), Math.floor(bucket.tokens)];
   }
 
   async del(keys: string | string[]): Promise<number> {
@@ -209,7 +214,8 @@ describe('@orbit/redis — createRedisRateLimitStore', () => {
       1000,
     );
 
-    expect(result).toEqual({ ok: true });
+    // Fresh bucket (5 tokens) → one consumed → 4 remaining, 12 s to refill.
+    expect(result).toEqual({ ok: true, remaining: 4, resetAfterMs: 12_000 });
     expect(client.evalCalls).toHaveLength(1);
     expect(client.evalCalls[0]!.keys).toEqual(['app:ana']);
     // now, limit, rate, default ttl = max(60, 2 × windowMs/1000)
@@ -225,19 +231,19 @@ describe('@orbit/redis — createRedisRateLimitStore', () => {
     expect(client.evalCalls[0]!.args[3]).toBe(30);
   });
 
-  it('returns exceeded + retryAfterMs from the script verdict', async () => {
-    const canned: { result: unknown } = { result: [0, 250] };
+  it('parses the full script verdict: retryAfterMs/reset/remaining', async () => {
+    const canned: { result: unknown } = { result: [0, 250, 1000, 0] };
     const client: RedisRateLimitClient = {
       eval: async () => canned.result,
     };
     const store = createRedisRateLimitStore({ client });
     const denied = await store.consume('k', { limit: 1, rate: 1 / 60_000, windowMs: 60_000 }, 0);
-    expect(denied).toEqual({ ok: false, retryAfterMs: 250 });
+    expect(denied).toEqual({ ok: false, retryAfterMs: 250, remaining: 0, resetAfterMs: 1000 });
 
-    canned.result = [1, 0];
+    canned.result = [1, 0, 5000, 2];
     await expect(
       store.consume('k', { limit: 1, rate: 1 / 60_000, windowMs: 60_000 }, 0),
-    ).resolves.toEqual({ ok: true });
+    ).resolves.toEqual({ ok: true, remaining: 2, resetAfterMs: 5000 });
   });
 
   it('reset() deletes every key under the prefix (SCAN + DEL)', async () => {

@@ -59,8 +59,17 @@
 import { ErrorCode, OrbitError } from '@orbit/core';
 import type { OrbitContext, OrbitPlugin } from '@orbit/core';
 
-/** The verdict of one atomic `consume` on a bucket. */
-export type ConsumeResult = { ok: true } | { ok: false; retryAfterMs: number };
+/**
+ * The verdict of one atomic `consume` on a bucket.
+ *
+ * Stores may additionally report `remaining` (whole requests left in the
+ * bucket) and `resetAfterMs` (ms until the bucket refills to capacity) —
+ * the plugin turns them into the standard `RateLimit-*` response headers.
+ * Optional so custom stores can return just the verdict.
+ */
+export type ConsumeResult =
+  | { ok: true; remaining?: number; resetAfterMs?: number }
+  | { ok: false; retryAfterMs: number; remaining?: number; resetAfterMs?: number };
 
 /** Refill math params every store needs to run the token bucket. */
 export interface BucketParams {
@@ -142,10 +151,20 @@ export function createMemoryRateLimitStore(): RateLimitBucketStore {
       bucket.last = now;
       bucket.tokens = Math.min(limit, bucket.tokens + elapsed * rate);
       if (bucket.tokens < 1) {
-        return { ok: false, retryAfterMs: Math.ceil((1 - bucket.tokens) / rate) };
+        return {
+          ok: false,
+          retryAfterMs: Math.ceil((1 - bucket.tokens) / rate),
+          remaining: 0,
+          // ms until the bucket refills to capacity (the quota reset).
+          resetAfterMs: Math.ceil((limit - bucket.tokens) / rate),
+        };
       }
       bucket.tokens -= 1;
-      return { ok: true };
+      return {
+        ok: true,
+        remaining: Math.floor(bucket.tokens),
+        resetAfterMs: Math.ceil((limit - bucket.tokens) / rate),
+      };
     },
     get bucketCount() {
       return buckets.size;
@@ -207,6 +226,35 @@ export interface RateLimitPlugin extends OrbitPlugin {
 const PROVIDE_DEFAULT = 'rateLimiter';
 
 /**
+ * Emit the standard rate-limit response headers (draft-ietf-httpapi-
+ * ratelimit-headers, as popular libraries do) via the §7 `responseHeaders`
+ * channel, on EVERY request the plugin gates:
+ *
+ * - `RateLimit-Limit` — the window's quota (bucket capacity).
+ * - `RateLimit-Remaining` — whole requests left in the bucket right now.
+ * - `RateLimit-Reset` — seconds until the quota resets (bucket refills to
+ *   capacity); the token-bucket analogue of "end of window".
+ * - `Retry-After` (429 only) — seconds until the next request may pass.
+ *
+ * Headers ride every response format (JSON, msgpack, errors) and never
+ * clobber a header another plugin set explicitly. Stores that don't report
+ * `remaining`/`resetAfterMs` simply emit `RateLimit-Limit`.
+ */
+function setRateLimitHeaders(ctx: OrbitContext, limit: number, result: ConsumeResult): void {
+  const headers = (ctx.responseHeaders ??= {});
+  if (headers['ratelimit-limit'] === undefined) headers['ratelimit-limit'] = String(limit);
+  if (!result.ok && headers['retry-after'] === undefined) {
+    headers['retry-after'] = String(Math.max(1, Math.ceil(result.retryAfterMs / 1000)));
+  }
+  if (result.remaining !== undefined && headers['ratelimit-remaining'] === undefined) {
+    headers['ratelimit-remaining'] = String(result.remaining);
+  }
+  if (result.resetAfterMs !== undefined && headers['ratelimit-reset'] === undefined) {
+    headers['ratelimit-reset'] = String(Math.max(1, Math.ceil(result.resetAfterMs / 1000)));
+  }
+}
+
+/**
  * Default identity key: the client's IP as seen by a proxy, else a shared
  * bucket. Deployment note: set `keyOf` when you can resolve a real identity
  * (user id, API key) — IP-based buckets are a floor, not a contract.
@@ -266,6 +314,10 @@ export function createRateLimitPlugin(options: RateLimitOptions): RateLimitPlugi
       async onBeforeParse({ ctx }) {
         const key = keyOf(ctx);
         const result = await store.consume(key, params, now());
+        // Standard rate-limit headers on success AND on the 429 (the
+        // responseHeaders channel is merged into error responses too — but
+        // never into an SSE stream, which starts before the pipeline runs).
+        setRateLimitHeaders(ctx, limit, result);
         if (result.ok) return;
         if (options.onExceeded) throw options.onExceeded(ctx, key, result.retryAfterMs);
         throw new OrbitError(ErrorCode.PERMISSION_DENIED, 'Rate limit exceeded', {

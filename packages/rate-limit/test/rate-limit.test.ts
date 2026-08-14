@@ -144,14 +144,27 @@ describe('createMemoryRateLimitStore', () => {
 
   it('consumes tokens, then reports retryAfterMs, then refills', async () => {
     const store = createMemoryRateLimitStore();
-    expect(await store.consume('k', params, 0)).toEqual({ ok: true });
-    expect(await store.consume('k', params, 0)).toEqual({ ok: true });
+    // The verdict carries the header inputs: remaining + ms until full.
+    expect(await store.consume('k', params, 0)).toEqual({
+      ok: true,
+      remaining: 1,
+      resetAfterMs: 30_000, // (2 − 1) tokens at 2/60_000 per ms
+    });
+    expect(await store.consume('k', params, 0)).toEqual({
+      ok: true,
+      remaining: 0,
+      resetAfterMs: 60_000, // (2 − 0) tokens
+    });
     const denied = await store.consume('k', params, 0);
-    expect(denied).toMatchObject({ ok: false });
+    expect(denied).toMatchObject({ ok: false, remaining: 0 });
     if (!denied.ok) expect(denied.retryAfterMs).toBeGreaterThan(0);
 
     // A full window later the bucket is back to capacity.
-    expect(await store.consume('k', params, 60_001)).toEqual({ ok: true });
+    expect(await store.consume('k', params, 60_001)).toEqual({
+      ok: true,
+      remaining: 1,
+      resetAfterMs: 30_000,
+    });
     expect(store.bucketCount).toBe(1);
     store.reset?.();
     expect(store.bucketCount).toBe(0);
@@ -159,10 +172,10 @@ describe('createMemoryRateLimitStore', () => {
 
   it('keys buckets independently', async () => {
     const store = createMemoryRateLimitStore();
-    expect(await store.consume('a', params, 0)).toEqual({ ok: true });
-    expect(await store.consume('a', params, 0)).toEqual({ ok: true }); // 2 → 1 → 0
-    expect(await store.consume('a', params, 0)).toMatchObject({ ok: false });
-    expect(await store.consume('b', params, 0)).toEqual({ ok: true }); // own bucket
+    expect((await store.consume('a', params, 0)).ok).toBe(true);
+    expect((await store.consume('a', params, 0)).ok).toBe(true); // 2 → 1 → 0
+    expect((await store.consume('a', params, 0)).ok).toBe(false);
+    expect((await store.consume('b', params, 0)).ok).toBe(true); // own bucket
     expect(store.bucketCount).toBe(2);
   });
 });
@@ -250,6 +263,80 @@ describe('provides channel (ctx.providers.rateLimiter)', () => {
       plugins: [createRateLimitPlugin({ windowMs: 60_000, limit: 5, provideAs: false })],
     });
     expect(none.providers.rateLimiter).toBeUndefined();
+  });
+
+  it('emits standard rate-limit headers on success (draft-ietf-httpapi-ratelimit)', async () => {
+    const clock = fakeClock();
+    const plugin = createRateLimitPlugin({ windowMs: 60_000, limit: 2, now: clock.now });
+    const orbit = makeOrbit(plugin);
+    const post = (query: string) =>
+      orbit.handler(
+        new Request('http://orbit.local/', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ query }),
+        }),
+      );
+
+    const first = await post('user { id }');
+    expect(first.status).toBe(200);
+    expect(first.headers.get('ratelimit-limit')).toBe('2');
+    expect(first.headers.get('ratelimit-remaining')).toBe('1');
+    expect(first.headers.get('ratelimit-reset')).toBe('30'); // 30 s until full
+    expect(first.headers.get('retry-after')).toBeNull();
+
+    const second = await post('user { id }');
+    expect(second.status).toBe(200);
+    expect(second.headers.get('ratelimit-remaining')).toBe('0');
+    expect(second.headers.get('ratelimit-reset')).toBe('60');
+  });
+
+  it('emits Retry-After + remaining 0 on the 429 response', async () => {
+    const clock = fakeClock();
+    const plugin = createRateLimitPlugin({ windowMs: 60_000, limit: 1, now: clock.now });
+    const orbit = makeOrbit(plugin);
+    const post = (query: string) =>
+      orbit.handler(
+        new Request('http://orbit.local/', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ query }),
+        }),
+      );
+
+    await post('user { id }');
+    const denied = await post('user { id }');
+    expect(denied.status).toBe(429);
+    expect(denied.headers.get('retry-after')).toBe('60'); // 60 s to one token
+    expect(denied.headers.get('ratelimit-limit')).toBe('1');
+    expect(denied.headers.get('ratelimit-remaining')).toBe('0');
+    expect(denied.headers.get('ratelimit-reset')).toBe('60');
+  });
+
+  it('never clobbers headers another plugin set explicitly', async () => {
+    const plugin = createRateLimitPlugin({ windowMs: 60_000, limit: 1 });
+    const orbit = createOrbit({
+      adapters: memoryAdapter([{ entity: 'user', resolve: () => ({ id: '1' }) }]),
+      plugins: [
+        {
+          name: 'custom-headers',
+          hooks: {
+            onBeforeParse({ ctx }) {
+              (ctx.responseHeaders ??= {})['ratelimit-limit'] = '99';
+            },
+          },
+        },
+        plugin,
+      ],
+    });
+    const response = await orbit.handler(
+      new Request('http://orbit.local/', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ query: 'user { id }' }),
+      }),
+    );
+    expect(response.headers.get('ratelimit-limit')).toBe('99');
   });
 
   it('rejects a colliding provider name from another plugin at boot', () => {

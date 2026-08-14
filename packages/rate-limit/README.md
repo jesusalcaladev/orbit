@@ -70,6 +70,25 @@ check + decrement in a single step inside the store (the Redis store is a Lua
 `EVAL`), so concurrent instances can never double-spend a token — a
 read-modify-write store would be racy by design.
 
+## Standard rate-limit headers
+
+Every response the plugin gates carries the standard rate-limit headers
+([draft-ietf-httpapi-ratelimit-headers](https://www.ietf.org/archive/id/draft-ietf-httpapi-ratelimit-headers-07.html),
+like `express-rate-limit` / `@nestjs/throttler`), emitted via the §7
+`responseHeaders` channel:
+
+| Header | When | Meaning |
+| :--- | :--- | :--- |
+| `RateLimit-Limit` | every request | The window's quota (bucket capacity). |
+| `RateLimit-Remaining` | every request | Whole requests left in the bucket right now. |
+| `RateLimit-Reset` | every request | Seconds until the quota resets (bucket refills to capacity — the token-bucket analogue of "end of window"). |
+| `Retry-After` | 429 only | Seconds until the next request may pass. |
+
+Headers ride every response format (JSON, msgpack, errors) and never clobber
+headers another plugin set explicitly. Custom stores that don't report
+`remaining`/`resetAfterMs` simply emit `RateLimit-Limit` (and `Retry-After` on
+the 429).
+
 ## The limiter on `ctx.providers` (🧪 provides channel)
 
 By default the plugin exposes the limiter on
@@ -102,7 +121,9 @@ rejects duplicate plugin names, and duplicate provider names fail at boot too).
 ## The `RateLimitBucketStore` contract
 
 ```ts
-export type ConsumeResult = { ok: true } | { ok: false; retryAfterMs: number };
+export type ConsumeResult =
+  | { ok: true; remaining?: number; resetAfterMs?: number }
+  | { ok: false; retryAfterMs: number; remaining?: number; resetAfterMs?: number };
 
 export interface RateLimitBucketStore {
   consume(key: string, params: { limit: number; rate: number; windowMs: number }, now: number):
@@ -141,5 +162,5 @@ export interface RateLimitBucketStore {
 ## Contract
 
 Implements the frozen `OrbitPlugin` interface from `@orbit/core` (spec §11) —
-no core changes, no new error codes, purely additive. 15 tests in
+no core changes, no new error codes, purely additive. 18 tests in
 `packages/rate-limit/test/`.

@@ -150,7 +150,9 @@ export function createRedisCacheStore(options: RedisCacheStoreOptions): CacheSto
  *
  * KEYS[1] = bucket key · ARGV[1] = now (ms) · ARGV[2] = limit ·
  * ARGV[3] = rate (tokens/ms) · ARGV[4] = ttlSeconds.
- * Returns `{1, 0}` when the request may pass, `{0, retryAfterMs}` otherwise.
+ * Returns `{allowed, retryAfterMs, resetAfterMs, remaining}` — the last two
+ * feed the standard `RateLimit-Reset` / `RateLimit-Remaining` headers
+ * (reset = ms until the bucket refills to capacity).
  */
 const RATE_LIMIT_LUA = `
 local tokens = tonumber(ARGV[2])
@@ -165,15 +167,20 @@ if elapsed > 0 then
   tokens = math.min(tonumber(ARGV[2]), tokens + elapsed * tonumber(ARGV[3]))
   last = tonumber(ARGV[1])
 end
+local limit = tonumber(ARGV[2])
 if tokens < 1 then
   local retryAfterMs = math.ceil((1 - tokens) / tonumber(ARGV[3]))
+  local resetAfterMs = math.ceil((limit - tokens) / tonumber(ARGV[3]))
   redis.call('HSET', KEYS[1], 'tokens', tostring(tokens), 'last', tostring(last))
   redis.call('EXPIRE', KEYS[1], tonumber(ARGV[4]))
-  return {0, retryAfterMs}
+  return {0, retryAfterMs, resetAfterMs, 0}
 end
-redis.call('HSET', KEYS[1], 'tokens', tostring(tokens - 1), 'last', tostring(last))
+tokens = tokens - 1
+local remaining = math.floor(tokens)
+local resetAfterMs = math.ceil((limit - tokens) / tonumber(ARGV[3]))
+redis.call('HSET', KEYS[1], 'tokens', tostring(tokens), 'last', tostring(last))
 redis.call('EXPIRE', KEYS[1], tonumber(ARGV[4]))
-return {1, 0}
+return {1, 0, resetAfterMs, remaining}
 `.trim();
 
 /**
@@ -234,12 +241,20 @@ export function createRedisRateLimitStore(options: RedisRateLimitStoreOptions): 
     key: string,
     params: { limit: number; rate: number; windowMs: number },
     now: number,
-  ): Promise<{ ok: true } | { ok: false; retryAfterMs: number }>;
+  ): Promise<
+    | { ok: true; remaining?: number; resetAfterMs?: number }
+    | { ok: false; retryAfterMs: number; remaining?: number; resetAfterMs?: number }
+  >;
   /** SCAN + DEL every key under the prefix (key rotation / tests). */
   reset(): Promise<void>;
 } {
   const { client, prefix = 'orbit:rate-limit:', ttlSeconds } = options;
   const fullKey = (key: string) => prefix + key;
+
+  const finite = (value: unknown, fallback: number): number => {
+    const n = Number(value ?? fallback);
+    return Number.isFinite(n) ? n : fallback;
+  };
 
   return {
     async consume(key, { limit, rate, windowMs }, now) {
@@ -250,13 +265,23 @@ export function createRedisRateLimitStore(options: RedisRateLimitStoreOptions): 
         keys: [fullKey(key)],
         arguments: [now, limit, rate, ttl],
       });
-      if (Array.isArray(result) && result.length > 0) {
-        const allowed = Number(result[0]) === 1;
-        if (allowed) return { ok: true };
-        const retryAfterMs = Number(result[1] ?? 0);
-        return { ok: false, retryAfterMs: Number.isFinite(retryAfterMs) ? retryAfterMs : 0 };
+      // Shape: {allowed, retryAfterMs, resetAfterMs, remaining}. Tolerant of
+      // a bare truthy return (clients that flatten single-value tables).
+      if (Array.isArray(result) && Number(result[0]) === 1) {
+        return {
+          ok: true,
+          remaining: finite(result[3], 0),
+          resetAfterMs: finite(result[2], 0),
+        };
       }
-      // A bare truthy return (clients that flatten single-value tables) = allowed.
+      if (Array.isArray(result)) {
+        return {
+          ok: false,
+          retryAfterMs: finite(result[1], 0),
+          remaining: finite(result[3], 0),
+          resetAfterMs: finite(result[2], 0),
+        };
+      }
       return { ok: true };
     },
 

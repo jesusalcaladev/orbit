@@ -5,6 +5,15 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
 ## [Unreleased]
 
 ### Added
+- **Standard rate-limit response headers (`@orbit/rate-limit`)** — every
+  gated response now carries `RateLimit-Limit`, `RateLimit-Remaining` and
+  `RateLimit-Reset` (draft-ietf-httpapi-ratelimit-headers, as
+  `express-rate-limit` / `@nestjs/throttler` do), and the 429 carries
+  `Retry-After` — emitted via the §7 `responseHeaders` channel, never
+  clobbering headers another plugin set. The `ConsumeResult` contract gained
+  optional `remaining`/`resetAfterMs` (both first-party stores report them;
+  the Redis Lua script returns `{allowed, retryAfterMs, resetAfterMs,
+  remaining}`). Tests: rate-limit 15 → 18.
 - **Distributed rate limiting (`@orbit/rate-limit` + `@orbit/redis`)** —
   `createRateLimitPlugin` now accepts a **pluggable atomic bucket store**
   (`RateLimitBucketStore`): the single `consume(key, params, now)` method
