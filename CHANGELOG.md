@@ -5,6 +5,48 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
 ## [Unreleased]
 
 ### Added
+- **Distributed rate limiting (`@orbit/rate-limit` + `@orbit/redis`)** —
+  `createRateLimitPlugin` now accepts a **pluggable atomic bucket store**
+  (`RateLimitBucketStore`): the single `consume(key, params, now)` method
+  refills, checks and decrements in ONE step inside the store, so N
+  instances sharing a store can never double-spend a token (a
+  read-modify-write store would be racy by design). `createMemoryRateLimitStore`
+  is the synchronous reference (and the default — behavior unchanged);
+  `@orbit/redis` ships **`createRedisRateLimitStore`** — one Lua `EVAL` per
+  consume, prefixed hash buckets (`orbit:rate-limit:`), server-side TTL
+  (default `2 × windowMs`, `ttlSeconds` override) and `reset()` via
+  SCAN+DEL — so limits are shared across every instance pointing at the
+  same Redis. The plugin also exposes the limiter on
+  **`ctx.providers.rateLimiter`** (🧪 provides channel, `provideAs` to
+  rename/disable) so adapters and plugins consume the SAME shared buckets
+  imperatively. Failures fail closed (a store outage rejects, sanitized).
+  Tests: rate-limit 8 → 15, redis 9 → 14 (incl. a two-instance sharing
+  contract against an in-memory fake — no network in CI).
+- **Plugin service injection into `ctx` (`provides` → `ctx.providers`)** 🧪
+  (spec §11, additive) — an `OrbitPlugin` may declare boot-time services
+  (`provides: { cacheStore, config, … }`) and the engine collects them at
+  `createOrbit` (registration order; **duplicate names and reserved
+  prototype names throw at boot**, both plugins named) into a frozen,
+  read-only container injected onto **every** execution's `ctx.providers`
+  **before any hook runs** — so every hook AND every adapter sees the
+  services regardless of registration order. Reaches queries, mutations
+  (`onBeforeParse` + `mutate`), `stream()`, mutation `return` re-queries and
+  the realtime subscription gates (`authorizedSubscribe`). Per-request
+  values stay in `ctx.state`; `providers` is boot-time singletons. 8 tests
+  in `test/providers.test.ts`. Spec §11, `docs/plugins.md`, ROADMAP §1.
+- **Age-aware cache HTTP headers** (spec §7/§8, additive) — when a cache
+  spec is applied, the cache plugin now emits `x-orbit-cache: hit|miss` and
+  `cache-control` via the `responseHeaders` channel: `public, max-age=<remaining
+  freshness>` on a fresh serve and `public, max-age=0,
+  stale-while-revalidate=<remaining window>` when serving stale, so a
+  CDN/proxy caches Orbit's answers for exactly as long as Orbit itself
+  would. Neither header is emitted without a spec, and the error contract's
+  `cache-control: no-store` is now enforced AFTER pipeline headers are
+  merged — a cache miss marker stamped before a resolution failure can never
+  make an error cacheable. 6 tests in `test/cache.test.ts`.
+- **`@orbit/redis` — batched `clear()`** — the Redis store now deletes in
+  multi-key `DEL` chunks (100 keys) instead of one round-trip per key; test
+  pins the exact batch shape. 9 tests.
 - **`@orbit/auth`** — first-party authentication & authorization plugin
   (`createAuthPlugin`) with `authenticate`/`authorize`/`scope` and
   `bearerAuth`/`apiKeyAuth` presets plus `requireCaller`/`requireRole`

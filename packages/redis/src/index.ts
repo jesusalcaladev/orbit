@@ -108,9 +108,17 @@ export function createRedisCacheStore(options: RedisCacheStoreOptions): CacheSto
     async clear() {
       if (!client.scanIterator) return; // no enumeration → nothing to clear
       // Call the method on `client` so its `this` binding is preserved.
+      // Multi-key `DEL` (chunked) beats one round-trip per key on a large
+      // keyspace — node-redis v4/v5 accepts an array natively.
+      let batch: string[] = [];
       for await (const full of client.scanIterator({ MATCH: prefix + '*', COUNT: 100 })) {
-        await client.del(full);
+        batch.push(full);
+        if (batch.length >= 100) {
+          await client.del(batch);
+          batch = [];
+        }
       }
+      if (batch.length > 0) await client.del(batch);
     },
 
     async *keys() {
@@ -124,4 +132,145 @@ export function createRedisCacheStore(options: RedisCacheStoreOptions): CacheSto
   };
 
   return store;
+}
+
+/* --------------------------------------------------------------------------
+ * Distributed rate-limit buckets (shared across instances)
+ * -------------------------------------------------------------------------- */
+
+/**
+ * Atomic token-bucket consume as a single Redis script.
+ *
+ * One `EVAL` = one decision: refill, check and decrement happen inside Redis,
+ * so N instances sharing a key can never double-spend a token (a
+ * read-modify-write in JS would be racy by design). The bucket is a hash
+ * `{ tokens, last }`; `EXPIRE` bounds dead keys (a bucket idle for longer
+ * than its TTL resets to full on the next touch, which is exactly the lazy
+ * refill contract).
+ *
+ * KEYS[1] = bucket key · ARGV[1] = now (ms) · ARGV[2] = limit ·
+ * ARGV[3] = rate (tokens/ms) · ARGV[4] = ttlSeconds.
+ * Returns `{1, 0}` when the request may pass, `{0, retryAfterMs}` otherwise.
+ */
+const RATE_LIMIT_LUA = `
+local tokens = tonumber(ARGV[2])
+local last = tonumber(ARGV[1])
+local raw = redis.call('HMGET', KEYS[1], 'tokens', 'last')
+if raw[1] then
+  tokens = tonumber(raw[1])
+  last = tonumber(raw[2])
+end
+local elapsed = tonumber(ARGV[1]) - last
+if elapsed > 0 then
+  tokens = math.min(tonumber(ARGV[2]), tokens + elapsed * tonumber(ARGV[3]))
+  last = tonumber(ARGV[1])
+end
+if tokens < 1 then
+  local retryAfterMs = math.ceil((1 - tokens) / tonumber(ARGV[3]))
+  redis.call('HSET', KEYS[1], 'tokens', tostring(tokens), 'last', tostring(last))
+  redis.call('EXPIRE', KEYS[1], tonumber(ARGV[4]))
+  return {0, retryAfterMs}
+end
+redis.call('HSET', KEYS[1], 'tokens', tostring(tokens - 1), 'last', tostring(last))
+redis.call('EXPIRE', KEYS[1], tonumber(ARGV[4]))
+return {1, 0}
+`.trim();
+
+/**
+ * The minimal Redis client surface the rate-limit store needs — node-redis
+ * v4/v5 satisfies it out of the box (`eval`, plus optional `del`/
+ * `scanIterator` for `reset()`).
+ */
+export interface RedisRateLimitClient {
+  eval(
+    script: string,
+    options: { keys: string[]; arguments: Array<string | number> },
+  ): Promise<unknown>;
+  /** Optional — powers `reset()` (SCAN + multi-key DEL). */
+  del?(keys: string | string[]): Promise<unknown>;
+  /** Optional — powers `reset()`. */
+  scanIterator?(options: { MATCH: string; COUNT?: number }): AsyncIterableIterator<string>;
+}
+
+export interface RedisRateLimitStoreOptions {
+  /** A connected Redis client (node-redis v4/v5 recommended). */
+  client: RedisRateLimitClient;
+  /**
+   * Namespace prepended to every bucket key. Default `'orbit:rate-limit:'`;
+   * set `''` or a per-app prefix to share a Redis.
+   */
+  prefix?: string;
+  /**
+   * Server-side key TTL (seconds). Defaults to `2 × windowMs` (so an idle
+   * bucket survives at least a full refill window, then resets to full — the
+   * lazy refill contract). `EXPIRE` refreshes on every consume.
+   */
+  ttlSeconds?: number;
+}
+
+/**
+ * A Redis-backed atomic rate-limit bucket store for
+ * `@orbit/rate-limit`'s `createRateLimitPlugin({ store })` — limits shared
+ * across every instance pointing at the same Redis. The store satisfies the
+ * frozen `RateLimitBucketStore` contract structurally (same `consume`
+ * shape), so no dependency on `@orbit/rate-limit` is needed.
+ *
+ * ```ts
+ * import { createRateLimitPlugin } from '@orbit/rate-limit';
+ * import { createRedisRateLimitStore } from '@orbit/redis';
+ *
+ * createRateLimitPlugin({
+ *   windowMs: 60_000,
+ *   limit: 120,
+ *   store: createRedisRateLimitStore({ client }),
+ * });
+ * ```
+ *
+ * Failures fail closed: a Redis outage rejects the request (sanitized by the
+ * engine) — a limiter that silently stops limiting is worse than a 500.
+ */
+export function createRedisRateLimitStore(options: RedisRateLimitStoreOptions): {
+  consume(
+    key: string,
+    params: { limit: number; rate: number; windowMs: number },
+    now: number,
+  ): Promise<{ ok: true } | { ok: false; retryAfterMs: number }>;
+  /** SCAN + DEL every key under the prefix (key rotation / tests). */
+  reset(): Promise<void>;
+} {
+  const { client, prefix = 'orbit:rate-limit:', ttlSeconds } = options;
+  const fullKey = (key: string) => prefix + key;
+
+  return {
+    async consume(key, { limit, rate, windowMs }, now) {
+      // The bucket's server-side TTL: keep an idle bucket around for at least
+      // one full refill window, then let it reset to full on the next touch.
+      const ttl = ttlSeconds ?? Math.max(60, Math.ceil(windowMs / 1000) * 2);
+      const result = await client.eval(RATE_LIMIT_LUA, {
+        keys: [fullKey(key)],
+        arguments: [now, limit, rate, ttl],
+      });
+      if (Array.isArray(result) && result.length > 0) {
+        const allowed = Number(result[0]) === 1;
+        if (allowed) return { ok: true };
+        const retryAfterMs = Number(result[1] ?? 0);
+        return { ok: false, retryAfterMs: Number.isFinite(retryAfterMs) ? retryAfterMs : 0 };
+      }
+      // A bare truthy return (clients that flatten single-value tables) = allowed.
+      return { ok: true };
+    },
+
+    async reset() {
+      if (!client.scanIterator || !client.del) return; // no enumeration → no-op
+      let batch: string[] = [];
+      for await (const full of client.scanIterator({ MATCH: prefix + '*', COUNT: 100 })) {
+        batch.push(full);
+        if (batch.length >= 100) {
+          await client.del(batch);
+          batch = [];
+        }
+      }
+      if (batch.length > 0) await client.del(batch);
+    },
+  };
 }

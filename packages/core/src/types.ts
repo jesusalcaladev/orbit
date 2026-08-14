@@ -91,6 +91,17 @@ export interface OrbitContext {
   rawQuery?: string;
   /** Plugin/application scratch space, shared across the whole pipeline. */
   state?: Record<string, unknown>;
+  /**
+   * Boot-time services injected by plugins via `OrbitPlugin.provides` — the
+   * engine collects them at `createOrbit` (duplicate names rejected) and
+   * materializes the merged, read-only container onto every execution before
+   * any hook runs. Every hook AND every adapter sees the same services;
+   * registration order is irrelevant because injection happens before the
+   * pipeline starts. Contrast with `state`: `providers` is boot-time
+   * singletons shared across requests (frozen — read-only); `state` is
+   * per-request scratch. 🧪 Experimental (spec §11, additive).
+   */
+  providers?: Readonly<Record<string, unknown>>;
   /** The Orbit engine instance (set by the engine itself). */
   orbit?: OrbitEngineLike;
   /** Content type override — set by plugins to opt into non-JSON serialization. */

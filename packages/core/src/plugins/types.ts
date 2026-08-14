@@ -95,11 +95,46 @@ export interface OrbitHooks {
   onError(input: ErrorInput): OrbitError | void | Promise<OrbitError | void>;
 }
 
-/** A named bundle of hooks. The core is empty of logic; plugins bring the brains. */
+/**
+ * A named bundle of hooks. The core is empty of logic; plugins bring the brains.
+ *
+ * A plugin may also declare boot-time services via `provides`: the engine
+ * collects them (in registration order, duplicate names rejected at
+ * `createOrbit` time) and injects the merged, read-only container onto every
+ * request's `ctx.providers` **before any hook runs** — so every hook AND every
+ * adapter sees the injected services regardless of registration order. This is
+ * the first-class channel for "inject things into ctx": a Redis client, a
+ * config object, a service instance — anything an adapter or a later plugin
+ * needs that exists at boot.
+ *
+ * ```ts
+ * const redisPlugin: OrbitPlugin = {
+ *   name: 'redis',
+ *   provides: { redis: createRedisCacheStore({ client }) },
+ *   hooks: { … },
+ * };
+ * // adapter:
+ * resolve(filters, ctx) { const store = ctx.providers?.redis; … }
+ * ```
+ *
+ * The container is shared across requests and frozen — treat it as read-only.
+ * Per-request values (a caller identity, a tenant id) belong in `ctx.state`,
+ * which is per-request scratch; `provides` is boot-time singletons.
+ *
+ * Additive to the frozen contract (spec §11): optional field, no hook
+ * signature or shape changed. 🧪 Experimental — shape may evolve before 1.0.
+ */
 export interface OrbitPlugin {
   /** Unique name — used for diagnostics and duplicate detection. */
   name: string;
   hooks: Partial<OrbitHooks>;
+  /**
+   * Boot-time services injected into every request's `ctx.providers`.
+   * Keys must be unique across all mounted plugins and may not be reserved
+   * prototype names (`__proto__`, `constructor`, `prototype`) — both are
+   * rejected at `createOrbit` time, loudly.
+   */
+  provides?: Readonly<Record<string, unknown>>;
 }
 
 /** Every hook, in pipeline order (used for introspection/tests). */

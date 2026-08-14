@@ -89,6 +89,12 @@ export interface OrbitConfig {
 interface OrbitOptions {
   adapters: AdapterRegistry;
   plugins: PluginRegistry;
+  /**
+   * Boot-time services merged from every plugin's `provides`, in registration
+   * order (duplicates rejected at `createOrbit`). Injected onto every
+   * execution's `ctx.providers` before any hook runs (spec §11, 🧪).
+   */
+  providers: Readonly<Record<string, unknown>>;
   maxQueryDepth: number;
   maxPayloadBytes: number;
   maxKeyLength: number;
@@ -186,6 +192,16 @@ export class Orbit {
     return this.#options.adapters;
   }
 
+  /**
+   * The merged, read-only service container declared by plugins
+   * (`OrbitPlugin.provides`). The engine injects it onto every execution's
+   * `ctx.providers`; exposed here so the realtime subscription gates (which
+   * run the pipeline directly, not via `execute`) can merge it too.
+   */
+  get providers(): Readonly<Record<string, unknown>> {
+    return this.#options.providers;
+  }
+
   /** Maximum relation nesting depth (used by the realtime hub too). */
   get maxQueryDepth(): number {
     return this.#options.maxQueryDepth;
@@ -207,7 +223,16 @@ export class Orbit {
    */
   async execute(envelope: OrbitEnvelope, ctx: OrbitContext = {}): Promise<OrbitResult> {
     const valid = validateEnvelope(envelope);
-    const fullCtx: OrbitContext = { ...ctx, envelope: valid, orbit: this };
+    // Providers are the engine's channel (plugin-declared boot-time services):
+    // the merged container REPLACES any caller-supplied `providers`, so plugins
+    // stay the single source of truth. Per-request caller values belong in
+    // `ctx.state`, which the spread below preserves.
+    const fullCtx: OrbitContext = {
+      ...ctx,
+      providers: this.#options.providers,
+      envelope: valid,
+      orbit: this,
+    };
 
     // Effective cancellation: the caller's AbortSignal (if any) plus the
     // optional engine timeout. The signal rides on ctx so adapters/plugins
@@ -268,7 +293,12 @@ export class Orbit {
    */
   async *stream(envelope: OrbitEnvelope, ctx: OrbitContext = {}): AsyncGenerator<OrbitStreamEvent> {
     const valid = validateEnvelope(envelope);
-    const fullCtx: OrbitContext = { ...ctx, envelope: valid, orbit: this };
+    const fullCtx: OrbitContext = {
+      ...ctx,
+      providers: this.#options.providers,
+      envelope: valid,
+      orbit: this,
+    };
     if (valid.do !== undefined) {
       throw new OrbitError(
         ErrorCode.INVALID_QUERY,
@@ -909,20 +939,33 @@ export class Orbit {
     ctx: OrbitContext,
   ): Promise<Response> {
     const payload = orbitError.toJSON();
+    // Error responses are never cacheable (spec §7: `cache-control: no-store`
+    // is part of the error contract) — enforce it AFTER the pipeline headers
+    // are merged, so a plugin that stamped `cache-control: public, max-age=…`
+    // on a request that then failed (e.g. the cache plugin's miss marker
+    // followed by a resolution error) can never make an error cacheable.
+    const noStore = (headers: Headers) => {
+      headers.set('cache-control', 'no-store');
+      return headers;
+    };
     if (format === 'sse') {
       return new Response(`data: ${JSON.stringify(payload)}\n\n`, {
         status: orbitError.status,
-        headers: finalHeaders(
-          { 'content-type': SSE_CONTENT_TYPE, 'cache-control': 'no-cache', vary: VARY },
-          ctx,
+        headers: noStore(
+          finalHeaders(
+            { 'content-type': SSE_CONTENT_TYPE, 'cache-control': 'no-cache', vary: VARY },
+            ctx,
+          ),
         ),
       });
     }
     if (format === 'msgpack') {
       const bytes = encodeMsgpack(payload);
-      const headers = finalHeaders(
-        { 'content-type': MSGPACK_CONTENT_TYPE, 'cache-control': 'no-store', vary: VARY },
-        ctx,
+      const headers = noStore(
+        finalHeaders(
+          { 'content-type': MSGPACK_CONTENT_TYPE, 'cache-control': 'no-store', vary: VARY },
+          ctx,
+        ),
       );
       if (gzip) {
         headers.set('content-encoding', 'gzip');
@@ -931,9 +974,11 @@ export class Orbit {
       return new Response(bytes, { status: orbitError.status, headers });
     }
     const body = JSON.stringify(payload);
-    const headers = finalHeaders(
-      { 'content-type': JSON_CONTENT_TYPE, 'cache-control': 'no-store', vary: VARY },
-      ctx,
+    const headers = noStore(
+      finalHeaders(
+        { 'content-type': JSON_CONTENT_TYPE, 'cache-control': 'no-store', vary: VARY },
+        ctx,
+      ),
     );
     if (gzip) {
       headers.set('content-encoding', 'gzip');
@@ -1037,9 +1082,16 @@ export function createOrbit(config: OrbitConfig = {}): Orbit {
 
   assertCacheAfterTransformers(plugins);
 
+  // Providers (spec §11, 🧪): merge every plugin's `provides` in registration
+  // order. Duplicate names and reserved prototype names fail loudly at boot —
+  // same philosophy as the registry's duplicate plugin-name rejection: a
+  // silent last-wins override is how subtle production bugs are born.
+  const providers = collectProviders(plugins);
+
   return new Orbit({
     adapters,
     plugins,
+    providers,
     maxQueryDepth: config.maxQueryDepth ?? DEFAULT_MAX_DEPTH,
     maxPayloadBytes: config.maxPayloadBytes ?? DEFAULT_MAX_PAYLOAD_BYTES,
     maxKeyLength: config.maxKeyLength ?? DEFAULT_MAX_KEY_LENGTH,
@@ -1098,6 +1150,47 @@ function findEntityEvictingCache(plugins: PluginRegistry): EntityEvictingCache |
     }
   }
   return undefined;
+}
+
+/** Provider names a plugin may never declare (prototype traps / pollution). */
+const RESERVED_PROVIDER_NAMES = new Set(['__proto__', 'constructor', 'prototype']);
+
+/**
+ * Merge every plugin's `provides` into one read-only container, in
+ * registration order (spec §11, 🧪). Failures are loud, at boot:
+ * - a name declared by two plugins throws, naming both — no silent last-wins;
+ * - reserved prototype names (`__proto__`, `constructor`, `prototype`) throw —
+ *   a provider called `__proto__` would be unreachable/ambiguous anyway.
+ *
+ * The result is frozen: the container is shared across requests, so plugins
+ * must treat it as read-only (per-request values go in `ctx.state`).
+ */
+function collectProviders(plugins: PluginRegistry): Readonly<Record<string, unknown>> {
+  const merged: Record<string, unknown> = {};
+  const owner = new Map<string, string>();
+  for (const plugin of plugins.list) {
+    const provides = plugin.provides;
+    if (provides === undefined) continue;
+    for (const [name, value] of Object.entries(provides)) {
+      if (RESERVED_PROVIDER_NAMES.has(name)) {
+        throw new Error(
+          `Plugin '${plugin.name}' provides reserved name '${name}' — pick another provider name`,
+        );
+      }
+      const previous = owner.get(name);
+      if (previous !== undefined) {
+        throw new Error(
+          `Provider '${name}' is provided by both '${previous}' and '${plugin.name}' — ` +
+            'provider names must be unique across all mounted plugins',
+        );
+      }
+      owner.set(name, plugin.name);
+      // Own-property write: a hostile/hostile-looking plugin key can never
+      // rewrite the container's prototype (see utils#setOwn).
+      setOwn(merged, name, value);
+    }
+  }
+  return Object.freeze(merged);
 }
 
 /**

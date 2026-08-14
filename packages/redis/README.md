@@ -42,6 +42,49 @@ transformer) and attach cache specs to queries as usual.
 | `prefix` | `'orbit:'` | Namespace prepended to every stored key. Plugin keys are already `orbit:<hash>`, so default full keys read `orbit:orbit:<hash>`; set `''` for bare keys or a per-app prefix to share one Redis. |
 | `ttlSeconds` | `undefined` | Server-side `EX` applied on every `set`, capping key lifetime so stale entries can't grow the keyspace. The plugin still enforces `ttl`/`stale` via `createdAt`; pick ≥ your longest `ttl + stale` window. |
 
+## Distributed rate limiting (`createRedisRateLimitStore`)
+
+A Redis-backed **atomic** bucket store for
+[`@orbit/rate-limit`](../rate-limit) — limits shared across every instance
+pointing at the same Redis:
+
+```ts
+import { createClient } from 'redis';
+import { createOrbit } from '@orbit/core';
+import { createRateLimitPlugin } from '@orbit/rate-limit';
+import { createRedisRateLimitStore } from '@orbit/redis';
+
+const client = createClient({ url: process.env.REDIS_URL });
+await client.connect();
+
+const orbit = createOrbit({
+  adapters,
+  plugins: [
+    createRateLimitPlugin({
+      windowMs: 60_000,
+      limit: 120,
+      store: createRedisRateLimitStore({ client }),
+    }),
+  ],
+});
+```
+
+- **Atomic by construction** — each `consume` is one Lua `EVAL` (refill +
+  check + decrement inside Redis), so N instances can never double-spend a
+  token. A read-modify-write in JS would be racy by design.
+- **Buckets are hashes** `{ tokens, last }` under `prefix` (default
+  `'orbit:rate-limit:'`); every `consume` refreshes a server-side `EXPIRE`
+  (default `2 × windowMs`, override with `ttlSeconds`), so idle buckets
+  expire and reset to full — exactly the lazy-refill contract.
+- **Failures fail closed** — a Redis outage rejects the request (sanitized
+  `ORBIT_INTERNAL` by the engine): a limiter that silently stops limiting is
+  worse than a 500.
+- **`reset()`** SCANs + DELs every key under the prefix (key rotation /
+  tests) when the client provides `scanIterator`/`del`.
+
+The store satisfies `@orbit/rate-limit`'s `RateLimitBucketStore` contract
+structurally — `@orbit/redis` stays dependency-free beyond `@orbit/core`.
+
 ## Behavior notes
 
 - **Storage format** — entries are JSON (`{ value, createdAt, query }`). The

@@ -148,12 +148,59 @@ All hooks receive `ctx`, an `OrbitContext` that is shared across the whole execu
 - `ctx.envelope` — the validated envelope.
 - `ctx.parent` — parent entity/data while resolving a relation.
 - `ctx.state` — plugin scratch space (`state ??= {}`).
+- `ctx.providers` — **read-only services injected by plugins at boot**
+  (`OrbitPlugin.provides`) — see *Injecting services below*.
 - `ctx.orbit` — the engine (for background work, as the cache plugin does).
 - `ctx.rawQuery` — the final raw query after `onBeforeParse`.
 - `ctx.responseHeaders` — **write channel**: set response headers (e.g.
   `set-cookie`, CORS, custom `cache-control`) and the handler merges them
   into the response. Array values append one header line per item. See
   `docs/server.md` → *Response headers & cookies*.
+
+### Injecting services into the context (`provides`)
+
+A plugin can **inject boot-time services into `ctx`** with the optional
+`provides` field — the engine's first-class channel for wiring shared
+resources (a Redis client, a config object, a service instance) into every
+hook AND every adapter, with no ordering games:
+
+```ts
+import { createRedisCacheStore } from '@orbit/redis';
+import type { OrbitPlugin } from '@orbit/core';
+
+const redisPlugin: OrbitPlugin = {
+  name: 'redis',
+  // Declared at boot; injected into every request's ctx.providers before
+  // ANY hook runs, in registration order (duplicate names throw at boot).
+  provides: { cacheStore: createRedisCacheStore({ client }) },
+  hooks: { /* … */ },
+};
+
+// …and an adapter consumes it straight off the context:
+const userAdapter = {
+  entity: 'user',
+  async resolve(filters, ctx) {
+    const store = ctx.providers?.cacheStore as CacheStore | undefined;
+    // …use the injected store
+  },
+};
+```
+
+Rules (spec §11, 🧪 experimental):
+
+- **Boot-time singletons, shared across requests** — the container is frozen;
+  treat it as read-only. Per-request values (a caller identity, a tenant id)
+  belong in `ctx.state`, which is per-request scratch and mutable.
+- **Collected in registration order, duplicates rejected at `createOrbit`**
+  (both plugins named in the error) — same fail-loudly philosophy as the
+  registry's duplicate plugin-name rejection. Reserved prototype names
+  (`__proto__`, `constructor`, `prototype`) are rejected too.
+- **Every pipeline path sees it**: queries, mutations (via `onBeforeParse`
+  and `mutate`), `stream()`, the mutation `return` re-query, and the
+  realtime subscription gates.
+- Provider names are app-level vocabulary — cast once at your boundary
+  (e.g. `ctx.providers?.cacheStore as CacheStore`), or narrow via a typed
+  adapter factory.
 
 ### Setting response headers (cookies, CORS, …)
 
@@ -182,6 +229,18 @@ import { createCachePlugin } from '@orbit/core';
 const cache = createCachePlugin();           // in-memory store
 // or: createCachePlugin({ store: myRedisStore })  // any CacheStore
 ```
+
+### HTTP cache-control
+
+When a spec is applied, the plugin also speaks HTTP to downstream caches via
+the `responseHeaders` channel (spec §7): `x-orbit-cache: hit|miss` tells you
+which path served, and `cache-control` mirrors the spec with **age-aware**
+values (`public, max-age=<remaining freshness>` on a fresh serve;
+`public, max-age=0, stale-while-revalidate=<remaining window>` when serving
+stale) so a CDN/proxy caches Orbit's answers for exactly as long as Orbit
+itself would. Neither header is emitted without a spec, and errors always
+win with `cache-control: no-store` — a cache miss marker can never make a
+failed request cacheable.
 
 ### Behavior
 

@@ -259,7 +259,11 @@ streaming, headers are sent before the pipeline runs, so a pipeline-set
 `responseHeaders` cannot reach the stream — pass them via the handler's `ctx`
 option instead. The engine also emits negotiation metadata automatically:
 `vary: accept, accept-encoding` on every response, `cache-control: no-store`
-on errors, and `cache-control: no-cache` on SSE.
+on errors, and `cache-control: no-cache` on SSE. The built-in cache plugin
+additionally emits `x-orbit-cache: hit|miss` and an age-aware
+`cache-control` (spec §8) on responses it handled — but the error contract's
+`no-store` always wins, even when a plugin stamped cache headers before a
+resolution failure.
 
 ### Streaming semantics (SSE) ✅
 
@@ -304,6 +308,14 @@ knows no databases (principle 3). The store is pluggable: a zero-dep memory
 store ships, and production Redis / Cloudflare KV stores ship as
 `@orbit/redis` and `@orbit/kv-cache` (the `CacheStore` contract is
 sync-or-async, so network-backed stores plug in unchanged).
+
+When a spec is applied, the plugin also speaks HTTP to downstream caches via
+the §7 `responseHeaders` channel: `x-orbit-cache: hit|miss` tells you which
+path served, and `cache-control` mirrors the spec with **age-aware** values
+(`public, max-age=<remaining freshness>` on a fresh serve; `public,
+max-age=0, stale-while-revalidate=<remaining window>` when serving stale) so
+a CDN/proxy caches Orbit's answers for exactly as long as Orbit itself would
+— and revalidates in the background the same way.
 
 ---
 
@@ -482,6 +494,43 @@ Decisions (frozen):
 | `_origin` (underscore prefix) | **No** — the field is `origin` | It is a public plugin-facing field, not an internal detail. |
 | `_cacheSpec` on the node | **No** — cache specs never live on the node | The node is pure query structure; caching is request context (`ctx.envelope.cache` or the `x-orbit-cache` header), read by the cache plugin. |
 | Mutation `return` nodes | stamped `origin: 'mutate'` | The re-query runs the full pipeline (§5) but is semantically server-initiated — plugins can distinguish it. |
+
+### Injecting services into the pipeline (`provides`) — 🧪 ADDITIVE
+
+Plugins may declare **boot-time services** on the plugin object itself:
+
+```ts
+const redisPlugin: OrbitPlugin = {
+  name: 'redis',
+  provides: { cacheStore: createRedisCacheStore({ client }) },
+  hooks: { … },
+};
+// …and every hook AND adapter reads it off the context:
+resolve(filters, ctx) { const store = ctx.providers?.cacheStore; … }
+```
+
+- The engine collects `provides` from every mounted plugin **in registration
+  order** at `createOrbit` time and injects the merged, **read-only**
+  container onto every request's `ctx.providers` **before any hook runs** —
+  so a hook or adapter sees the service regardless of registration order, and
+  a provider plugin never has to be listed first.
+- **Duplicate provider names throw at boot**, naming both plugins — same
+  fail-loudly philosophy as the registry's duplicate plugin-name rejection.
+  Reserved prototype names (`__proto__`, `constructor`, `prototype`) are
+  rejected too.
+- `providers` is **boot-time singletons, shared across requests** (the
+  container is frozen). Per-request values — a caller identity, a tenant id —
+  belong in `ctx.state`, which is per-request scratch and mutable. This is
+  the protocol's first-class channel for "inject things into ctx": a Redis
+  client, a config object, a service instance.
+- The container reaches queries, mutations (via `onBeforeParse` and
+  `mutate`), `stream()`, the mutation `return` re-query and the realtime
+  subscription gates (`authorizedSubscribe`) — every path that runs the
+  pipeline.
+
+Additive: an optional plugin field + an optional context field. No hook
+signature, envelope shape or frozen interface changed. 🧪 Experimental — the
+shape may evolve before 1.0. Pinned by `test/providers.test.ts`.
 
 ### Hook signatures — FROZEN
 

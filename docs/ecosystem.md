@@ -26,12 +26,16 @@ packages/
                                     CRUD, ObjectId via toId/fromId)
              @orbit/sqlite          ⬜ DataAdapter over `node:sqlite` (optional)
              @orbit/rest            ✅ shipped — fetch-based DataAdapter
-  caches/    @orbit/redis           ✅ shipped — CacheStore over Redis
+  caches/             @orbit/redis           ✅ shipped — CacheStore over Redis + distributed
+                                    rate-limit bucket store (atomic Lua EVAL)
              @orbit/kv-cache        ✅ shipped — CacheStore over Cloudflare KV
              @orbit/memcached       ⬜ CacheStore over Memcached (optional)
   plugins/   @orbit/auth            ✅ shipped — authn/authz hooks (authenticate/authorize/scope)
              @orbit/logging         ✅ shipped — request-timing / observability
-             @orbit/rate-limit      ✅ shipped — token-bucket OrbitPlugin (queries + mutations)
+             @orbit/rate-limit      ✅ shipped — token-bucket OrbitPlugin (queries + mutations,
+                                    pluggable atomic bucket store: in-memory default, Redis
+                                    store shared across instances; limiter exposed on
+                                    `ctx.providers.rateLimiter` via the 🧪 provides channel)
              @orbit/cache           ✅ shipped — distribution home (impl stays in frozen core)
   servers/   @orbit/hono            ✅ shipped — thin handler wrapper for Hono
              @orbit/express         ✅ shipped — thin handler wrapper for Express
@@ -129,18 +133,46 @@ ObjectId ids), each with `create`/`update`/`delete` mutations and
 params, `/:id` when an `id` filter is present), mutations become
 `POST`/`PATCH`/`DELETE` — see [docs/adapters.md](./adapters.md).
 
+### `RateLimitBucketStore` (shipped — `@orbit/rate-limit`, first-party)
+
+```ts
+export type ConsumeResult = { ok: true } | { ok: false; retryAfterMs: number };
+
+export interface RateLimitBucketStore {
+  consume(key: string, params: { limit: number; rate: number; windowMs: number }, now: number):
+    ConsumeResult | Promise<ConsumeResult>;
+  readonly bucketCount?: number;   // optional — monitoring/tests
+  reset?(): void | Promise<void>;  // optional — key rotation/tests
+}
+```
+
+A first-party contract (not frozen — it shipped with `@orbit/rate-limit`):
+**one atomic method**. `consume` refills, checks and decrements a token
+bucket in a single step inside the store, so N instances sharing a store can
+never double-spend a token — that is what makes multi-instance limits real.
+Sync-or-async; the plugin `await`s each call. Implementations:
+`createMemoryRateLimitStore` (reference, synchronous, the default) and
+`createRedisRateLimitStore` (`@orbit/redis` — a Lua `EVAL`). The plugin also
+injects a `RateLimiter` handle on `ctx.providers.rateLimiter` (🧪 provides
+channel) so adapters/plugins consume the same shared buckets imperatively.
+
 ### `OrbitPlugin` (frozen — spec §11)
 
 ```ts
 export interface OrbitPlugin {
   name: string;                       // unique
   hooks: Partial<Record<HookName, (input: never) => unknown>>;
+  provides?: Record<string, unknown>; // 🧪 boot-time services → ctx.providers
 }
 ```
 
 `@orbit/auth` and `@orbit/logging` are hooks-only packages. See
-[docs/plugins.md](./plugins.md) for the hook reference, order, and the
-cache-plugin ordering rule.
+[docs/plugins.md](./plugins.md) for the hook reference, order, the
+cache-plugin ordering rule, and the 🧪 **`provides` injection channel** —
+how a plugin wires a shared resource (a Redis store, a config object, a
+service instance) into every request's `ctx.providers` before any hook runs,
+so adapters and later plugins consume it with no ordering games (duplicate
+names and reserved prototype names throw at `createOrbit`).
 
 ### The handler (frozen — `(Request, ctx?) => Promise<Response>`)
 
@@ -183,7 +215,10 @@ Workers-native `WebSocketPair` upgrade over the same runtime-agnostic
    backends that make the B6/B9 cache story production-ready. They implement
    the (now sync-or-async) `CacheStore` contract re-exported by `@orbit/cache`
    and inject the client/namespace, so both stay dependency-free beyond
-   `@orbit/core` (8 tests each against in-memory fakes — no network in CI).
+   `@orbit/core` (14 tests — incl. the distributed `createRedisRateLimitStore`
+   for `@orbit/rate-limit`, atomic via Lua `EVAL` — against in-memory fakes,
+   no network in CI). `@orbit/rate-limit` shipped its pluggable atomic
+   `RateLimitBucketStore` + the `ctx.providers.rateLimiter` handle (15 tests).
 5. **`@orbit/postgres`** ✅ + **`@orbit/mongo`** ✅ — the two flagship
    database adapters, both over injected clients (no driver dependency in
    the package). Postgres turns verbatim string filters into

@@ -144,6 +144,10 @@ export class SubscriptionHub {
     onEvent: (seq: number, event: SubscriptionEvent) => void,
     ctx: OrbitContext,
   ): Promise<RealtimeSubscription> {
+    // The subscription gates run the pipeline directly (not via execute), so
+    // inject the engine's plugin-declared providers the same way execute does —
+    // plugins and the subscription gates see identical services (spec §11 🧪).
+    ctx = { ...ctx, providers: this.#orbit.providers };
     let query = oqs;
     for (const plugin of this.#orbit.plugins.list) {
       const result = await plugin.hooks.onBeforeParse?.({ query, ctx });

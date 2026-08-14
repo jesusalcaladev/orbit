@@ -206,6 +206,63 @@ const MISS_KEY = 'orbit:cache:miss';
 const SKIP_KEY = 'orbit:cache:skip';
 
 /**
+ * Attach the cache's HTTP observability/control headers (spec §7 response
+ * headers channel, additive):
+ *
+ * - `x-orbit-cache: hit|miss` — which path served this request. Same name as
+ *   the REQUEST header carrying the spec; the response value is a different
+ *   vocabulary (`hit`/`miss`), so the two directions never collide.
+ * - `cache-control` — a downstream-cache hint (CDN/proxy) mirroring the
+ *   request's spec: `public, max-age=<remaining freshness>` on a fresh serve,
+ *   and `max-age=0, stale-while-revalidate=<remaining window>` when serving
+ *   stale. Age-aware so the hint never overstates how long the value stays
+ *   fresh. Only set when the plugin actually handled the request (a spec was
+ *   present); neither header is emitted otherwise, and neither clobbers a
+ *   header another plugin set explicitly.
+ */
+function setCacheHeaders(
+  ctx: OrbitContext,
+  spec: CacheSpec,
+  outcome: 'hit' | 'miss',
+  age: number,
+): void {
+  const headers = (ctx.responseHeaders ??= {});
+  if (headers['x-orbit-cache'] === undefined) headers['x-orbit-cache'] = outcome;
+  if (headers['cache-control'] !== undefined) return;
+
+  const { ttl, stale } = spec;
+  // Defensive: the plugin only calls this when a spec (ttl and/or stale) is
+  // present; with neither there is no freshness window to advertise.
+  const freshFor = ttl ?? stale;
+  if (freshFor === undefined) return;
+  const parts = ['public'];
+  if (outcome === 'miss') {
+    // Freshly resolved: the response IS fresh for the full spec window.
+    parts.push(`max-age=${freshFor}`);
+    if (stale !== undefined) parts.push(`stale-while-revalidate=${stale}`);
+  } else {
+    const remainingFresh = Math.max(0, Math.ceil(freshFor - age));
+    if (remainingFresh > 0) {
+      parts.push(`max-age=${remainingFresh}`);
+      if (stale !== undefined) parts.push(`stale-while-revalidate=${stale}`);
+    } else {
+      // Serving stale (SWR): the value is past its freshness — downstream
+      // caches must revalidate immediately but may serve stale meanwhile.
+      parts.push('max-age=0');
+      // The SWR window ends at the hard expiry (ttl + stale); a stale-only
+      // spec never hard-expires (Orbit keeps serving + refreshing forever),
+      // so there is no bounded CDN stale window to advertise.
+      const hardExpiry = ttl !== undefined ? ttl + (stale ?? 0) : undefined;
+      if (hardExpiry !== undefined) {
+        const remaining = Math.max(0, Math.ceil(hardExpiry - age));
+        if (remaining > 0) parts.push(`stale-while-revalidate=${remaining}`);
+      }
+    }
+  }
+  headers['cache-control'] = parts.join(', ');
+}
+
+/**
  * Client-defined, server-supported caching.
  *
  * Reads the cache spec from the envelope's `cache` field or the
@@ -308,6 +365,7 @@ export function createCachePlugin(options: CachePluginOptions = {}): CachePlugin
           // Cache miss: remember to store the fresh value after resolution.
           const state = (ctx.state ??= {});
           state[MISS_KEY] = { key, query: ctx.rawQuery ?? '' };
+          setCacheHeaders(ctx, spec, 'miss', 0);
           return;
         }
 
@@ -336,6 +394,7 @@ export function createCachePlugin(options: CachePluginOptions = {}): CachePlugin
           spec.ttl !== undefined
             ? age >= spec.ttl && age < spec.ttl + (spec.stale ?? 0)
             : spec.stale !== undefined && age >= spec.stale;
+        setCacheHeaders(ctx, spec, 'hit', age);
         if (needsRevalidate && !revalidating.has(key)) {
           revalidating.add(key);
           const engine = ctx.orbit as OrbitEngineLike | undefined;

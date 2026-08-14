@@ -493,6 +493,112 @@ describe('cache store hardening (P0)', () => {
     expect(resolve).toHaveBeenCalledTimes(2);
   });
 
+  it('emits x-orbit-cache: miss + cache-control on a miss (ttl spec)', async () => {
+    const { orbit } = makeCachedOrbit();
+    const response = await orbit.handler(
+      new Request('http://orbit.local/', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(baseEnvelope()),
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get('x-orbit-cache')).toBe('miss');
+    expect(response.headers.get('cache-control')).toBe('public, max-age=300');
+  });
+
+  it('emits x-orbit-cache: hit + remaining-freshness cache-control on a hit', async () => {
+    vi.useFakeTimers();
+    const { orbit } = makeCachedOrbit();
+    await orbit.execute(baseEnvelope());
+    vi.advanceTimersByTime(100_000); // entry is now 100 s old
+    const response = await orbit.handler(
+      new Request('http://orbit.local/', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(baseEnvelope()),
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get('x-orbit-cache')).toBe('hit');
+    // Age-aware: the hint mirrors REMAINING freshness (300 − 100), never
+    // overstating how long the value stays fresh.
+    expect(response.headers.get('cache-control')).toBe('public, max-age=200');
+  });
+
+  it('emits SWR cache-control when serving stale (max-age=0 + remaining window)', async () => {
+    vi.useFakeTimers();
+    const { orbit } = makeCachedOrbit();
+    const envelope = { query: 'user(id="1") { name }', cache: 'ttl=300,stale=60' };
+    await orbit.execute(envelope);
+    vi.advanceTimersByTime(310_000); // past ttl, inside the SWR window
+    const response = await orbit.handler(
+      new Request('http://orbit.local/', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(envelope),
+      }),
+    );
+    expect(response.headers.get('x-orbit-cache')).toBe('hit');
+    expect(response.headers.get('cache-control')).toBe(
+      'public, max-age=0, stale-while-revalidate=50',
+    );
+  });
+
+  it('emits SWR on a stale-only miss (stale spec)', async () => {
+    const { orbit } = makeCachedOrbit();
+    const envelope = { query: 'user(id="1") { name }', cache: 'stale=60' };
+    const response = await orbit.handler(
+      new Request('http://orbit.local/', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(envelope),
+      }),
+    );
+    expect(response.headers.get('x-orbit-cache')).toBe('miss');
+    expect(response.headers.get('cache-control')).toBe(
+      'public, max-age=60, stale-while-revalidate=60',
+    );
+  });
+
+  it('emits no cache headers when no spec is present', async () => {
+    const { orbit } = makeCachedOrbit();
+    const response = await orbit.handler(
+      new Request('http://orbit.local/', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ query: 'user(id="1") { name }' }),
+      }),
+    );
+    expect(response.headers.get('x-orbit-cache')).toBeNull();
+    expect(response.headers.get('cache-control')).toBeNull();
+  });
+
+  it('never lets a cache miss marker make an ERROR response cacheable', async () => {
+    const orbit = createOrbit({
+      adapters: memoryAdapter([
+        {
+          entity: 'user',
+          // Resolution fails AFTER the cache plugin stamped its miss headers.
+          resolve: () => {
+            throw new Error('db exploded');
+          },
+        },
+      ]),
+      plugins: [createCachePlugin()],
+    });
+    const response = await orbit.handler(
+      new Request('http://orbit.local/', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(baseEnvelope()),
+      }),
+    );
+    expect(response.status).toBe(500);
+    // The error contract (spec §7) always wins: no-store, never public.
+    expect(response.headers.get('cache-control')).toBe('no-store');
+  });
+
   it('a store that throws on set fails the request closed (sanitized)', async () => {
     const exploding = {
       get: () => undefined,
