@@ -15,6 +15,13 @@ class FakeKvNamespace implements KvNamespaceLike {
   lastPutOptions: { expirationTtl?: number } | undefined;
   /** Split list() into pages of this size to exercise pagination. */
   pageSize = 1000;
+  /**
+   * Real KV cursors are opaque continuation tokens into a STABLE snapshot —
+   * deleting items between pages must not shift the remaining pages. The
+   * fake snapshots the keyset at the start of each enumeration (first call
+   * without a cursor) and pages through that snapshot.
+   */
+  private snapshot: string[] | undefined;
 
   async get(key: string): Promise<string | null> {
     return this.data.get(key) ?? null;
@@ -35,15 +42,19 @@ class FakeKvNamespace implements KvNamespaceLike {
     cursor?: string;
   }): Promise<KvListResult> {
     const prefix = options?.prefix ?? '';
-    const limit = options?.limit ?? 1000;
-    const all = [...this.data.keys()].filter((k) => k.startsWith(prefix)).sort();
+    // The store always asks for limit 1000 — real KV pages server-side. The
+    // fake pages by its own `pageSize` so tests can force pagination.
+    if (options?.cursor === undefined) {
+      this.snapshot = [...this.data.keys()].filter((k) => k.startsWith(prefix)).sort();
+    }
+    const all = this.snapshot ?? [];
     const start = Number(options?.cursor ?? 0);
-    const page = all.slice(start, start + limit);
-    const complete = start + limit >= all.length;
+    const page = all.slice(start, start + this.pageSize);
+    const complete = start + this.pageSize >= all.length;
     return {
       keys: page.map((name) => ({ name })),
       list_complete: complete,
-      ...(complete ? {} : { cursor: String(start + limit) }),
+      ...(complete ? {} : { cursor: String(start + this.pageSize) }),
     };
   }
 }
@@ -66,13 +77,20 @@ describe('@orbit/kv-cache — createKvCacheStore', () => {
 
   it('treats a corrupted value as a miss (never throws)', async () => {
     const namespace = new FakeKvNamespace();
+    // The store reads keys under the DEFAULT prefix ('orbit:' + plugin key),
+    // so the corrupted entries must be seeded at their full key to actually
+    // reach parseEntry — a miss for the wrong reason would make this test
+    // vacuous.
     const store = createKvCacheStore({ namespace });
-    namespace.data.set('orbit:bad', '{not json');
-    namespace.data.set('orbit:array', '[1,2,3]');
-    namespace.data.set('orbit:notimestamp', JSON.stringify({ value: 1, query: '' }));
-    namespace.data.set('orbit:novalue', JSON.stringify({ createdAt: 1, query: '' }));
+    const seed = (key: string, value: string) => namespace.data.set(`orbit:${key}`, value);
+    seed('bad', '{not json');
+    seed('array', '[1,2,3]');
+    seed('scalar', '"just a string"');
+    seed('notimestamp', JSON.stringify({ value: 1, query: '' }));
+    seed('novalue', JSON.stringify({ createdAt: 1, query: '' }));
+    seed('noquery', JSON.stringify({ value: 1, createdAt: 1, query: 42 }));
 
-    for (const key of ['orbit:bad', 'orbit:array', 'orbit:notimestamp', 'orbit:novalue']) {
+    for (const key of ['bad', 'array', 'scalar', 'notimestamp', 'novalue', 'noquery']) {
       expect(await store.get(key)).toBeUndefined();
     }
   });
@@ -89,6 +107,17 @@ describe('@orbit/kv-cache — createKvCacheStore', () => {
     const keys: string[] = [];
     for await (const key of store.keys!()) keys.push(key);
     expect(keys.sort()).toEqual(['orbit:a', 'orbit:b']);
+  });
+
+  it('keys() pages through list() with cursors and still yields every bare key', async () => {
+    const namespace = new FakeKvNamespace();
+    namespace.pageSize = 2; // force pagination (KV pages at 1000 by default)
+    const store = createKvCacheStore({ namespace, prefix: 'app:' });
+    for (let i = 0; i < 5; i += 1) await store.set(`orbit:${i}`, entry);
+
+    const keys: string[] = [];
+    for await (const key of store.keys!()) keys.push(key);
+    expect(keys.sort()).toEqual(['orbit:0', 'orbit:1', 'orbit:2', 'orbit:3', 'orbit:4']);
   });
 
   it('delete removes only the targeted key', async () => {

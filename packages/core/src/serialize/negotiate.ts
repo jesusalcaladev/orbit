@@ -21,7 +21,8 @@ function parseAccept(header: string | null | undefined): AcceptEntry[] {
         if (Number.isFinite(parsed)) q = parsed;
       }
     }
-    return { type: (rawType ?? '').trim().toLowerCase(), q };
+    // `split()` always yields at least one element, so `rawType` is defined.
+    return { type: rawType!.trim().toLowerCase(), q };
   });
 }
 
@@ -82,7 +83,8 @@ export function wantsGzip(header: string | null | undefined): boolean {
   if (!header) return false;
   return header.split(',').some((part) => {
     const [name, ...params] = part.trim().split(';');
-    if ((name ?? '').trim().toLowerCase() !== 'gzip') return false;
+    // `split()` always yields at least one element, so `name` is defined.
+    if (name!.trim().toLowerCase() !== 'gzip') return false;
     for (const param of params) {
       const [key, value] = param.trim().split('=');
       if (key === 'q' && Number(value) === 0) return false;

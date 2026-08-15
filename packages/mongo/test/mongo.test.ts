@@ -286,6 +286,26 @@ describe('createMongoAdapter.resolve', () => {
     });
   });
 
+  it('translates ne/lt/lte operators from the filters spec', async () => {
+    const db = new FakeMongoDb().seed('user', []);
+    const adapter = createMongoAdapter({
+      entity: 'user',
+      client: db,
+      filters: {
+        age: { operator: 'lt' },
+        score: { operator: 'lte' },
+        banned: { operator: 'ne' },
+      },
+    });
+
+    await adapter.resolve({ age: '30', score: '10', banned: 'true' }, {});
+    expect(db.calls[0]?.filter).toEqual({
+      age: { $lt: '30' },
+      score: { $lte: '10' },
+      banned: { $ne: 'true' },
+    });
+  });
+
   it('rejects a malformed regex value with ORBIT_FILTER_INVALID', async () => {
     const db = new FakeMongoDb().seed('user', []);
     const adapter = createMongoAdapter({
@@ -580,6 +600,22 @@ describe('createMongoAdapter.mutate', () => {
     });
     await expect(
       adapter.mutate!('update', { filter: { id: '42' }, payload: { id: '42' } }, {}),
+    ).rejects.toMatchObject({ code: ErrorCode.MUTATION_FAILED });
+  });
+
+  it('accepts array payload values (safe recursion) and rejects unsafe ones inside them', async () => {
+    const db = new FakeMongoDb().seed('user', []);
+    const adapter = createMongoAdapter({ entity: 'user', client: db });
+
+    // An array value walks the safe-value check recursively and passes.
+    await expect(
+      adapter.mutate!('create', { payload: { tags: ['a', 'b', 'c'] } }, {}),
+    ).resolves.toMatchObject({ id: expect.any(String) });
+    expect(db.calls[0]?.doc).toEqual({ tags: ['a', 'b', 'c'] });
+
+    // An unsafe object nested INSIDE an array is still rejected.
+    await expect(
+      adapter.mutate!('create', { payload: { tags: ['ok', { $set: 1 }] } }, {}),
     ).rejects.toMatchObject({ code: ErrorCode.MUTATION_FAILED });
   });
 

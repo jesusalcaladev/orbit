@@ -28,7 +28,11 @@ interface PostPayload {
 function createPostWorld() {
   const posts = new Map<string, PostPayload>();
   const handlers = new Set<(event: SubscriptionEvent) => void>();
-  const counters = { subscribeCount: 0, unsubscribeCount: 0 };
+  const counters: {
+    subscribeCount: number;
+    unsubscribeCount: number;
+    lastHandler?: (event: SubscriptionEvent) => void;
+  } = { subscribeCount: 0, unsubscribeCount: 0 };
 
   const adapter: DataAdapter = {
     entity: 'post',
@@ -49,6 +53,7 @@ function createPostWorld() {
     subscribe: (_filters: Filters, handler: (event: SubscriptionEvent) => void) => {
       handlers.add(handler);
       counters.subscribeCount += 1;
+      counters.lastHandler = handler;
       return () => {
         handlers.delete(handler);
         counters.unsubscribeCount += 1;
@@ -121,7 +126,9 @@ describe('SubscriptionHub', () => {
     const sub = hub.resume('s', 1, (seq) => replayed.push(seq));
     expect(sub).not.toBeNull();
     expect(replayed).toEqual([2, 3]);
-    hub.unsubscribe('s');
+    // The resumed handle unsubscribes exactly its own subscription.
+    sub!.unsubscribe();
+    expect(hub.activeCount).toBe(0);
   });
 
   it('resume returns null for unknown subscriptions', () => {
@@ -141,6 +148,9 @@ describe('SubscriptionHub', () => {
     // Same query re-attaches cleanly.
     const sub = hub.subscribe('post { id }', 's', () => {});
     expect(sub.id).toBe('s');
+    // The re-attached handle is a working unsubscribe.
+    sub.unsubscribe();
+    expect(hub.activeCount).toBe(0);
   });
 
   it('rejects duplicate ids, unknown entities and unsupported adapters', () => {
@@ -159,6 +169,78 @@ describe('SubscriptionHub', () => {
     expect(() => plainHub.subscribe('x { id }', 'c', () => {})).toThrowError(
       expect.objectContaining({ code: ErrorCode.SUBSCRIPTION_FAILED }),
     );
+  });
+
+  it('canonicalizes multi-filter subscriptions (order-independent matching)', () => {
+    const { orbit, counters } = createPostWorld();
+    const hub = new SubscriptionHub(orbit);
+    // Two different key ORDERINGS of the same filter set must share ONE
+    // adapter hook (canonical sort) — and multi-key sorting also pins the
+    // comparator's deterministic order.
+    hub.subscribe('post(status="live",author="1") { id }', 'a', () => {});
+    hub.subscribe('post(author="1",status="live") { id }', 'b', () => {});
+    expect(counters.subscribeCount).toBe(1);
+  });
+
+  it('the returned handle unsubscribes exactly its own subscription', () => {
+    const { orbit, counters } = createPostWorld();
+    const hub = new SubscriptionHub(orbit);
+    const sub = hub.subscribe('post { id }', 'a', () => {});
+    hub.subscribe('post { id }', 'b', () => {});
+    expect(counters.subscribeCount).toBe(1);
+
+    sub.unsubscribe();
+    expect(counters.unsubscribeCount).toBe(0); // 'b' still attached
+    hub.unsubscribe('b');
+    expect(counters.unsubscribeCount).toBe(1);
+  });
+
+  it('activeCount tracks live subscriptions (monitoring surface)', () => {
+    const { orbit } = createPostWorld();
+    const hub = new SubscriptionHub(orbit);
+    expect(hub.activeCount).toBe(0);
+    hub.subscribe('post { id }', 'a', () => {});
+    hub.subscribe('post { id }', 'b', () => {});
+    expect(hub.activeCount).toBe(2);
+    hub.unsubscribe('a');
+    expect(hub.activeCount).toBe(1);
+  });
+
+  it('detach and unsubscribe of unknown ids are no-ops', () => {
+    const { orbit } = createPostWorld();
+    const hub = new SubscriptionHub(orbit);
+    hub.detach('nope');
+    hub.unsubscribe('nope');
+    expect(hub.activeCount).toBe(0);
+  });
+
+  it('drops adapter events after the shared hook was released (fan-out guard)', () => {
+    const { orbit, counters } = createPostWorld();
+    const hub = new SubscriptionHub(orbit);
+    hub.subscribe('post { id }', 'a', () => {});
+    hub.unsubscribe('a');
+    // A leaky adapter may still call the handler it was given — the hub must
+    // ignore events whose shared bucket is already gone.
+    expect(counters.lastHandler).toBeDefined();
+    counters.lastHandler!({ type: 'created', id: 'p1', data: { id: 'p1' } });
+    expect(hub.activeCount).toBe(0);
+  });
+
+  it('keeps only the last RESUME_LOG_MAX events for replay', async () => {
+    const { orbit, create } = createPostWorld();
+    const hub = new SubscriptionHub(orbit);
+    hub.subscribe('post { id }', 's', () => {});
+    for (let i = 0; i < 520; i += 1) {
+      await create({ id: `p${i}`, title: 'T', status: 'live' });
+    }
+    const replayed: number[] = [];
+    const sub = hub.resume('s', 0, (seq) => replayed.push(seq));
+    expect(sub).not.toBeNull();
+    // 520 events were produced; the ring buffer kept the newest 512.
+    expect(replayed).toHaveLength(512);
+    expect(replayed[0]).toBe(9);
+    sub!.unsubscribe();
+    expect(hub.activeCount).toBe(0);
   });
 });
 

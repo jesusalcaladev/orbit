@@ -4,8 +4,10 @@ import {
   createMemoryCacheStore,
   memoryAdapter,
   parseCacheSpec,
+  parseOQS,
 } from '../src/index.js';
 import type { CacheEntry, CacheStore } from '../src/index.js';
+import type { OrbitContext } from '../src/types.js';
 import { createOrbit } from '../src/engine.js';
 import { ErrorCode } from '../src/errors.js';
 
@@ -45,6 +47,22 @@ describe('parseCacheSpec', () => {
 
   it('rejects malformed specs', () => {
     for (const bad of ['ttl=', 'ttl=abc', 'foo=1', 'ttl=-5', '{nope}', '{', 'ttl=1,']) {
+      expect(() => parseCacheSpec(bad)).toThrowError(
+        expect.objectContaining({ code: ErrorCode.INVALID_QUERY }),
+      );
+    }
+  });
+
+  it('rejects JSON specs with invalid ttl/stale values', () => {
+    // The JSON branch validates each numeric field: wrong type, zero,
+    // negative, non-finite (1e999 overflows to Infinity) — all fail loudly.
+    for (const bad of [
+      '{"ttl":"300"}',
+      '{"ttl":0}',
+      '{"ttl":-5}',
+      '{"stale":1e999}',
+      '{"ttl":null}',
+    ]) {
       expect(() => parseCacheSpec(bad)).toThrowError(
         expect.objectContaining({ code: ErrorCode.INVALID_QUERY }),
       );
@@ -192,6 +210,156 @@ describe('cache plugin', () => {
     ).rejects.toMatchObject({ code: ErrorCode.INVALID_QUERY });
   });
 
+  it('a JSON-object spec with no keys gets the default ttl', async () => {
+    const { orbit, resolve } = makeCachedOrbit();
+    const envelope = { query: 'user(id="1") { name }', cache: '{}' };
+    await orbit.execute(envelope);
+    const hit = await orbit.execute(envelope);
+    expect(hit.fromCache).toBe(true);
+    expect(resolve).toHaveBeenCalledTimes(1);
+  });
+
+  it('invalidating one of several entity keys keeps the others indexed', async () => {
+    const { orbit, cache } = makeCachedOrbit();
+    await orbit.execute({ query: 'user(id="1") { name }', cache: 'ttl=60' });
+    await orbit.execute({ query: 'user(id="2") { name }', cache: 'ttl=60' });
+    const key1 = cache.keyFor({
+      entity: 'user',
+      filters: { id: '1' },
+      fields: ['name'],
+      relations: {},
+      origin: 'client',
+    });
+    await cache.invalidate(key1);
+    // The 'user' bucket still holds key2 — and invalidating an unknown entity
+    // is a no-op.
+    await cache.invalidateEntity('ghost');
+    await cache.invalidateEntity('user');
+  });
+
+  it('invalidatePrefix is a no-op on stores that cannot enumerate keys', async () => {
+    // A store without a keys() method cannot support prefix invalidation —
+    // the plugin must return cleanly instead of throwing (a buggy/limited
+    // KV store shape).
+    const store: CacheStore = {
+      get: () => undefined,
+      set: () => {},
+      delete: () => {},
+      clear: () => {},
+    };
+    const cache = createCachePlugin({ store });
+    await expect(cache.invalidatePrefix('orbit:')).resolves.toBeUndefined();
+  });
+
+  it('invalidatePrefix skips keys outside the prefix', async () => {
+    const cache = createCachePlugin({ store: createMemoryCacheStore() });
+    const store = cache.store as { get: (key: string) => unknown };
+    await cache.store.set('a', { value: 1, createdAt: 0, query: '' });
+    await cache.store.set('b', { value: 2, createdAt: 0, query: '' });
+    await cache.invalidatePrefix('zzz:');
+    expect(store.get('a')).toBeDefined();
+    expect(store.get('b')).toBeDefined();
+  });
+
+  it('a background revalidation with a plugin body does not overwrite the cache', async () => {
+    vi.useFakeTimers();
+    const cache = createCachePlugin();
+    const resolve = vi.fn(() => ({ id: '1', name: 'Ana' }));
+    const orbit = createOrbit({
+      adapters: memoryAdapter([{ entity: 'user', resolve }]),
+      // Transformers must be registered BEFORE the cache plugin (spec §11).
+      plugins: [
+        {
+          name: 'csv',
+          hooks: {
+            onBeforeSerialize: ({ data }) => ({
+              body: `name:${(data as { name: string }).name}`,
+              contentType: 'text/csv',
+            }),
+          },
+        },
+        cache,
+      ],
+    });
+    const envelope = { query: 'user(id="1") { name }', cache: 'stale=60' };
+    await orbit.execute(envelope);
+    vi.advanceTimersByTime(61_000);
+    await orbit.execute(envelope); // stale hit → background revalidation
+    await vi.runAllTimersAsync();
+    expect(resolve).toHaveBeenCalledTimes(2);
+  });
+
+  it('a background revalidation that yields a serialized body keeps the stored entry', async () => {
+    // With a serializer mounted, the cache's onBeforeSerialize never stores
+    // misses (the serializer's payload short-circuits #applyBeforeSerialize),
+    // so seed the entry directly: the stale HIT triggers a background
+    // revalidation whose engine result has a `body` — the revalidation must
+    // NOT overwrite the stored value with the raw data (body takes the wire).
+    vi.useFakeTimers();
+    const store = createMemoryCacheStore();
+    const cache = createCachePlugin({ store });
+    const resolve = vi.fn(() => ({ id: '1', name: 'Ana' }));
+    const orbit = createOrbit({
+      adapters: memoryAdapter([{ entity: 'user', resolve }]),
+      // Transformers must be registered BEFORE the cache plugin (spec §11).
+      plugins: [
+        {
+          name: 'csv',
+          hooks: {
+            onBeforeSerialize: ({ data }) => ({
+              body: `csv:${JSON.stringify(data)}`,
+              contentType: 'text/csv',
+            }),
+          },
+        },
+        cache,
+      ],
+    });
+    const envelope = { query: 'user(id="1") { name }', cache: 'stale=60' };
+    const key = cache.keyFor(parseOQS('user(id="1") { name }'));
+    store.set(key, {
+      value: { name: 'Ana' },
+      createdAt: Date.now() - 61_000, // past the stale=60 window → revalidate
+      query: 'user(id="1") { name }',
+    });
+
+    const hit = await orbit.execute(envelope);
+    expect(hit.fromCache).toBe(true);
+    await vi.runAllTimersAsync();
+    expect(resolve).toHaveBeenCalledTimes(1); // exactly the background revalidation
+    // The stored value was NOT replaced by the raw revalidation data.
+    expect(store.get(key)).toMatchObject({ value: { name: 'Ana' } });
+  });
+
+  it('indexes a repeated entity once (dedupe in the entity index)', async () => {
+    const cache = createCachePlugin();
+    const orbit = createOrbit({
+      adapters: memoryAdapter([{ entity: 'user', resolve: () => ({ id: '1', name: 'Ana' }) }]),
+      plugins: [cache],
+    });
+    const result = await orbit.execute({ query: 'user { id, user { id } }', cache: 'ttl=60' });
+    expect(result.data).toMatchObject({ id: '1' });
+    await cache.invalidateEntity('user');
+  });
+
+  it('accepts plugins registered after the cache that do not transform data', async () => {
+    const cache = createCachePlugin();
+    const orbit = createOrbit({
+      adapters: memoryAdapter([{ entity: 'user', resolve: () => ({ name: 'Ana' }) }]),
+      plugins: [
+        cache,
+        {
+          name: 'metrics',
+          hooks: {
+            onBeforeResolve: () => undefined,
+          },
+        },
+      ],
+    });
+    const result = await orbit.execute({ query: 'user { name }' });
+    expect(result.data).toEqual({ name: 'Ana' });
+  });
+
   it('does not double-transform cached values on hits (cache after transformers)', async () => {
     const mask = {
       name: 'mask',
@@ -273,6 +441,51 @@ describe('cache plugin', () => {
     expect(store.get('a')).toBeUndefined();
     expect(store.get('b')).toBeDefined();
     expect(store.get('c')).toBeDefined();
+  });
+
+  it('clear() empties the store and the entity index', async () => {
+    const { orbit, cache, resolve } = makeCachedOrbit();
+    await orbit.execute(baseEnvelope());
+    await orbit.execute(baseEnvelope());
+    expect(resolve).toHaveBeenCalledTimes(1);
+
+    await cache.clear();
+    await orbit.execute(baseEnvelope());
+    expect(resolve).toHaveBeenCalledTimes(2); // fresh resolve after the clear
+  });
+
+  it('cleans up the SWR marker when a stale hit has no engine (defensive)', async () => {
+    // The engine always injects `ctx.orbit`, so the `else` arm of the SWR
+    // revalidation guard is defensive (a programmatic caller invoking the
+    // hooks directly). It must clear the in-flight marker instead of wedging
+    // every later hit.
+    const cache = createCachePlugin({ store: createMemoryCacheStore() });
+    const parsed = parseOQS('user(id="1") { name }');
+    const key = cache.keyFor(parsed);
+    await cache.store.set(key, {
+      value: { name: 'Ana' },
+      createdAt: Date.now() - 5_000, // age 5 s: past ttl=1, inside the stale window
+      query: 'user(id="1") { name }',
+    });
+    const ctx: OrbitContext = { state: { 'orbit:cache:spec': { ttl: 1, stale: 60 } } };
+
+    const outcome = await cache.hooks.onBeforeResolve?.({ parsed, ctx });
+    expect(outcome).toEqual({ shortCircuit: { name: 'Ana' } });
+    // The marker was removed, so a second call takes the same path again.
+    const again = await cache.hooks.onBeforeResolve?.({ parsed, ctx });
+    expect(again).toEqual({ shortCircuit: { name: 'Ana' } });
+  });
+
+  it('a direct hook call with no rawQuery falls back to an empty revalidation query', async () => {
+    const cache = createCachePlugin({ store: createMemoryCacheStore() });
+    const parsed = parseOQS('user(id="1") { name }');
+    const ctx: OrbitContext = { state: { 'orbit:cache:spec': { ttl: 1 } } };
+    // No entry → miss marker written without a rawQuery to copy.
+    await cache.hooks.onBeforeResolve?.({ parsed, ctx });
+    expect((ctx.state as Record<string, unknown>)['orbit:cache:miss']).toMatchObject({
+      key: cache.keyFor(parsed),
+      query: '',
+    });
   });
 });
 

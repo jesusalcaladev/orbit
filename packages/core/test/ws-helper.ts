@@ -119,8 +119,12 @@ export class RawWsClient {
     this.socket.on('error', () => {});
   }
 
-  /** Perform the HTTP Upgrade handshake and wait for the server's response. */
-  connect(options: ConnectOptions = {}): Promise<HandshakeResult> {
+  /**
+   * Perform the HTTP Upgrade handshake and wait for the server's response.
+   * `head` appends raw bytes to the same TCP write as the handshake (an RFC
+   * 6455 pipelined first frame — tests the server's `head` handling).
+   */
+  connect(options: ConnectOptions = {}, head: Buffer = Buffer.alloc(0)): Promise<HandshakeResult> {
     const path = options.path ?? '/realtime';
     const method = options.method ?? 'GET';
     const defaults: Record<string, string | null> = {
@@ -135,7 +139,7 @@ export class RawWsClient {
     for (const [name, value] of Object.entries(defaults)) {
       if (value !== null) lines.push(`${name}: ${value}`);
     }
-    this.socket.write(lines.concat(['', '']).join('\r\n'));
+    this.socket.write(Buffer.concat([Buffer.from(lines.concat(['', '']).join('\r\n')), head]));
     return new Promise<HandshakeResult>((resolve) => {
       this.#resolveHandshake = resolve;
     });

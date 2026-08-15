@@ -91,10 +91,10 @@ export interface CreateWorkerOptions<Env = unknown, Ctx = unknown> {
   path?: string;
   /**
    * Mount the Workers-native WebSocket realtime transport. Pass options
-   * (`path`, `serialize: 'msgpack'`, `authorize`, …) or `false` to disable.
-   * Defaults to `{ path: '/realtime' }`.
+   * (`path`, `serialize: 'msgpack'`, `authorize`, …), `true` to enable with
+   * the defaults, or `false` to disable. Defaults to `{ path: '/realtime' }`.
    */
-  realtime?: WebSocketHandlerOptions<Env, Ctx> | false;
+  realtime?: WebSocketHandlerOptions<Env, Ctx> | boolean;
   /**
    * Called when an *infrastructure* error escapes the engine (invalid URL,
    * body stream failure, a throwing adapter outside the pipeline, …).

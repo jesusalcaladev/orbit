@@ -87,9 +87,10 @@ export function createLoggingPlugin(options: LoggingPluginOptions = {}): OrbitPl
   };
 
   const clear = (ctx: OrbitContext) => {
-    if (!ctx.state) return;
-    delete ctx.state[START_KEY];
-    delete ctx.state[META_KEY];
+    // State is guaranteed to exist when timing was found (readMeta reads it),
+    // but optional chaining keeps this safe for direct hook invocations.
+    delete ctx.state?.[START_KEY];
+    delete ctx.state?.[META_KEY];
   };
 
   return {

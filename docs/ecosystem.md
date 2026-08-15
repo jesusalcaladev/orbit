@@ -202,7 +202,7 @@ Workers-native `WebSocketPair` upgrade over the same runtime-agnostic
 
 1. **`@orbit/rest`** ✅ — the simplest adapter (fetch-based; the old
    `fetchAdapter` was removed from core). Validated the scaffolding pattern
-   end to end. `packages/rest` ships with its own tests (14) exercising the
+   end to end. `packages/rest` ships with its own tests (24) exercising the
    real `DataAdapter` contract against a mocked fetch.
 2. **`@orbit/cache`** ✅ — the plugin's dedicated distribution package. The
    implementation deliberately STAYS in the frozen core: the import surface
@@ -214,16 +214,16 @@ Workers-native `WebSocketPair` upgrade over the same runtime-agnostic
    breaking change reserved for a future major.
 3. **`@orbit/auth`** ✅ + **`@orbit/logging`** ✅ — the two hooks-only plugin
    packages: authn/authz (`authenticate`/`authorize`/`scope` + bearer/api-key
-   presets, 12 tests) and request timing/observability (5 tests). Both are
+   presets, 15 tests) and request timing/observability (9 tests). Both are
    dependency-free — nothing beyond `@orbit/core`.
 4. **`@orbit/redis`** ✅ + **`@orbit/kv-cache`** ✅ — the two `CacheStore`
    backends that make the B6/B9 cache story production-ready. They implement
    the (now sync-or-async) `CacheStore` contract re-exported by `@orbit/cache`
    and inject the client/namespace, so both stay dependency-free beyond
-   `@orbit/core` (14 tests — incl. the distributed `createRedisRateLimitStore`
+   `@orbit/core` (17 tests — incl. the distributed `createRedisRateLimitStore`
    for `@orbit/rate-limit`, atomic via Lua `EVAL` — against in-memory fakes,
    no network in CI). `@orbit/rate-limit` shipped its pluggable atomic
-   `RateLimitBucketStore` + the `ctx.providers.rateLimiter` handle (15 tests).
+   `RateLimitBucketStore` + the `ctx.providers.rateLimiter` handle (21 tests).
 5. **`@orbit/postgres`** ✅ + **`@orbit/mongo`** ✅ — the two flagship
    database adapters, both over injected clients (no driver dependency in
    the package). Postgres turns verbatim string filters into
@@ -237,7 +237,7 @@ Workers-native `WebSocketPair` upgrade over the same runtime-agnostic
    `deleteOne`, converts ids through `toId`/`fromId` (ObjectId support),
    and guarantees no operator injection — field names are
    charset-validated and payload values are walked recursively, so a `$`-keyed
-   object value can never become a query operator. 38 tests against an
+   object value can never become a query operator. 40 tests against an
    in-memory fake plus a compile-time assertion that the real `mongodb`
    driver satisfies the injected-client contract — no network in CI.
 6. **Server wrappers** ✅ (`@orbit/hono`, `@orbit/express` — thin raw

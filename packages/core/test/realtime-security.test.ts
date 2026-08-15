@@ -14,7 +14,8 @@
  *   400/403/404            — handshake rejections (HTTP status)
  */
 import { createServer } from 'node:http';
-import type { Server } from 'node:http';
+import type { IncomingMessage, Server } from 'node:http';
+import type { Duplex } from 'node:stream';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ErrorCode } from '../src/errors.js';
 import {
@@ -184,6 +185,66 @@ describe('RealtimeServer — handshake & access gates', () => {
     const handshake = await client.connect();
     expect(handshake.status).toBe(403);
     client.dispose();
+  });
+
+  it('rejects an upgrade with no request url (defensive 404 path)', async () => {
+    // node:http always provides `url`, but handleUpgrade defends against a
+    // missing one — a synthetic request with no url must 404, not throw.
+    await start();
+    const written: string[] = [];
+    const fakeSocket = {
+      writable: true,
+      setNoDelay() {},
+      write(chunk: Buffer) {
+        written.push(String(chunk));
+        return true;
+      },
+      end(chunk?: unknown) {
+        if (chunk !== undefined) written.push(String(chunk));
+      },
+      on() {},
+      destroy() {},
+    } as unknown as Duplex;
+    realtime.handleUpgrade({} as IncomingMessage, fakeSocket, Buffer.alloc(0));
+    // The upgrade flow runs through a promise chain (authorize), so the 404
+    // lands on the next microtask.
+    await sleep(5);
+    expect(written.join('')).toContain('404');
+  });
+
+  it('never writes to a socket that is not writable (heartbeat send guard)', async () => {
+    // Drive handleUpgrade directly with a synthetic DEAD socket: the upgrade
+    // response is written once, and the session's heartbeat ticks must then
+    // refuse to ping a socket that cannot accept bytes (the !writable guard).
+    await start({ heartbeatMs: 10 });
+    const writes: string[] = [];
+    const deadSocket = {
+      writable: false,
+      setNoDelay() {},
+      write(chunk: Buffer) {
+        writes.push(String(chunk));
+        return true;
+      },
+      on() {},
+      destroy() {},
+    } as unknown as Duplex;
+    realtime.handleUpgrade(
+      {
+        method: 'GET',
+        url: '/realtime',
+        headers: {
+          upgrade: 'websocket',
+          'sec-websocket-key': 'dGhlIHNhbXBsZSBub25jZQ==',
+          'sec-websocket-version': '13',
+        },
+      } as IncomingMessage,
+      deadSocket,
+      Buffer.alloc(0),
+    );
+    await sleep(5); // let the async authorize chain write the handshake
+    expect(writes).toHaveLength(1); // just the handshake response
+    await sleep(45); // several heartbeat intervals
+    expect(writes).toHaveLength(1); // no ping ever reached the dead socket
   });
 });
 
@@ -493,6 +554,81 @@ describe('RealtimeServer — message-level validation (error frames, connection 
       ErrorCode.INVALID_QUERY,
     );
   });
+
+  it('tracks pongs from the client (heartbeat liveness)', async () => {
+    await start();
+    const client = new RawWsClient(port);
+    await client.connect();
+    // A pong — even unsolicited — refreshes the server's liveness clock.
+    client.sendRaw(buildClientFrame(Buffer.alloc(0), { opcode: 0xa }));
+    await sleep(30);
+    expect(client.closed).toBe(false);
+    client.dispose();
+  });
+
+  it('heartbeats the client and closes 1001 when it stops responding', async () => {
+    // Generous interval so a slow handshake still lands before the first
+    // tick (which would otherwise terminate instead of pinging).
+    await start({ heartbeatMs: 150 });
+    const client = new RawWsClient(port);
+    await client.connect();
+    // Refresh liveness immediately so the first tick is guaranteed to PING
+    // rather than time out on a slow handshake.
+    client.sendRaw(buildClientFrame(Buffer.alloc(0), { opcode: 0xa }));
+    const ping1 = await client.awaitFrame((frame) => frame.opcode === 0x9, 'first ping');
+    expect(ping1.payload.length).toBe(0);
+    client.sendRaw(buildClientFrame(Buffer.alloc(0), { opcode: 0xa }));
+    const ping2 = await client.awaitFrame((frame) => frame.opcode === 0x9, 'second ping');
+    expect(ping2.payload.length).toBe(0);
+    // Stop answering — the next tick terminates the session (1001 GoingAway).
+    const close = await client.awaitFrame(isCloseFrame, 'heartbeat timeout close', 5000);
+    expect(close.payload.readUInt16BE(0)).toBe(CloseCode.GoingAway);
+    await client.waitForClose();
+    client.dispose();
+  });
+
+  it('releases the session when the socket errors (RST while data is in flight)', async () => {
+    await start();
+    const client = new RawWsClient(port);
+    await client.connect();
+    // Send a subscription and immediately kill the connection with an RST
+    // (not a FIN) before the server reads it — the server sees ECONNRESET
+    // with buffered data and must dispose the session via the 'error' path.
+    client.sendText(JSON.stringify({ subscribe: 'post { id }', id: 's1' }));
+    (client.socket as unknown as { resetAndDestroy: () => void }).resetAndDestroy();
+    await waitFor(() => realtime.sessionCount === 0, 'session released on socket error');
+    client.dispose();
+  });
+
+  it('processes a frame pipelined with the upgrade handshake (head data)', async () => {
+    await start();
+    const client = new RawWsClient(port);
+    const subFrame = buildClientFrame(
+      Buffer.from(JSON.stringify({ subscribe: 'post { id }', id: 's1' })),
+    );
+    const handshake = await client.connect({}, subFrame);
+    expect(handshake.status).toBe(101);
+    const ack = await client.awaitFrame(isTextFrame, 'pipelined ack', 4000);
+    expect(JSON.parse(ack.payload.toString('utf8'))).toMatchObject({ ack: 's1' });
+    client.dispose();
+  });
+
+  it('skips frames that arrive after a violation terminated the session', async () => {
+    await start();
+    const client = new RawWsClient(port);
+    await client.connect();
+    // A continuation with no message in progress → 1002. The VALID text frame
+    // in the same packet must be dropped, not processed (session closing).
+    client.sendRaw(
+      Buffer.concat([
+        buildClientFrame(Buffer.from('tail'), { opcode: 0x0 }),
+        buildClientFrame(Buffer.from('{}')),
+      ]),
+    );
+    const close = await client.awaitFrame(isCloseFrame, 'close 1002', 4000);
+    expect(close.payload.readUInt16BE(0)).toBe(CloseCode.ProtocolError);
+    client.dispose();
+  });
 });
 
 describe('RealtimeServer — retention & expiry', () => {
@@ -537,6 +673,39 @@ describe('RealtimeServer — retention & expiry', () => {
     const error = await second.awaitFrame(isTextFrame, 'expired resume error', 4000);
     const parsed = JSON.parse(error.payload.toString('utf8')) as { error?: { code: string } };
     expect(parsed.error?.code).toBe(ErrorCode.SUBSCRIPTION_FAILED);
+    second.dispose();
+  });
+
+  it('re-attaching before the retention window expires cancels the release timer', async () => {
+    const world = await start({ retentionMs: 80 }); // SHORT window
+    const first = new RawWsClient(port);
+    await first.connect();
+    first.sendText(JSON.stringify({ subscribe: 'post { id }', id: 's1' }));
+    await first.awaitFrame(isTextFrame, 'ack', 4000);
+    first.close();
+    await first.waitForClose();
+    await waitFor(() => realtime.sessionCount === 0, 'session closed');
+
+    // Re-attach (same id, same query) and let the original window elapse —
+    // the re-attach MUST cancel the pending release timer (it lives on the
+    // SERVER, shared across sessions), so the subscription survives the
+    // window and keeps delivering. With the timer per-session (the old bug),
+    // the first session's timer would fire after 80 ms and kill the
+    // re-attached subscription mid-use.
+    const second = new RawWsClient(port);
+    await second.connect();
+    second.sendText(JSON.stringify({ subscribe: 'post { id }', id: 's1' }));
+    const ack = await second.awaitFrame(isTextFrame, 're-attach ack', 4000);
+    expect(JSON.parse(ack.payload.toString('utf8'))).toMatchObject({ ack: 's1' });
+
+    await sleep(150); // well past the original retention window
+    world.emit({ type: 'updated', id: 'p1', patch: { views: 1 } });
+    const event = await second.awaitFrame(
+      (frame) => frame.opcode === 0x1 && frame.payload.toString('utf8').includes('"id":"s1"'),
+      'event after re-attach + window',
+      4000,
+    );
+    expect(JSON.parse(event.payload.toString('utf8'))).toMatchObject({ id: 's1', seq: 1 });
     second.dispose();
   });
 });

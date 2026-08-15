@@ -5,6 +5,23 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
 ## [Unreleased]
 
 ### Added
+- **Coverage ≥90% everywhere (all packages)** — every package now ships a
+  `vitest.config.ts` with v8 coverage thresholds (≥90% stmts/funcs/lines,
+  ≥85% branch — most at or over 90% branch) and a `test:coverage` script;
+  `pnpm -r run test:coverage` enforces them. Added ~40 tests across
+  redis/kv-cache/logging/rate-limit/auth/rest/express/cloudflare-workers/
+  mongo (incl. fixing two vacuous corrupted-entry tests in the Redis/KV
+  stores whose keys never matched the store prefix, so `parseEntry`'s
+  fail-safe path is now actually exercised). **@orbit/core reaches 100%
+  coverage on all four metrics** (462 tests, up from 400) with a real
+  retention-timer fix (re-attach now cancels the pending release) and
+  ping-first heartbeats; **@orbit/cloudflare-workers at 100%** (40 tests)
+  and **@orbit/rate-limit at 100%** (22 tests). Suite: **703 tests**
+  (core 462 + redis 17 + kv-cache 9 + logging 9 + rate-limit 22 + auth 15 +
+  rest 24 + express 18 + hono 13 + cloudflare-workers 40 + mongo 40 +
+  postgres 30 + cache 4). Also: `OrbitContext.waitUntil` type fix in
+  `@orbit/cloudflare-workers` and `realtime: true` typed on the CFW
+  transport options.
 - **Standard rate-limit response headers (`@orbit/rate-limit`)** — every
   gated response now carries `RateLimit-Limit`, `RateLimit-Remaining` and
   `RateLimit-Reset` (draft-ietf-httpapi-ratelimit-headers, as

@@ -63,8 +63,8 @@ export function createMemoryCacheStore(options: MemoryCacheStoreOptions = {}): M
       entries.delete(key); // refresh insertion order
       entries.set(key, entry);
       if (entries.size > maxEntries) {
-        const oldest = entries.keys().next().value;
-        if (oldest !== undefined) entries.delete(oldest);
+        // The map just grew past the cap, so it is non-empty: a key exists.
+        entries.delete(entries.keys().next().value as string);
       }
     },
     delete: (key) => {
@@ -105,6 +105,10 @@ export function parseCacheSpec(raw: string): CacheSpec {
     } catch {
       throw fail();
     }
+    // A `{`-prefixed input that parses is always a JSON object (arrays and
+    // scalars start with other characters), so the non-record guard is
+    // defensive against future spec shapes — not reachable today.
+    /* v8 ignore next — see above. */
     if (!isRecord(parsed)) throw fail();
     const spec: CacheSpec = {};
     for (const key of ['ttl', 'stale'] as const) {
@@ -231,9 +235,10 @@ function setCacheHeaders(
   if (headers['cache-control'] !== undefined) return;
 
   const { ttl, stale } = spec;
-  // Defensive: the plugin only calls this when a spec (ttl and/or stale) is
-  // present; with neither there is no freshness window to advertise.
   const freshFor = ttl ?? stale;
+  /* v8 ignore next — defensive: every call site passes a spec with ttl
+     and/or stale (the plugin stamps a default ttl), so there is always a
+     window to advertise; kept as a guard against future callers. */
   if (freshFor === undefined) return;
   const parts = ['public'];
   if (outcome === 'miss') {
@@ -252,9 +257,14 @@ function setCacheHeaders(
       // The SWR window ends at the hard expiry (ttl + stale); a stale-only
       // spec never hard-expires (Orbit keeps serving + refreshing forever),
       // so there is no bounded CDN stale window to advertise.
+      // Serving stale past a ttl implies a stale window exists (a ttl-only
+      // spec hard-expires instead), so `?? 0` is a defensive fallback.
+      /* v8 ignore next — see above. */
       const hardExpiry = ttl !== undefined ? ttl + (stale ?? 0) : undefined;
       if (hardExpiry !== undefined) {
         const remaining = Math.max(0, Math.ceil(hardExpiry - age));
+        /* v8 ignore next — serving stale implies age < hardExpiry (the
+           hard-expiry path deletes the entry instead), so remaining > 0. */
         if (remaining > 0) parts.push(`stale-while-revalidate=${remaining}`);
       }
     }
@@ -390,9 +400,16 @@ export function createCachePlugin(options: CachePluginOptions = {}): CachePlugin
           return;
         }
 
+        // In the stale-window band `stale` is necessarily defined (a ttl-only
+        // spec with age ≥ ttl hard-expires above), so `?? 0` is defensive.
+        // The `?? 0` covers ttl-only specs (no SWR window): in the stale band
+        // stale is necessarily defined — a ttl-only spec with age ≥ ttl
+        // hard-expires above — but hoisting the fallback keeps the ternary
+        // free of it (and the window is 0 for ttl-only, as hard-expiry does).
+        const staleWindow = spec.stale ?? 0;
         const needsRevalidate =
           spec.ttl !== undefined
-            ? age >= spec.ttl && age < spec.ttl + (spec.stale ?? 0)
+            ? age >= spec.ttl && age < spec.ttl + staleWindow
             : spec.stale !== undefined && age >= spec.stale;
         setCacheHeaders(ctx, spec, 'hit', age);
         if (needsRevalidate && !revalidating.has(key)) {

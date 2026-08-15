@@ -51,20 +51,20 @@ describe('@orbit/redis — createRedisCacheStore', () => {
 
   it('treats a corrupted value as a miss (never throws)', async () => {
     const client = new FakeRedisClient();
+    // The store reads keys under the DEFAULT prefix ('orbit:' + plugin key),
+    // so the corrupted entries must be seeded at their full key to actually
+    // reach parseEntry — a miss for the wrong reason would make this test
+    // vacuous.
     const store = createRedisCacheStore({ client });
-    client.data.set('orbit:bad', '{not json');
-    client.data.set('orbit:array', '[1,2,3]');
-    client.data.set('orbit:notimestamp', JSON.stringify({ value: 1, query: '' }));
-    client.data.set('orbit:novalue', JSON.stringify({ createdAt: 1, query: '' }));
-    client.data.set('orbit:scalar', '"just a string"');
+    const seed = (key: string, value: string) => client.data.set(`orbit:${key}`, value);
+    seed('bad', '{not json');
+    seed('array', '[1,2,3]');
+    seed('notimestamp', JSON.stringify({ value: 1, query: '' }));
+    seed('novalue', JSON.stringify({ createdAt: 1, query: '' }));
+    seed('scalar', '"just a string"');
+    seed('noquery', JSON.stringify({ value: 1, createdAt: 1, query: 42 }));
 
-    for (const key of [
-      'orbit:bad',
-      'orbit:array',
-      'orbit:notimestamp',
-      'orbit:novalue',
-      'orbit:scalar',
-    ]) {
+    for (const key of ['bad', 'array', 'notimestamp', 'novalue', 'scalar', 'noquery']) {
       expect(await store.get(key)).toBeUndefined();
     }
   });
@@ -229,6 +229,50 @@ describe('@orbit/redis — createRedisRateLimitStore', () => {
     await store.consume('bruno', { limit: 1, rate: 1 / 60_000, windowMs: 60_000 }, 0);
     expect(client.evalCalls[0]!.keys).toEqual(['orbit:rate-limit:bruno']);
     expect(client.evalCalls[0]!.args[3]).toBe(30);
+  });
+
+  it('treats a bare (non-array) eval return as allowed', async () => {
+    // Some clients flatten single-value tables to a bare number; the store
+    // must not crash — it degrades to `{ ok: true }`.
+    const client: RedisRateLimitClient = { eval: async () => 1 };
+    const store = createRedisRateLimitStore({ client });
+    await expect(
+      store.consume('k', { limit: 1, rate: 1 / 60_000, windowMs: 60_000 }, 0),
+    ).resolves.toEqual({ ok: true });
+
+    const weird: RedisRateLimitClient = { eval: async () => ({ anything: 'goes' }) };
+    await expect(
+      createRedisRateLimitStore({ client: weird }).consume(
+        'k',
+        { limit: 1, rate: 1 / 60_000, windowMs: 60_000 },
+        0,
+      ),
+    ).resolves.toEqual({ ok: true });
+  });
+
+  it('reset() is a no-op when the client cannot enumerate keys', async () => {
+    // A minimal client without scanIterator/del must not throw on reset().
+    const client: RedisRateLimitClient = { eval: async () => [1, 0, 0, 0] };
+    const store = createRedisRateLimitStore({ client });
+    await expect(store.reset()).resolves.toBeUndefined();
+  });
+
+  it('reset() deletes in multi-key DEL chunks, not one round-trip per key', async () => {
+    const client = new FakeRateLimitRedis();
+    const delCalls: Array<string | string[]> = [];
+    const original = client.del.bind(client);
+    client.del = async (keys) => {
+      delCalls.push(keys);
+      return original(keys);
+    };
+    const store = createRedisRateLimitStore({ client });
+    for (let i = 0; i < 250; i += 1) {
+      await store.consume(`k-${i}`, { limit: 1, rate: 1 / 60_000, windowMs: 60_000 }, 0);
+    }
+    await store.reset();
+    expect(client.data.size).toBe(0);
+    const arrays = delCalls.filter((call): call is string[] => Array.isArray(call));
+    expect(arrays.map((batch) => batch.length)).toEqual([100, 100, 50]);
   });
 
   it('parses the full script verdict: retryAfterMs/reset/remaining', async () => {

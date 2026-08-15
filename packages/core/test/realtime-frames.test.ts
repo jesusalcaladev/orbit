@@ -149,6 +149,18 @@ describe('FrameDecoder', () => {
     expect(() => decoder.push(declared)).toThrowError(FrameTooLargeError);
   });
 
+  it('rejects a 64-bit length beyond the safe integer range (no precision trap)', () => {
+    const decoder = new FrameDecoder(1024);
+    // FIN + binary, masked, 64-bit length = MAX_SAFE_INTEGER + 1 (impossible
+    // to represent as a safe number — must be rejected, not mis-parsed).
+    const frame = Buffer.alloc(14);
+    frame[0] = 0x82;
+    frame[1] = 0x80 | 0x7f;
+    frame.writeBigUInt64BE(BigInt(Number.MAX_SAFE_INTEGER) + 1n, 2);
+    frame.writeUInt32BE(0x01020304, 10); // mask key
+    expect(() => decoder.push(frame)).toThrow(/safe integer/);
+  });
+
   it('accepts frames at or under the limit', () => {
     const decoder = new FrameDecoder(1024);
     const frames = decoder.push(clientFrame(Opcode.Text, 'x'.repeat(1024)));
@@ -164,5 +176,21 @@ describe('FrameDecoder', () => {
     const rest = decoder.push(raw.subarray(3));
     expect(rest).toHaveLength(1);
     expect(rest[0]!.payload.toString('utf8')).toBe('Hello');
+  });
+
+  it('buffers a partial 16-bit-length header until all 4 bytes arrive', () => {
+    const decoder = new FrameDecoder();
+    const frame = clientFrame(Opcode.Text, 'x'.repeat(300));
+    // Only 3 bytes of the extended-length header (2-byte b0/b1 + 1 length byte).
+    expect(decoder.push(frame.subarray(0, 3))).toHaveLength(0);
+    expect(decoder.push(frame.subarray(3))).toHaveLength(1);
+  });
+
+  it('buffers a partial 64-bit-length header until all 10 bytes arrive', () => {
+    const decoder = new FrameDecoder();
+    const frame = clientFrame(Opcode.Text, 'x'.repeat(70_000));
+    // Only 9 bytes of the 64-bit-length header.
+    expect(decoder.push(frame.subarray(0, 9))).toHaveLength(0);
+    expect(decoder.push(frame.subarray(9))).toHaveLength(1);
   });
 });

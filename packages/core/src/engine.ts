@@ -176,8 +176,8 @@ export class Orbit {
     });
     this.#parseCache.set(key, node);
     if (this.#parseCache.size > PARSE_CACHE_MAX) {
-      const oldest = this.#parseCache.keys().next().value as string | undefined;
-      if (oldest !== undefined) this.#parseCache.delete(oldest);
+      // The map just grew past the cap, so it is non-empty: a key exists.
+      this.#parseCache.delete(this.#parseCache.keys().next().value as string);
     }
     return node;
   }
@@ -251,6 +251,8 @@ export class Orbit {
     let timer: ReturnType<typeof setTimeout> | undefined;
     if (timeoutMs !== undefined && timeoutMs > 0) {
       timer = setTimeout(() => controller.abort(), timeoutMs);
+      /* v8 ignore next — Node's Timeout always has unref(); the guard keeps
+         the type honest in DOM-typed runtimes where the timer is a number. */
       if (typeof timer.unref === 'function') timer.unref();
     }
     fullCtx.signal = controller.signal;
@@ -364,7 +366,8 @@ export class Orbit {
       // envelope contract — files are context, not envelope fields).
       if (contentType.includes('multipart/form-data')) {
         const { envelope, files } = await this.#readMultipart(request, contentType);
-        const fullCtx: OrbitContext = files ? { ...base, files } : base;
+        // `#readMultipart` always returns an object (possibly empty).
+        const fullCtx: OrbitContext = { ...base, files };
         if (format === 'sse') {
           parseOQS(envelope.query ?? '', {
             maxDepth: this.#options.maxQueryDepth,
@@ -517,6 +520,8 @@ export class Orbit {
     ctx: OrbitContext,
     origin: NodeOrigin = 'client',
   ): AsyncGenerator<QueryStage, QueryFinal> {
+    /* v8 ignore next 3 — every caller (execute, stream) validates the
+       envelope first, so `query` is always a string here; kept as a guard. */
     if (typeof envelope.query !== 'string') {
       throw new OrbitError(ErrorCode.INVALID_QUERY, "Missing 'query' string in envelope");
     }
@@ -803,6 +808,9 @@ export class Orbit {
             for (let j = 0; j < projected.length; j += 1) {
               const item = projected[j];
               if (!isRecord(item)) continue;
+              // Projection preserves the container type, so an array PROJECTION
+              // implies an array adapter result — the else arm is defensive.
+              /* v8 ignore next — see above. */
               const parentData = Array.isArray(result) ? result[j] : result;
               nextLevel.push({
                 node: relation,
@@ -1005,6 +1013,8 @@ export class Orbit {
     let settled = false;
     let stream: ReadableStream<Uint8Array<ArrayBuffer>> = new ReadableStream({
       async pull(controller) {
+        /* v8 ignore next 3 — the stream never re-pulls after close(), so a
+           pull can only run while the pipeline is still producing. */
         if (settled) {
           controller.close();
           return;

@@ -172,17 +172,16 @@ export class FrameDecoder {
 
     if (length > this.#maxFrameSize) throw new FrameTooLargeError(length, this.#maxFrameSize);
 
-    const maskLength = masked ? 4 : 0;
-    if (buf.length < offset + maskLength + length) return undefined;
+    // Unmasked client frames were already rejected above, so the mask is
+    // always present by this point.
+    const mask = buf.subarray(offset, offset + 4);
+    offset += 4;
+    if (buf.length < offset + length) return undefined;
 
-    const mask = masked ? buf.subarray(offset, offset + 4) : undefined;
-    offset += maskLength;
     // Copy (not a view) — unmasking mutates the payload in place.
     const payload = Buffer.allocUnsafe(length);
     buf.copy(payload, 0, offset, offset + length);
-    if (mask) {
-      for (let i = 0; i < payload.length; i += 1) payload[i]! ^= mask[i % 4]!;
-    }
+    for (let i = 0; i < payload.length; i += 1) payload[i]! ^= mask[i % 4]!;
     this.#buffer = buf.subarray(offset + length);
     return { opcode, fin, payload };
   }

@@ -442,6 +442,24 @@ describe('mutations', () => {
     });
   });
 
+  it('rejects mutations on a hand-written adapter that has no mutate method', async () => {
+    // memoryAdapter always wires a (throwing) mutate; a raw DataAdapter
+    // without one exercises the engine's own guard (spec §5: ORBIT_MUTATION_FAILED).
+    const orbit = createOrbit({
+      adapters: [
+        {
+          entity: 'user',
+          resolve: () => ({ id: '1', name: 'Ana' }),
+        },
+      ],
+    });
+    await expect(
+      orbit.execute({ do: 'user.update', args: { payload: { name: 'X' } } }),
+    ).rejects.toMatchObject({
+      code: ErrorCode.MUTATION_FAILED,
+    });
+  });
+
   it('rejects malformed mutation actions', async () => {
     const orbit = makeOrbit();
     await expect(orbit.execute({ do: 'update' })).rejects.toMatchObject({

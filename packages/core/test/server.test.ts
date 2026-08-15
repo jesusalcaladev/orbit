@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { createOrbit, memoryAdapter } from '../src/index.js';
+import { createOrbit, decodeMsgpack, memoryAdapter } from '../src/index.js';
 import { ErrorCode, OrbitError } from '../src/errors.js';
 
 const users = [{ id: '1', name: 'Ana' }];
@@ -39,6 +39,15 @@ describe('handler', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toContain('application/json');
     expect(await response.json()).toEqual({ data: { name: 'Ana' } });
+  });
+
+  it('serves data: null when the adapter resolves nothing (bare root)', async () => {
+    const orbit = createOrbit({
+      adapters: memoryAdapter([{ entity: 'user', resolve: () => null }]),
+    });
+    const response = await orbit.handler(post({ query: 'user(id="1")' }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ data: null });
   });
 
   it('serves mutations with data and invalidates', async () => {
@@ -280,6 +289,205 @@ describe('handler', () => {
     expect(response.headers.getSetCookie()).toEqual([
       'session=token123; HttpOnly; Path=/; Max-Age=3600',
     ]);
+  });
+
+  it('gzip-compresses SSE responses when the client asks for it', async () => {
+    const orbit = makeOrbit();
+    const request = new Request('http://localhost/orbit', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'text/event-stream',
+        'accept-encoding': 'gzip',
+      },
+      body: JSON.stringify({ query: 'user(id="1") { name }' }),
+    });
+    const response = await orbit.handler(request);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-encoding')).toBe('gzip');
+    // Decompress and parse the SSE body back to the plain stream.
+    const compressed = await response.arrayBuffer();
+    const decompressed = await new Response(
+      new Blob([compressed]).stream().pipeThrough(new DecompressionStream('gzip')),
+    ).text();
+    expect(decompressed).toContain('data: {"level":0,"data":{"name":"Ana"}}');
+    expect(decompressed).toContain('"level":"done"');
+  });
+
+  it('closes the SSE stream cleanly when the client cancels mid-flight', async () => {
+    const orbit = makeOrbit();
+    const request = new Request('http://localhost/orbit', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'text/event-stream' },
+      body: JSON.stringify({ query: 'user { name }' }),
+    });
+    const response = await orbit.handler(request);
+    // Cancel before consuming — the pull loop must stop and the pipeline's
+    // generator be released without leaking the resolver.
+    const reader = response.body!.getReader();
+    await reader.cancel();
+    await reader.closed;
+  });
+
+  it('gzip-compresses error responses (json and msgpack)', async () => {
+    const orbit = makeOrbit();
+
+    const jsonReq = new Request('http://localhost/orbit', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'accept-encoding': 'gzip',
+      },
+      body: JSON.stringify({ query: 'ghost { id }' }),
+    });
+    const jsonRes = await orbit.handler(jsonReq);
+    expect(jsonRes.status).toBe(404);
+    expect(jsonRes.headers.get('content-encoding')).toBe('gzip');
+    const jsonBody = await new Response(
+      new Blob([await jsonRes.arrayBuffer()]).stream().pipeThrough(new DecompressionStream('gzip')),
+    ).json();
+    expect(jsonBody.error.code).toBe('ORBIT_ENTITY_UNREGISTERED');
+
+    const mpReq = new Request('http://localhost/orbit', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/x-msgpack',
+        'accept-encoding': 'gzip',
+      },
+      body: JSON.stringify({ query: 'ghost { id }' }),
+    });
+    const mpRes = await orbit.handler(mpReq);
+    expect(mpRes.status).toBe(404);
+    expect(mpRes.headers.get('content-encoding')).toBe('gzip');
+    const mpBody = await new Response(
+      new Blob([await mpRes.arrayBuffer()]).stream().pipeThrough(new DecompressionStream('gzip')),
+    ).arrayBuffer();
+    expect(decodeMsgpack(new Uint8Array(mpBody))).toMatchObject({
+      error: { code: 'ORBIT_ENTITY_UNREGISTERED' },
+    });
+  });
+
+  it('serves a request with no content-type header (bytes body)', async () => {
+    const orbit = makeOrbit();
+    const request = new Request('http://localhost/orbit', {
+      method: 'POST',
+      // A raw byte body carries no content-type; undici does not add one.
+      body: new Uint8Array(
+        new TextEncoder().encode(JSON.stringify({ query: 'user(id="1") { name }' })),
+      ),
+    });
+    const response = await orbit.handler(request);
+    expect(response.status).toBe(200);
+    expect((await response.json()).data).toEqual({ name: 'Ana' });
+  });
+
+  it('rejects a do-only envelope on SSE (400, error as an SSE frame)', async () => {
+    const orbit = makeOrbit();
+    const request = new Request('http://localhost/orbit', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'text/event-stream' },
+      body: JSON.stringify({ do: 'user.update', args: {} }),
+    });
+    const response = await orbit.handler(request);
+    expect(response.status).toBe(400);
+    expect(response.headers.get('content-type')).toContain('text/event-stream');
+    expect(await response.text()).toContain('ORBIT_INVALID_QUERY');
+  });
+
+  it('rejects a do-only envelope on multipart SSE (400, error as an SSE frame)', async () => {
+    const orbit = makeOrbit();
+    const form = new FormData();
+    form.append('envelope', JSON.stringify({ do: 'user.update', args: {} }));
+    const request = new Request('http://localhost/orbit', {
+      method: 'POST',
+      headers: { accept: 'text/event-stream' },
+      body: form,
+    });
+    const response = await orbit.handler(request);
+    expect(response.status).toBe(400);
+    expect(response.headers.get('content-type')).toContain('text/event-stream');
+    expect(await response.text()).toContain('ORBIT_INVALID_QUERY');
+  });
+
+  it('rejects a multipart envelope field that is not valid JSON', async () => {
+    const orbit = makeOrbit();
+    const form = new FormData();
+    form.append('envelope', '{not json');
+    const request = new Request('http://localhost/orbit', {
+      method: 'POST',
+      body: form,
+    });
+    const response = await orbit.handler(request);
+    expect(response.status).toBe(400);
+    expect((await response.json()).error.code).toBe('ORBIT_INVALID_QUERY');
+  });
+
+  it('rejects a garbage multipart body with a clean 400 (no internals leak)', async () => {
+    const orbit = makeOrbit();
+    const request = new Request('http://localhost/orbit', {
+      method: 'POST',
+      headers: { 'content-type': 'multipart/form-data; boundary=xyz' },
+      body: 'this is not a multipart body',
+    });
+    const response = await orbit.handler(request);
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error?: { code: string; message: string } };
+    expect(body.error?.code).toBe('ORBIT_INVALID_QUERY');
+    expect(body.error?.message).not.toContain('this is not');
+  });
+
+  it('sanitizes a failing request body stream to ORBIT_INTERNAL (500)', async () => {
+    const orbit = makeOrbit();
+    const failing = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.error(new Error('upstream exploded: s3://bucket/key'));
+      },
+    });
+    // `duplex: 'half'` is required at runtime (undici) for a stream body but
+    // the ambient RequestInit type does not declare it — assert the whole init.
+    const request = new Request('http://localhost/orbit', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: failing as unknown as BodyInit,
+      duplex: 'half',
+    } as RequestInit);
+    const response = await orbit.handler(request);
+    expect(response.status).toBe(500);
+    const body = (await response.json()) as { error?: { code: string; message: string } };
+    expect(body.error?.code).toBe('ORBIT_INTERNAL');
+    // The upstream error message (which may embed credentials/paths) must
+    // never reach the client.
+    expect(body.error?.message).not.toContain('upstream exploded');
+  });
+
+  it('gzip-compresses a plugin binary body', async () => {
+    const orbit = makeOrbit({
+      plugins: [
+        {
+          name: 'bin',
+          hooks: {
+            onBeforeSerialize: () => ({
+              body: new TextEncoder().encode('raw-bytes'),
+              contentType: 'application/octet-stream',
+            }),
+          },
+        },
+      ],
+    });
+    const request = new Request('http://localhost/orbit', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'accept-encoding': 'gzip' },
+      body: JSON.stringify({ query: 'user(id="1") { name }' }),
+    });
+    const response = await orbit.handler(request);
+    expect(response.headers.get('content-encoding')).toBe('gzip');
+    const decompressed = await new Response(
+      new Blob([await response.arrayBuffer()])
+        .stream()
+        .pipeThrough(new DecompressionStream('gzip')),
+    ).text();
+    expect(decompressed).toBe('raw-bytes');
   });
 
   it('merges caller-provided responseHeaders into SSE responses', async () => {

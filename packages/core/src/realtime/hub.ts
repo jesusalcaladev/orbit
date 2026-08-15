@@ -39,9 +39,9 @@ interface Shared {
 
 /** Canonical form of a filter set so `{a:"1",b:"2"}` and `{b:"2",a:"1"}` match. */
 function canonicalFilters(filters: Filters): string {
-  return JSON.stringify(
-    Object.entries(filters).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)),
-  );
+  // Object keys are unique, so `a[0] === b[0]` can never happen — the two
+  // arms below are the whole domain (and keep the order deterministic).
+  return JSON.stringify(Object.entries(filters).sort((a, b) => (a[0] > b[0] ? 1 : -1)));
 }
 
 export class SubscriptionHub {
@@ -188,6 +188,8 @@ export class SubscriptionHub {
     this.#subscribers.delete(clientId);
 
     const shared = this.#shared.get(subscriber.key);
+    /* v8 ignore next — a tracked subscriber always has its shared bucket
+       (both are removed together); kept as a guard. */
     if (!shared) return;
     shared.subscribers.delete(subscriber);
     if (shared.subscribers.size === 0) {

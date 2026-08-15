@@ -7,11 +7,14 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
       include: ['src/**/*.ts'],
+      // Pure API surfaces with zero runtime statements (re-export barrel and
+      // type-only modules) — nothing to execute, so nothing to cover.
+      exclude: ['src/index.ts', 'src/types.ts', 'src/adapters/types.ts'],
       thresholds: {
-        lines: 90,
-        functions: 90,
-        statements: 90,
-        branches: 85,
+        lines: 100,
+        functions: 100,
+        statements: 100,
+        branches: 100,
       },
     },
   },

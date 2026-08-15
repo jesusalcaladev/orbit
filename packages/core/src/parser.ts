@@ -127,6 +127,10 @@ class Parser {
 
   private readIdent(): string {
     if (!IDENT_START.test(this.peek())) {
+      // Every caller guards end-of-input before calling readIdent (empty
+      // roots, unterminated blocks and argument lists fail with their own
+      // message), so the 'end of input' fallback is defensive.
+      /* v8 ignore next — see above. */
       this.fail(`Expected an identifier but found '${this.peek() || 'end of input'}'`);
     }
     const start = this.pos;

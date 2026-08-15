@@ -216,6 +216,19 @@ describe('createWorker — the fetch handler', () => {
     expect(res.status).toBe(404);
   });
 
+  it('enables the realtime route with default options when realtime is true', async () => {
+    const { orbit } = createWorld();
+    const worker = createWorker({ orbit, realtime: true });
+    // Outside workerd there is no WebSocketPair → 501 proves the default
+    // /realtime route is mounted with the default options.
+    const res = await worker.fetch(
+      new Request('https://example.com/realtime', { headers: { upgrade: 'websocket' } }),
+      {},
+      {},
+    );
+    expect(res.status).toBe(501);
+  });
+
   it('routes the upgrade at a custom realtime path (default stays free)', async () => {
     const { orbit } = createWorld();
     const worker = createWorker({ orbit, realtime: { path: '/ws' } });
@@ -327,6 +340,49 @@ describe('createWorker — the fetch handler', () => {
 
     expect(res.status).toBe(418);
     expect(await res.json()).toEqual({ error: 'kaboom' });
+  });
+
+  it('answers a generic 500 when no onError is provided (no internals leak)', async () => {
+    const worker = createWorker({
+      orbit: async () => {
+        throw new Error('kaboom-with-secrets');
+      },
+    });
+    const res = await worker.fetch(
+      jsonPost(new Request('https://example.com/api/orbit'), { query: 'x { id }' }),
+      {},
+      {},
+    );
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe('internal server error');
+  });
+
+  it('forwards ctx.waitUntil calls from adapters into the execution context', async () => {
+    const waitUntil = vi.fn();
+    const orbit = createOrbit({
+      adapters: memoryAdapter([
+        {
+          entity: 'job',
+          resolve: async (_filters, ctx) => {
+            // `waitUntil` rides the context via the index signature (the
+            // CFW bridge attaches it when the execution context provides one).
+            const waitUntil = ctx.waitUntil as ((promise: Promise<unknown>) => void) | undefined;
+            waitUntil?.(Promise.resolve('done'));
+            return { ok: true };
+          },
+        },
+      ]),
+    });
+    const worker = createWorker({ orbit });
+
+    await worker.fetch(
+      jsonPost(new Request('https://example.com/api/orbit'), { query: 'job { ok }' }),
+      {},
+      { waitUntil },
+    );
+    expect(waitUntil).toHaveBeenCalledTimes(1);
+    expect(waitUntil.mock.calls[0]?.[0]).toBeInstanceOf(Promise);
   });
 
   it('merges pipeline-set responseHeaders into the worker response (set-cookie)', async () => {
@@ -473,12 +529,82 @@ describe('handleWebSocket — the Workers upgrade', () => {
     expect(res.status).toBe(403);
   });
 
+  it('403s when the authorize gate throws', async () => {
+    const { orbit } = createWorld();
+    const res = await handleWebSocket(
+      new Request('https://x/realtime', { headers: { upgrade: 'websocket' } }),
+      orbit,
+      {
+        authorize: () => {
+          throw new Error('gate exploded');
+        },
+      },
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it('seeds the session context from an object-returning authorize gate', async () => {
+    const { orbit } = createWorld();
+    const server = new FakeWs();
+    const stubbed = vi.fn(function WebSocketPair(this: { 0: unknown; 1: FakeWs }) {
+      this[0] = {};
+      this[1] = server;
+    });
+    const original = (globalThis as { WebSocketPair?: unknown }).WebSocketPair;
+    (globalThis as unknown as { WebSocketPair: unknown }).WebSocketPair = stubbed;
+    const originalResponse = globalThis.Response;
+    class FakeResponse {
+      status: number;
+      constructor(_body: unknown, init: { status?: number } = {}) {
+        this.status = init.status ?? 200;
+      }
+    }
+    (globalThis as unknown as { Response: unknown }).Response = FakeResponse;
+    try {
+      const seen: Array<string | undefined> = [];
+      const seeded = createOrbit({
+        adapters: memoryAdapter([
+          {
+            entity: 'ping',
+            resolve: (_filters, ctx) => {
+              seen.push((ctx.state as { viewer?: string } | undefined)?.viewer);
+              return { ok: true };
+            },
+          },
+        ]),
+      });
+      const res = await handleWebSocket(
+        new Request('https://x/realtime', { headers: { upgrade: 'websocket' } }),
+        seeded,
+        { authorize: () => ({ state: { viewer: 'ana' } }) },
+      );
+      expect(res.status).toBe(101);
+      server.sendJson({ query: 'ping { ok }', id: 'q1' });
+      await waitFor(() => server.frames().some((f) => f.id === 'q1'), 'seeded reply');
+      expect(seen).toEqual(['ana']);
+    } finally {
+      (globalThis as unknown as { WebSocketPair: unknown }).WebSocketPair = original;
+      (globalThis as unknown as { Response: unknown }).Response = originalResponse;
+    }
+  });
+
   it('answers 501 outside workerd (no WebSocketPair global)', async () => {
     const { orbit } = createWorld();
     const res = await handleWebSocket(
       new Request('https://x/realtime', { headers: { upgrade: 'websocket' } }),
       orbit,
     );
+    expect(res.status).toBe(501);
+  });
+
+  it('authorize returning true (not an object) skips context seeding', async () => {
+    const { orbit } = createWorld();
+    const res = await handleWebSocket(
+      new Request('https://x/realtime', { headers: { upgrade: 'websocket' } }),
+      orbit,
+      { authorize: () => true },
+    );
+    // Allowed, no session ctx, and outside workerd → 501 (route matched).
     expect(res.status).toBe(501);
   });
 
@@ -636,6 +762,71 @@ describe('createRealtimeSession — subscriptions + envelope requests', () => {
     expect(ws.lastFrame()).toMatchObject({ error: { code: 'ORBIT_INVALID_QUERY' } });
   });
 
+  it('echoes the correlation id on control-frame rejections', async () => {
+    const { orbit } = createWorld();
+    const ws = new FakeWs();
+    createRealtimeSession(ws, orbit);
+
+    ws.sendJson({ teleport: 'nowhere', id: 't1' });
+    await waitFor(() => ws.frames().length > 0, 'error frame');
+    expect(ws.lastFrame()).toMatchObject({ id: 't1', error: { code: 'ORBIT_INVALID_QUERY' } });
+  });
+
+  it('drops replies that land after the session closed', async () => {
+    const { orbit } = createWorld();
+    const ws = new FakeWs();
+    const session = createRealtimeSession(ws, orbit);
+
+    // Close before the async reply to the envelope request lands — the send
+    // must be a no-op, never a throw or a frame on a dead socket.
+    ws.sendJson({ query: 'post { id }', id: 'q1' });
+    session.close();
+    await sleep(20);
+    expect(ws.frames().some((f) => f.id === 'q1')).toBe(false);
+  });
+
+  it('close() is idempotent (second call releases nothing twice)', async () => {
+    const { orbit, handlers } = createWorld();
+    const ws = new FakeWs();
+    const session = createRealtimeSession(ws, orbit);
+
+    ws.sendJson({ subscribe: 'post { id }', id: 's1' });
+    await waitFor(() => ws.frames().some((f) => f.ack === 's1'), 'ack');
+    session.close();
+    session.close();
+    expect(handlers.size).toBe(0);
+  });
+
+  it("a socket-level 'close' event releases every subscription", async () => {
+    // The returned handle closes the session, but the Workers platform also
+    // fires the socket's OWN 'close' event when the peer disconnects — the
+    // transport must react to that too (no retention on Workers).
+    const { orbit, handlers } = createWorld();
+    const ws = new FakeWs();
+    createRealtimeSession(ws, orbit);
+
+    ws.sendJson({ subscribe: 'post { id }', id: 's1' });
+    await waitFor(() => ws.frames().some((f) => f.ack === 's1'), 'ack');
+    expect(handlers.size).toBe(1);
+
+    ws.close(1000, 'peer gone');
+    expect(handlers.size).toBe(0);
+  });
+
+  it('drops client frames that arrive after the session closed', async () => {
+    const { orbit } = createWorld();
+    const ws = new FakeWs();
+    const session = createRealtimeSession(ws, orbit);
+
+    session.close();
+    const before = ws.frames().length;
+    ws.sendJson({ subscribe: 'post { id }', id: 'late' });
+    ws.dispatch('message', { data: JSON.stringify({ query: 'post { id }', id: 'q' }) });
+    await sleep(10);
+    // No ack, no query reply, no error frame — post-close frames are dropped.
+    expect(ws.frames().length).toBe(before);
+  });
+
   it('speaks MessagePack when serialize is msgpack', async () => {
     const { orbit } = createWorld();
     await orbit.execute({ do: 'post.create', args: { payload: { id: 'p1', title: 'Hola' } } });
@@ -657,5 +848,48 @@ describe('createRealtimeSession — subscriptions + envelope requests', () => {
     ws.sendJson({ subscribe: 'post { id }', id: 's1' });
     await waitFor(() => ws.frames().length > 0, 'size error');
     expect(ws.lastFrame()).toMatchObject({ error: { code: 'ORBIT_INVALID_QUERY' } });
+  });
+
+  it('rejects invalid JSON strings with the standard error frame', async () => {
+    const { orbit } = createWorld();
+    const ws = new FakeWs();
+    createRealtimeSession(ws, orbit);
+
+    ws.dispatch('message', { data: '{not json' });
+    await waitFor(() => ws.frames().length > 0, 'json error');
+    expect(ws.lastFrame()).toMatchObject({
+      error: { code: 'ORBIT_INVALID_QUERY', message: 'Message is not valid JSON/MessagePack' },
+    });
+  });
+
+  it('rejects oversized binary frames and invalid MessagePack bytes', async () => {
+    const { orbit } = createWorld();
+    const oversized = new FakeWs();
+    createRealtimeSession(oversized, orbit, { maxMessageBytes: 8 });
+    oversized.dispatch('message', { data: new ArrayBuffer(16) });
+    await waitFor(() => oversized.frames().length > 0, 'binary size error');
+    expect(oversized.lastFrame()).toMatchObject({
+      error: { code: 'ORBIT_INVALID_QUERY', message: 'Message is too large' },
+    });
+
+    const garbage = new FakeWs();
+    createRealtimeSession(garbage, orbit);
+    garbage.dispatch('message', { data: new Uint8Array([0xff, 0xfe, 0xfd]).buffer });
+    await waitFor(() => garbage.frames().length > 0, 'msgpack error');
+    expect(garbage.lastFrame()).toMatchObject({
+      error: { code: 'ORBIT_INVALID_QUERY', message: 'Message is not valid JSON/MessagePack' },
+    });
+  });
+
+  it('rejects frames that are neither text nor bytes', async () => {
+    const { orbit } = createWorld();
+    const ws = new FakeWs();
+    createRealtimeSession(ws, orbit);
+
+    ws.dispatch('message', { data: new Blob(['hello']) });
+    await waitFor(() => ws.frames().length > 0, 'blob error');
+    expect(ws.lastFrame()).toMatchObject({
+      error: { code: 'ORBIT_INVALID_QUERY', message: 'Message must be text or bytes' },
+    });
   });
 });

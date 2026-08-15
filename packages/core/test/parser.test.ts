@@ -40,6 +40,16 @@ describe('parseOQS — roots & filters', () => {
     expect(node.filters).toEqual({ id: '123', name: 'Ana' });
   });
 
+  it('rejects a selection block that never closes (input ends inside the braces)', () => {
+    expect(() => parseOQS('user {')).toThrow(/Unterminated/);
+    expect(() => parseOQS('user { id ,')).toThrow(/Unterminated/);
+  });
+
+  it('rejects a non-identifier where a field name is expected', () => {
+    expect(() => parseOQS('user { , id }')).toThrow(/identifier/i);
+    expect(() => parseOQS('user { 1 }')).toThrow(/identifier/i);
+  });
+
   it('supports escapes inside quoted values', () => {
     const node = parseOQS('user(name="a\\"b\\\\c\\n")');
     expect(node.filters).toEqual({ name: 'a"b\\c\n' });

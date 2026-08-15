@@ -167,6 +167,50 @@ describe('createAuthPlugin', () => {
     expect(result.status).toBe(200);
     expect(calls).toBe(0);
   });
+
+  it('authorize denies when no caller is stamped (defensive, hook-level)', async () => {
+    // In the normal pipeline onBeforeParse always stamps or denies first, but
+    // the gate must not silently pass if a caller is missing for any reason.
+    const plugin = createAuthPlugin({ authenticate: () => null, authorize: () => {} });
+    await expect(
+      plugin.hooks.onBeforeResolve?.({
+        parsed: { entity: 'user' } as unknown as import('@orbit/core').QueryNode,
+        ctx: {} as import('@orbit/core').OrbitContext,
+      }),
+    ).rejects.toMatchObject({ code: ErrorCode.PERMISSION_DENIED });
+  });
+
+  it('scope denies when no caller is stamped (defensive, hook-level)', async () => {
+    const plugin = createAuthPlugin({ authenticate: () => null, scope: () => ({}) });
+    await expect(
+      plugin.hooks.onBeforeExecute?.({
+        entity: 'user',
+        filters: {},
+        node: { entity: 'user' } as unknown as import('@orbit/core').QueryNode,
+        ctx: {} as import('@orbit/core').OrbitContext,
+      }),
+    ).rejects.toMatchObject({ code: ErrorCode.PERMISSION_DENIED });
+  });
+
+  it('scope returning nothing leaves the filters untouched', async () => {
+    const resolve = ({ id }: { id?: string }) => (id ? users.find((u) => u.id === id) : users);
+    const orbit = createOrbit({
+      adapters: memoryAdapter([{ entity: 'user', resolve }]),
+      plugins: [
+        createAuthPlugin({
+          authenticate: apiKeyAuth(KEYS),
+          scope: () => {
+            // No adjustment — the adapter sees the original filters.
+          },
+        }),
+      ],
+    });
+    const result = await orbit.execute(
+      { query: 'user(id="2") { name }' },
+      headers('secret-member'),
+    );
+    expect(result.data).toEqual({ name: 'Bruno' });
+  });
 });
 
 describe('bearerAuth', () => {

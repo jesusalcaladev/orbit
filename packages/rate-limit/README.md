@@ -162,5 +162,5 @@ export interface RateLimitBucketStore {
 ## Contract
 
 Implements the frozen `OrbitPlugin` interface from `@orbit/core` (spec §11) —
-no core changes, no new error codes, purely additive. 18 tests in
+no core changes, no new error codes, purely additive. 21 tests in
 `packages/rate-limit/test/`.

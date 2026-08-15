@@ -8,7 +8,7 @@ import {
   type SubscriptionEvent,
 } from '@orbit/core';
 import express from 'express';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { attachRealtime, createExpressApp, expressHandler } from '../src/index.js';
 
 /** In-memory store shared by the test adapters. */
@@ -434,5 +434,90 @@ describe('expressHandler', () => {
 
     expect(res.status).toBe(418);
     expect(await res.json()).toEqual({ error: 'custom teapot' });
+  });
+
+  it('answers a generic 500 when no onError is provided (no internals leak)', async () => {
+    const app = express();
+    app.use(
+      '/orbit',
+      expressHandler({
+        orbit: async () => {
+          throw new Error('kaboom-with-secrets');
+        },
+      }),
+    );
+    const { url, close } = await listen(app);
+    openServers.push(close);
+
+    const res = await fetch(`${url}/orbit`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ query: 'user { id }' }),
+    });
+
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: 'Internal server error' });
+  });
+
+  it('passes a Buffer body from express.raw() untouched to the engine', async () => {
+    const app = express();
+    app.use(express.raw({ type: '*/*' }));
+    app.use('/orbit', expressHandler({ orbit: buildOrbit() }));
+    const { url, close } = await listen(app);
+    openServers.push(close);
+
+    const res = await fetch(`${url}/orbit`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ query: 'user(id="1") { name }' }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ data: { name: 'Alice' } });
+  });
+
+  it('passes a bodyless response through (status only)', async () => {
+    const app = express();
+    app.use('/orbit', expressHandler({ orbit: async () => new Response(null, { status: 204 }) }));
+    const { url, close } = await listen(app);
+    openServers.push(close);
+
+    const res = await fetch(`${url}/orbit`, { method: 'POST' });
+    expect(res.status).toBe(204);
+    expect(await res.text()).toBe('');
+  });
+
+  it('destroys the response when the engine stream errors mid-flight', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const app = express();
+      app.use(
+        '/orbit',
+        expressHandler({
+          orbit: async () =>
+            new Response(
+              new ReadableStream({
+                start(controller) {
+                  controller.enqueue(new Uint8Array([1, 2, 3]));
+                  controller.error(new Error('stream broke'));
+                },
+              }),
+              { status: 200 },
+            ),
+        }),
+      );
+      const { url, close } = await listen(app);
+      openServers.push(close);
+
+      // The client either sees a reset or an incomplete response — the server
+      // must log the stream error and destroy the socket instead of crashing.
+      await fetch(`${url}/orbit`, { method: 'POST' }).catch(() => {});
+      expect(errorSpy).toHaveBeenCalledWith(
+        '[orbit:express] response stream error:',
+        expect.any(Error),
+      );
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });

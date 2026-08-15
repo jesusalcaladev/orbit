@@ -100,6 +100,11 @@ describe('RealtimeServer — envelope request/response (spec §10)', () => {
     return { ws, messages };
   }
 
+  it('exposes the underlying hub (monitoring/programmatic fan-out)', async () => {
+    await start();
+    expect(realtime.hub.activeCount).toBe(0);
+  });
+
   it('answers a query with the standard payload and the echoed id', async () => {
     await start();
     const { ws, messages } = await connect();

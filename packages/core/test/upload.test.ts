@@ -112,6 +112,20 @@ describe('file uploads — multipart handler', () => {
     expect((await response.json()).error.code).toBe(ErrorCode.INVALID_QUERY);
   });
 
+  it('rejects a valid-JSON envelope field that fails envelope validation', async () => {
+    // JSON.parse succeeds but validateEnvelope rejects (neither `query` nor
+    // `do`) — the OrbitError must be rethrown as-is, not wrapped as a plain
+    // JSON parse failure (engine keeps the precise code either way).
+    const { orbit } = uploadOrbit();
+    const form = new FormData();
+    form.set('envelope', JSON.stringify({}));
+    const response = await orbit.handler(
+      new Request('http://localhost/orbit', { method: 'POST', body: form }),
+    );
+    expect(response.status).toBe(400);
+    expect((await response.json()).error.code).toBe(ErrorCode.INVALID_QUERY);
+  });
+
   it('rejects non-file fields other than envelope', async () => {
     const { orbit } = uploadOrbit();
     const form = new FormData();

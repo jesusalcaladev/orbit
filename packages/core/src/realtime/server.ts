@@ -99,6 +99,16 @@ export class RealtimeServer {
   readonly #authorize?: RealtimeServerOptions['authorize'];
   readonly #origins?: Set<string>;
   readonly #sessions = new Set<Session>();
+  /**
+   * Pending retention-release timers, keyed by client subscription id.
+   *
+   * These live on the SERVER, not on a session: when a socket drops, the
+   * timer gives the client a window to reconnect + `resume`, and a re-attach
+   * from ANY session must be able to cancel it. Kept per-session, a reconnect
+   * would create a fresh session whose own (empty) map could never cancel the
+   * old session's pending release — the subscription would be killed mid-use.
+   */
+  readonly #retention = new Map<string, NodeJS.Timeout>();
 
   constructor(orbit: Orbit, options: RealtimeServerOptions = {}) {
     this.#hub = new SubscriptionHub(orbit);
@@ -112,6 +122,30 @@ export class RealtimeServer {
     };
     this.#authorize = options.authorize;
     this.#origins = options.origin === undefined ? undefined : new Set([options.origin].flat());
+  }
+
+  /**
+   * Detach a subscription and arm the retention window: unless the client
+   * re-attaches (and cancels this timer via `#cancelRelease`), the release
+   * fires after `retentionMs` and frees the shared adapter hook.
+   */
+  #scheduleRelease(clientId: string): void {
+    this.#hub.detach(clientId);
+    const timer = setTimeout(() => {
+      this.#retention.delete(clientId);
+      this.#hub.unsubscribe(clientId);
+    }, this.#options.retentionMs);
+    timer.unref();
+    this.#retention.set(clientId, timer);
+  }
+
+  /** Cancel a pending retention-release timer (a client re-attached in time). */
+  #cancelRelease(clientId: string): void {
+    const timer = this.#retention.get(clientId);
+    if (timer) {
+      clearTimeout(timer);
+      this.#retention.delete(clientId);
+    }
   }
 
   /** Access to the underlying hub (monitoring, programmatic fan-out). */
@@ -183,7 +217,15 @@ export class RealtimeServer {
           // (fan-out, resume replay) is not held back by delayed-ACK waits.
           (socket as Socket).setNoDelay(true);
           socket.write(upgradeResponse(key));
-          const session = new Session(socket, this.#orbit, this.#hub, this.#options, authCtx);
+          const session = new Session(
+            socket,
+            this.#orbit,
+            this.#hub,
+            this.#options,
+            authCtx,
+            (clientId) => this.#scheduleRelease(clientId),
+            (clientId) => this.#cancelRelease(clientId),
+          );
           this.#sessions.add(session);
           socket.on('data', (chunk) => session.onData(chunk));
           socket.on('close', () => {
@@ -213,6 +255,11 @@ export class RealtimeServer {
   close(): void {
     for (const session of this.#sessions) session.shutdown();
     this.#sessions.clear();
+    // Drop any pending retention-release timers so the process can exit
+    // (unref'd timers alone do not hold the loop, but the callbacks would
+    // still fire on a live server after close).
+    for (const timer of this.#retention.values()) clearTimeout(timer);
+    this.#retention.clear();
     this.#hub.close();
   }
 }
@@ -232,9 +279,11 @@ class Session {
   readonly #decoder: FrameDecoder;
   readonly #driver: RealtimeSessionDriver;
   readonly #heartbeat: NodeJS.Timeout;
-  readonly #retention = new Map<string, NodeJS.Timeout>();
+  readonly #scheduleRelease: (clientId: string) => void;
+  readonly #cancelRelease: (clientId: string) => void;
   #fragment?: { opcode: number; chunks: Buffer[]; total: number; count: number };
   #lastPong = Date.now();
+  #lastPingAt = 0;
   #closing = false;
 
   constructor(
@@ -243,17 +292,22 @@ class Session {
     hub: SubscriptionHub,
     options: SessionOptions,
     authCtx: OrbitContext = {},
+    scheduleRelease: (clientId: string) => void,
+    cancelRelease: (clientId: string) => void,
   ) {
     this.#socket = socket;
     this.#hub = hub;
     this.#options = options;
     this.#authCtx = authCtx;
     this.#decoder = new FrameDecoder(options.maxMessageBytes);
+    this.#scheduleRelease = scheduleRelease;
+    this.#cancelRelease = cancelRelease;
     // The shared session driver owns the frame-level protocol (subscribe/
     // unsubscribe/resume/envelope requests) and threads the session's auth
     // context into every envelope execution and subscription gate. On
     // attach we cancel any pending retention-release timer — the client
-    // re-attached before expiry.
+    // re-attached before expiry (the timer lives on the server so any
+    // session can cancel it).
     this.#driver = createSessionDriver(orbit, hub, (message) => this.#send(this.#encode(message)), {
       ctx: this.#authCtx,
       onAttach: (clientId) => this.#cancelRelease(clientId),
@@ -263,6 +317,10 @@ class Session {
   }
 
   onData(chunk: Buffer): void {
+    // Defensive: after dispose() the socket is destroyed synchronously, so no
+    // further 'data' events can reach the session — kept as a guard against
+    // future callers (e.g. a transport feeding head data after a terminate).
+    /* v8 ignore next — see above. */
     if (this.#closing) return;
     let frames: Frame[];
     try {
@@ -286,7 +344,8 @@ class Session {
     // Detach every subscription and give the client a retention window to
     // reconnect + resume; the shared adapter hook stays alive meanwhile so
     // the event log keeps growing (spec §10 resume / benchmark B6). The
-    // driver drops its tracking (retention takes over the unsubscribe).
+    // driver drops its tracking (retention takes over the unsubscribe); the
+    // release timers live on the server so a reconnect can cancel them.
     for (const clientId of this.#driver.activeIds()) this.#scheduleRelease(clientId);
     this.#driver.clear();
   }
@@ -297,24 +356,6 @@ class Session {
    */
   shutdown(): void {
     this.#terminate(CloseCode.GoingAway, 'server shutdown');
-  }
-
-  #scheduleRelease(clientId: string): void {
-    this.#hub.detach(clientId);
-    const timer = setTimeout(() => {
-      this.#retention.delete(clientId);
-      this.#hub.unsubscribe(clientId);
-    }, this.#options.retentionMs);
-    timer.unref();
-    this.#retention.set(clientId, timer);
-  }
-
-  #cancelRelease(clientId: string): void {
-    const timer = this.#retention.get(clientId);
-    if (timer) {
-      clearTimeout(timer);
-      this.#retention.delete(clientId);
-    }
   }
 
   #onFrame(frame: Frame): void {
@@ -366,6 +407,8 @@ class Session {
         }
         if (!frame.fin) {
           // Start a fragmented message; the running total is bounded as it grows.
+          /* v8 ignore next 2 — defensive: the FrameDecoder already enforces
+             maxMessageBytes per frame, so a single fragment can never exceed it. */
           if (frame.payload.length > this.#options.maxMessageBytes) {
             this.#terminate(CloseCode.TooBig, 'message too large');
             return;
@@ -410,6 +453,9 @@ class Session {
   }
 
   #handleMessage(opcode: number, payload: Buffer): void {
+    /* v8 ignore next 2 — defensive: the FrameDecoder enforces the same limit
+       before any payload is buffered, so this guard is a second line of
+       defense against future decoder changes, not a reachable path today. */
     if (payload.length > this.#options.maxMessageBytes) {
       this.#terminate(CloseCode.TooBig, 'message too large');
       return;
@@ -450,12 +496,19 @@ class Session {
   }
 
   #tickHeartbeat(): void {
+    /* v8 ignore next — the interval is always cleared in dispose() before
+       #closing is ever true, so this guard is purely defensive. */
     if (this.#closing) return;
-    // No pong since the previous ping → the client is gone.
-    if (Date.now() - this.#lastPong > this.#options.heartbeatMs) {
+    // Ping-first heartbeat: a fresh session always gets a ping before any
+    // liveness judgement (its clock starts at construction). Only a client
+    // that left the PREVIOUS ping unanswered within one interval is dead.
+    // This also keeps the protocol robust to a slow handshake — the first
+    // tick can never terminate a session that has simply not answered yet.
+    if (this.#lastPingAt !== 0 && Date.now() - this.#lastPong > this.#options.heartbeatMs) {
       this.#terminate(CloseCode.GoingAway, 'heartbeat timeout');
       return;
     }
+    this.#lastPingAt = Date.now();
     this.#send(encodeFrame(Opcode.Ping, Buffer.alloc(0)));
   }
 

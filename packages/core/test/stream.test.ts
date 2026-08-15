@@ -112,6 +112,30 @@ describe('orbit.stream', () => {
     });
   });
 
+  it('carries the plugin-serialized contentType on the final done event', async () => {
+    const orbit = createOrbit({
+      adapters: memoryAdapter([{ entity: 'user', resolve: () => ({ name: 'Ana' }) }]),
+      plugins: [
+        {
+          name: 'csv',
+          hooks: {
+            onBeforeSerialize: ({ data }) => ({
+              body: `name:${(data as { name: string }).name}`,
+              contentType: 'text/csv',
+            }),
+          },
+        },
+      ],
+    });
+    const events = [];
+    for await (const event of orbit.stream({ query: 'user { name }' })) events.push(event);
+    expect(events.at(-1)).toMatchObject({
+      level: 'done',
+      data: 'name:Ana',
+      contentType: 'text/csv',
+    });
+  });
+
   it('normalizes errors through onError hooks', async () => {
     const orbit = createOrbit({
       adapters: memoryAdapter([{ entity: 'user', resolve: () => null }]),

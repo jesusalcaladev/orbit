@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   AdapterRegistry,
+  PluginRegistry,
   createOrbit,
   decodeMsgpack,
   encodeMsgpack,
   memoryAdapter,
+  readEnvelope,
   validateEnvelope,
 } from '../src/index.js';
 import { ErrorCode } from '../src/errors.js';
@@ -136,6 +138,30 @@ describe('envelope validation coverage', () => {
 
   it('rejects non-object envelopes', () => {
     expect(() => validateEnvelope('query')).toThrowError(
+      expect.objectContaining({ code: ErrorCode.INVALID_QUERY }),
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// readEnvelope (string bodies)
+// ---------------------------------------------------------------------------
+
+describe('readEnvelope coverage', () => {
+  const envelope = JSON.stringify({ query: 'user { id }' });
+
+  it('parses a string body within the byte limit', () => {
+    expect(readEnvelope(envelope, 10_000)).toEqual({ query: 'user { id }' });
+  });
+
+  it('rejects a string body over the byte limit with PAYLOAD_TOO_LARGE', () => {
+    expect(() => readEnvelope(envelope, 4)).toThrowError(
+      expect.objectContaining({ code: ErrorCode.PAYLOAD_TOO_LARGE }),
+    );
+  });
+
+  it('rejects non-JSON string bodies with INVALID_QUERY', () => {
+    expect(() => readEnvelope('not json', 10_000)).toThrowError(
       expect.objectContaining({ code: ErrorCode.INVALID_QUERY }),
     );
   });
@@ -305,6 +331,131 @@ describe('engine coverage', () => {
     await expect(orbit.execute({ query: 'user { name }' })).rejects.toMatchObject({
       code: ErrorCode.INTERNAL,
     });
+  });
+
+  it('accepts pre-built AdapterRegistry and PluginRegistry instances', async () => {
+    const adapters = new AdapterRegistry().register(
+      memoryAdapter([{ entity: 'user', resolve: () => ({ name: 'Ana' }) }]),
+    );
+    const plugins = new PluginRegistry().register([
+      {
+        name: 'noop',
+        hooks: {
+          onBeforeParse: () => undefined,
+        },
+      },
+    ]);
+    const orbit = createOrbit({ adapters, plugins });
+    const result = await orbit.execute({ query: 'user { name }' });
+    expect(result.data).toEqual({ name: 'Ana' });
+  });
+
+  it('rejects a mutation on an adapter without mutate (MUTATION_FAILED)', async () => {
+    const orbit = createOrbit({
+      adapters: memoryAdapter([{ entity: 'user', resolve: () => ({ id: '1' }) }]),
+    });
+    await expect(orbit.execute({ do: 'user.delete', args: {} })).rejects.toMatchObject({
+      code: ErrorCode.MUTATION_FAILED,
+      status: 500,
+    });
+  });
+
+  it('lets onBeforeExecute inject context (ctx adjustment rides into execution)', async () => {
+    const orbit = createOrbit({
+      adapters: memoryAdapter([
+        {
+          entity: 'user',
+          resolve: (_filters, ctx) => ({ tag: (ctx.state as { tag?: string }).tag }),
+        },
+      ]),
+      plugins: [
+        {
+          name: 'ctx-inject',
+          hooks: {
+            onBeforeExecute: () => ({ ctx: { state: { tag: 'forced' } } }),
+          },
+        },
+      ],
+    });
+    const result = await orbit.execute({ query: 'user { tag }' }, { state: {} });
+    expect(result.data).toEqual({ tag: 'forced' });
+  });
+
+  it('rejects a batch adapter that returns a non-array (sanitized INTERNAL)', async () => {
+    const orbit = createOrbit({
+      adapters: [
+        { entity: 'user', resolve: () => [{ id: '1' }, { id: '2' }] },
+        {
+          entity: 'posts',
+          resolve: () => null,
+          batch: () => ({ nope: true }) as never,
+        },
+      ],
+    });
+    // Two posts pendings (one per user item) force the batch path.
+    await expect(orbit.execute({ query: 'user { posts { id } }' })).rejects.toMatchObject({
+      code: ErrorCode.INTERNAL,
+    });
+  });
+
+  it('does not overwrite a record relation when the child resolves nothing', async () => {
+    const orbit = createOrbit({
+      adapters: memoryAdapter([
+        { entity: 'user', resolve: () => ({ id: '1' }) },
+        { entity: 'posts', resolve: () => undefined },
+      ]),
+    });
+    const result = await orbit.execute({ query: 'user { posts { id } }' });
+    // The child resolved undefined → the relation is left unset.
+    expect(result.data).toEqual({});
+  });
+
+  it('skips undefined child resolutions per array item', async () => {
+    const orbit = createOrbit({
+      adapters: memoryAdapter([
+        { entity: 'user', resolve: () => [{ id: '1' }, { id: '2' }] },
+        { entity: 'posts', resolve: () => undefined },
+      ]),
+    });
+    const result = await orbit.execute({ query: 'user { posts { id } }' });
+    expect(result.data).toEqual([{}, {}]);
+  });
+
+  it('skips relations on a non-record root result', async () => {
+    const orbit = createOrbit({
+      adapters: memoryAdapter([
+        { entity: 'user', resolve: () => null },
+        { entity: 'posts', resolve: () => [] },
+      ]),
+    });
+    const result = await orbit.execute({ query: 'user { posts { id } }' });
+    expect(result.data).toBeNull();
+  });
+
+  it('serves null when the adapter resolves undefined', async () => {
+    const orbit = createOrbit({
+      adapters: memoryAdapter([{ entity: 'user', resolve: () => undefined }]),
+    });
+    const result = await orbit.execute({ query: 'user { id }' });
+    expect(result.data).toBeNull();
+  });
+
+  it('treats a non-string/non-bytes plugin payload as a plain data transform', async () => {
+    const orbit = createOrbit({
+      adapters: memoryAdapter([{ entity: 'user', resolve: () => ({ name: 'Ana' }) }]),
+      plugins: [
+        {
+          name: 'bad-body',
+          hooks: {
+            onBeforeSerialize: () => ({ body: 42, contentType: 'text/plain' }),
+          },
+        },
+      ],
+    });
+    // `{ body, contentType }` is not a valid byte-payload, so it is applied
+    // as a chained DATA transform instead of being served verbatim.
+    const result = await orbit.execute({ query: 'user { name }' });
+    expect(result.data).toEqual({ body: 42, contentType: 'text/plain' });
   });
 });
 

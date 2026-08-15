@@ -20,6 +20,25 @@ function makeOrbit(plugin: ReturnType<typeof createRateLimitPlugin>) {
 }
 
 describe('createRateLimitPlugin', () => {
+  it('rejects a non-positive windowMs at boot (developer error)', () => {
+    expect(() => createRateLimitPlugin({ windowMs: 0, limit: 5 })).toThrow(/windowMs/);
+    expect(() => createRateLimitPlugin({ windowMs: -1000, limit: 5 })).toThrow(/windowMs/);
+  });
+
+  it('rejects a non-positive limit at boot (developer error)', () => {
+    expect(() => createRateLimitPlugin({ windowMs: 60_000, limit: 0 })).toThrow(/limit/);
+    expect(() => createRateLimitPlugin({ windowMs: 60_000, limit: -1 })).toThrow(/limit/);
+  });
+
+  it('bucketCount is 0 when the injected store does not report one', () => {
+    const plugin = createRateLimitPlugin({
+      windowMs: 60_000,
+      limit: 1,
+      store: { consume: () => ({ ok: true }) },
+    });
+    expect(plugin.bucketCount).toBe(0);
+  });
+
   it('allows up to limit requests, then rejects with 429', async () => {
     const clock = fakeClock();
     const plugin = createRateLimitPlugin({ windowMs: 60_000, limit: 3, now: clock.now });
@@ -135,6 +154,26 @@ describe('createRateLimitPlugin', () => {
     // Different IP → own bucket.
     await expect(
       orbit.execute({ query: 'user { id }' }, withHeaders('x-forwarded-for', '5.6.7.8')),
+    ).resolves.toMatchObject({ status: 200 });
+  });
+
+  it('falls back to x-real-ip when x-forwarded-for is absent', async () => {
+    const plugin = createRateLimitPlugin({ windowMs: 60_000, limit: 1 });
+    const orbit = makeOrbit(plugin);
+    const withHeaders = (name: string, value: string) => ({
+      headers: new Headers({ [name]: value }),
+    });
+
+    await expect(
+      orbit.execute({ query: 'user { id }' }, withHeaders('x-real-ip', '10.0.0.1')),
+    ).resolves.toMatchObject({ status: 200 });
+    // Same real-ip (no forwarded header) → same bucket → denied.
+    await expect(
+      orbit.execute({ query: 'user { id }' }, withHeaders('x-real-ip', '10.0.0.1')),
+    ).rejects.toMatchObject({ status: 429 });
+    // A different real-ip has its own bucket.
+    await expect(
+      orbit.execute({ query: 'user { id }' }, withHeaders('x-real-ip', '10.0.0.2')),
     ).resolves.toMatchObject({ status: 200 });
   });
 });

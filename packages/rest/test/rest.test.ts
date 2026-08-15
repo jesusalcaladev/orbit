@@ -125,6 +125,50 @@ describe('restAdapter.resolve', () => {
     expect(calls[0]?.url).toBe('https://api.example.com/v1/post?authorId=7');
   });
 
+  it('skips the parent key when the parent record carries no id', async () => {
+    const calls: FetchCall[] = [];
+    const adapter = restAdapter({
+      entity: 'post',
+      baseUrl: 'https://api.example.com/v1',
+      parentKey: 'authorId',
+      fetchFn: mockFetch(new Map([['https://api.example.com/v1/post', [{ id: 'p1' }]]]), calls),
+    });
+
+    const result = await adapter.resolve({}, { parent: { entity: 'user', data: { name: 'Ada' } } });
+    expect(result).toEqual([{ id: 'p1' }]);
+    expect(calls[0]?.url).toBe('https://api.example.com/v1/post');
+  });
+
+  it('resolves headers as a function (e.g. a live auth token)', async () => {
+    const seen: Record<string, string> = {};
+    const adapter = restAdapter({
+      entity: 'user',
+      baseUrl: 'https://api.example.com',
+      headers: () => ({ authorization: 'Bearer live-token' }),
+      fetchFn: async (_input, init) => {
+        Object.assign(seen, init?.headers);
+        return new Response('{"id":"1"}', { status: 200 });
+      },
+    });
+
+    await adapter.resolve({ id: '1' }, {});
+    expect(seen.authorization).toBe('Bearer live-token');
+  });
+
+  it('maps upstream 400/422 to FILTER_INVALID (status preserved)', async () => {
+    for (const status of [400, 422]) {
+      const adapter = restAdapter({
+        entity: 'user',
+        baseUrl: 'https://api.example.com',
+        fetchFn: async () => new Response('bad', { status }),
+      });
+      await expect(adapter.resolve({}, {})).rejects.toMatchObject({
+        code: ErrorCode.FILTER_INVALID,
+        status,
+      });
+    }
+  });
+
   it('applies unwrap to the response body', async () => {
     const adapter = restAdapter({
       entity: 'user',
@@ -138,6 +182,17 @@ describe('restAdapter.resolve', () => {
       ),
     });
     expect(await adapter.resolve({ q: '1' }, {})).toEqual([{ id: '1' }]);
+  });
+
+  it('degrades a non-JSON 200 body to undefined (resolve)', async () => {
+    const adapter = restAdapter({
+      entity: 'user',
+      baseUrl: 'https://api.example.com',
+      fetchFn: async () => new Response('<html>oops</html>', { status: 200 }),
+    });
+    // A 200 with an unparseable body is a miss-shaped payload — the adapter
+    // does not invent data, it resolves to undefined (projected to null-ish).
+    await expect(adapter.resolve({}, {})).resolves.toBeUndefined();
   });
 });
 
@@ -248,6 +303,56 @@ describe('restAdapter.mutate', () => {
       code: ErrorCode.MUTATION_FAILED,
       status: 418,
     });
+  });
+
+  it('accepts a bare action name (no entity prefix) on direct calls', async () => {
+    const calls: FetchCall[] = [];
+    const adapter = restAdapter({
+      entity: 'user',
+      baseUrl: 'https://api.example.com',
+      fetchFn: mockFetch(new Map([['https://api.example.com/user', { id: '1' }]]), calls),
+    });
+    // The engine always passes `entity.action`; the adapter tolerates a bare
+    // verb too, splitting only when a dot is present.
+    const result = await adapter.mutate!('create', { payload: { name: 'Ada' } }, {});
+    expect(result).toMatchObject({ id: '1' });
+    expect(calls[0]?.method).toBe('POST');
+  });
+
+  it('applies unwrap to mutation responses', async () => {
+    const adapter = restAdapter({
+      entity: 'user',
+      baseUrl: 'https://api.example.com',
+      unwrap: (json) => (json as { data: unknown }).data,
+      fetchFn: mockFetch(
+        new Map([['https://api.example.com/user', { data: { id: 'x', name: 'Ada' } }]]),
+        [],
+      ),
+    });
+    const result = await adapter.mutate!('user.create', { payload: { name: 'Ada' } }, {});
+    expect(result).toMatchObject({ id: 'x', name: 'Ada' });
+  });
+
+  it('returns only the id when the mutation response is not an object', async () => {
+    const adapter = restAdapter({
+      entity: 'user',
+      baseUrl: 'https://api.example.com',
+      fetchFn: mockFetch(new Map([['https://api.example.com/user', [1, 2, 3]]]), []),
+    });
+    // A bare array/primitive response carries no fields to merge — the id
+    // from the request filter is preserved and nothing is invented.
+    const result = await adapter.mutate!('user.create', { filter: { id: '42' } }, {});
+    expect(result).toEqual({ id: '42' });
+  });
+
+  it('degrades a non-JSON 200 body to just the id (mutate)', async () => {
+    const adapter = restAdapter({
+      entity: 'user',
+      baseUrl: 'https://api.example.com',
+      fetchFn: async () => new Response('not json at all', { status: 200 }),
+    });
+    const result = await adapter.mutate!('user.create', { filter: { id: '9' } }, {});
+    expect(result).toEqual({ id: '9' });
   });
 });
 

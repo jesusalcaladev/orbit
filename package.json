@@ -17,7 +17,7 @@
     "typecheck": "pnpm run build && pnpm -r run typecheck && tsc -p tsconfig.json",
     "test": "pnpm -r run test",
     "test:watch": "pnpm --filter @orbit/core run test:watch",
-    "test:coverage": "pnpm --filter @orbit/core run test:coverage",
+    "test:coverage": "pnpm -r run test:coverage",
     "format": "biome check --write .",
     "lint": "biome check .",
     "example": "pnpm run build && node examples/node/standalone-server.ts",

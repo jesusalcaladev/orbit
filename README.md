@@ -275,8 +275,8 @@ in as `packages/*`.
 
 ```bash
 pnpm install         # dev dependencies only (typescript, vitest)
-pnpm test            # 598 tests, Vitest (400 core + 14 express + 13 hono + 16 rest + 4 cache + 26 cloudflare-workers + 18 rate-limit + 12 auth + 5 logging + 14 redis + 8 kv-cache + 30 postgres + 38 mongo)
-pnpm run test:coverage # ~95% stmts / ~90% branch / ~96% lines (see packages/core)
+pnpm test            # 635 tests, Vitest (400 core + 18 express + 13 hono + 24 rest + 4 cache + 35 cloudflare-workers + 21 rate-limit + 15 auth + 9 logging + 17 redis + 9 kv-cache + 30 postgres + 40 mongo)
+pnpm run test:coverage # every package with its own v8 thresholds (≥90% stmts/funcs/lines, ≥85% branch — most at/over 90% branch)
 pnpm run typecheck   # strict TypeScript (builds all packages, then checks examples/bench)
 pnpm run build       # ESM + .d.ts → dist/ in every package
 pnpm run example     # zero-dep demo server on localhost:3000 (examples/node/standalone-server.ts)

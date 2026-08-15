@@ -16,9 +16,9 @@ pnpm install
 
 | Command | What it does |
 | :--- | :--- |
-| `pnpm test` | Run the full Vitest suite across every workspace (324 tests: 307 core + 13 rest + 4 cache) |
+| `pnpm test` | Run the full Vitest suite across every workspace (635 tests: 400 core + 18 express + 13 hono + 24 rest + 4 cache + 35 cloudflare-workers + 21 rate-limit + 15 auth + 9 logging + 17 redis + 9 kv-cache + 30 postgres + 40 mongo) |
 | `pnpm run test:watch` | Watch mode (core) |
-| `pnpm run test:coverage` | Core coverage report with thresholds (90% stmts / 90% funcs / 85% branch; currently 94% stmts) |
+| `pnpm run test:coverage` | Coverage per package with v8 thresholds (≥90% stmts / funcs / lines, ≥85% branch) — run `pnpm -r run test:coverage` |
 | `pnpm run typecheck` | Strict TypeScript check (builds all packages, then checks examples/bench) |
 | `pnpm run build` | Emit ESM + `.d.ts` to `dist/` in every package |
 | `pnpm run example` | Run the zero-dependency demo server |

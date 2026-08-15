@@ -30,6 +30,12 @@ describe('negotiateFormat', () => {
     expect(negotiateFormat('application/x-msgpack;q=0.5, application/json;q=1')).toBe('json');
   });
 
+  it('ignores non-q parameters on media types (q stays the default)', () => {
+    expect(negotiateFormat('application/json;charset=utf-8')).toBe('json');
+    expect(negotiateFormat('application/x-msgpack;profile=orbit')).toBe('msgpack');
+    expect(negotiateFormat('text/event-stream;charset=utf-8')).toBe('sse');
+  });
+
   it('ignores q=0 entries and falls back', () => {
     expect(negotiateFormat('application/x-msgpack;q=0')).toBe('json');
     expect(negotiateFormat('application/x-msgpack;q=0, text/event-stream;q=0.5')).toBe('sse');

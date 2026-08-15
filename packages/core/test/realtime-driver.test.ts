@@ -25,7 +25,8 @@ function makeWorld() {
           const payload = args.payload as { id: string };
           const event: SubscriptionEvent = { type: 'created', id: payload.id, data: payload };
           for (const handler of handlers) handler(event);
-          return { id: payload.id };
+          // Adapters may declare extra entities/keys to evict.
+          return { id: payload.id, invalidates: ['post'] };
         },
         subscribe: (_filters, handler) => {
           handlers.add(handler);
@@ -117,7 +118,12 @@ describe('createSessionDriver — the shared frame contract (spec §10)', () => 
     const { driver, sent } = makeSession(orbit);
 
     await driver.dispatch({ do: 'post.create', args: { payload: { id: 'p9' } }, id: 'm1' });
-    expect(sent.at(-1)).toMatchObject({ id: 'm1', status: 200, data: { success: true, id: 'p9' } });
+    expect(sent.at(-1)).toMatchObject({
+      id: 'm1',
+      status: 200,
+      data: { success: true, id: 'p9' },
+      invalidates: ['post'],
+    });
 
     // Invalid envelope (both query and do) → 400 with the id echoed.
     await driver.dispatch({ query: 'post { id }', do: 'post.create', id: 'b1' });
@@ -126,6 +132,33 @@ describe('createSessionDriver — the shared frame contract (spec §10)', () => 
       status: 400,
       error: { code: 'ORBIT_INVALID_QUERY' },
     });
+
+    // The same failure WITHOUT a correlation id → no `id` on the error frame.
+    await driver.dispatch({ query: 'post { id }', do: 'post.create' });
+    expect(sent.at(-1)).toMatchObject({
+      status: 400,
+      error: { code: 'ORBIT_INVALID_QUERY' },
+    });
+    expect('id' in sent.at(-1)!).toBe(false);
+  });
+
+  it('acknowledges unsubscribing an unknown id without touching the hub', async () => {
+    const { orbit } = makeWorld();
+    const { driver, sent } = makeSession(orbit);
+
+    await driver.dispatch({ unsubscribe: 'nope' });
+    expect(sent.at(-1)).toEqual({ unsubscribed: 'nope' });
+  });
+
+  it('resume without `after` replays from the start (after = 0)', async () => {
+    const { orbit, handlers } = makeWorld();
+    const { driver, sent } = makeSession(orbit);
+
+    await driver.dispatch({ subscribe: 'post { id }', id: 's1' });
+    for (const handler of handlers) handler({ type: 'created', id: 'p1', data: { id: 'p1' } });
+
+    await driver.dispatch({ resume: 's1' });
+    expect(sent.at(-1)).toEqual({ resumed: 's1', after: 0 });
   });
 
   it('throws on unknown control frames (transport sends the error frame)', async () => {
@@ -145,6 +178,26 @@ describe('createSessionDriver — the shared frame contract (spec §10)', () => 
     driver.releaseAll();
     expect(handlers.size).toBe(0);
     expect(driver.activeIds()).toEqual([]);
+  });
+
+  it('runs plugin rewrites through the subscription gates', async () => {
+    const orbit = createOrbit({
+      adapters: memoryAdapter([{ entity: 'post', resolve: () => [], subscribe: () => () => {} }]),
+      plugins: [
+        {
+          name: 'rewrite',
+          hooks: {
+            // Return a string (even if unchanged) → the rewritten query wins.
+            onBeforeParse: ({ query }) => query.trim(),
+            // Return a node → the parsed tree is replaced.
+            onAfterParse: ({ parsed }) => ({ ...parsed, fields: [...parsed.fields] }),
+          },
+        },
+      ],
+    });
+    const { driver, sent } = makeSession(orbit);
+    await driver.dispatch({ subscribe: 'post { id }', id: 's1' });
+    expect(sent).toContainEqual({ ack: 's1' });
   });
 
   it('calls onAttach when a subscription is (re)attached', async () => {
