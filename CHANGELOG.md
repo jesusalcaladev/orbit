@@ -5,6 +5,17 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
 ## [Unreleased]
 
 ### Added
+- **Full-stack example (`examples/node/stack/13-fullstack-mongo.ts`)** —
+  one Orbit engine with the whole first-party ecosystem mounted and proven
+  live: `@orbit/mongo` adapters (relations + `$in` batching, mutations),
+  the Redis `CacheStore` with entity-precise eviction, Redis-backed
+  distributed rate-limit buckets with standard `RateLimit-*` headers,
+  `@orbit/auth` read gates + row scoping, and per-request `@orbit/logging`
+  — 20 live assertions, runnable with zero infra (in-memory Mongo/Redis
+  stand-ins) or against real drivers via `MONGODB_URI`. Registered as
+  example 13 in `run-all.ts`; docs updated (`examples/README.md`,
+  `docs/examples.md`). Root devDependencies: `mongodb` + the five
+  `@orbit/*` workspace packages.
 - **Coverage ≥90% everywhere (all packages)** — every package now ships a
   `vitest.config.ts` with v8 coverage thresholds (≥90% stmts/funcs/lines,
   ≥85% branch — most at or over 90% branch) and a `test:coverage` script;

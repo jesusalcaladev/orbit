@@ -20,6 +20,9 @@ importers:
       '@hono/node-server':
         specifier: ^1.13.0
         version: 1.19.17(hono@4.13.1)
+      '@orbit/auth':
+        specifier: workspace:*
+        version: link:packages/auth
       '@orbit/cloudflare-workers':
         specifier: workspace:*
         version: link:packages/cloudflare-workers
@@ -32,6 +35,18 @@ importers:
       '@orbit/hono':
         specifier: workspace:*
         version: link:packages/hono
+      '@orbit/logging':
+        specifier: workspace:*
+        version: link:packages/logging
+      '@orbit/mongo':
+        specifier: workspace:*
+        version: link:packages/mongo
+      '@orbit/rate-limit':
+        specifier: workspace:*
+        version: link:packages/rate-limit
+      '@orbit/redis':
+        specifier: workspace:*
+        version: link:packages/redis
       '@types/express':
         specifier: ^4.17.21
         version: 4.17.25
@@ -62,6 +77,9 @@ importers:
       lint-staged:
         specifier: ^17.3.0
         version: 17.3.0
+      mongodb:
+        specifier: ^6.21.0
+        version: 6.21.0
       typescript:
         specifier: ^7.0.2
         version: 7.0.2

@@ -36,10 +36,15 @@
     "@commitlint/cli": "^21.2.1",
     "@commitlint/config-conventional": "^21.2.0",
     "@hono/node-server": "^1.13.0",
+    "@orbit/auth": "workspace:*",
     "@orbit/cloudflare-workers": "workspace:*",
     "@orbit/core": "workspace:*",
     "@orbit/express": "workspace:*",
     "@orbit/hono": "workspace:*",
+    "@orbit/logging": "workspace:*",
+    "@orbit/mongo": "workspace:*",
+    "@orbit/rate-limit": "workspace:*",
+    "@orbit/redis": "workspace:*",
     "@types/express": "^4.17.21",
     "@types/node": "^24.0.0",
     "@types/ws": "^8.18.1",
@@ -50,6 +55,7 @@
     "hono": "^4.2.0",
     "husky": "^9.1.7",
     "lint-staged": "^17.3.0",
+    "mongodb": "^6.21.0",
     "typescript": "^7.0.2",
     "ws": "^8.21.3"
   }

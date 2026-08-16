@@ -16,6 +16,7 @@ import { main as speed } from './performance/09-speed.ts';
 import { main as expressDemo } from './frameworks/10-express.ts';
 import { main as honoDemo } from './frameworks/11-hono.ts';
 import { main as workersDemo } from './frameworks/12-cloudflare-workers.ts';
+import { main as stackMongo } from './stack/13-fullstack-mongo.ts';
 
 const runs: Array<{ name: string; run: () => Promise<void> }> = [
   { name: '01 · hello', run: hello },
@@ -30,6 +31,7 @@ const runs: Array<{ name: string; run: () => Promise<void> }> = [
   { name: '10 · book API on express', run: expressDemo },
   { name: '11 · book API on hono', run: honoDemo },
   { name: '12 · book API on workers', run: workersDemo },
+  { name: '13 · full-stack: mongo + redis + auth + rate-limit', run: stackMongo },
 ];
 
 for (const { name, run } of runs) {

@@ -14,7 +14,7 @@ each one demonstrates one facet of the protocol and prints its results.
 
 ```bash
 npm run build                   # once (examples import from dist/)
-node examples/node/run-all.ts   # run all twelve, back to back
+node examples/node/run-all.ts   # run all thirteen, back to back
 ```
 
 ## The node examples (`examples/node/`)
@@ -33,6 +33,7 @@ node examples/node/run-all.ts   # run all twelve, back to back
 | [`10-express.ts`](../examples/node/frameworks/10-express.ts) | **The book API on Express** — a layered, best-practice app: domain (`book/data.ts`) → application (`book/engine.ts`) → interface (this file). Relations, authn in the framework + authz in the engine, client-driven caching, realtime via `attachRealtime`. |
 | [`11-hono.ts`](../examples/node/frameworks/11-hono.ts) | **The same book API on Hono** — identical engine, identical walkthrough, proving the engine is framework-agnostic. |
 | [`12-cloudflare-workers.ts`](../examples/node/frameworks/12-cloudflare-workers.ts) | **The same book API on Cloudflare Workers** — the engine behind one `fetch` handler, driven through `worker.fetch` with bindings in every context, plus the Workers-native realtime session. |
+| [`13-fullstack-mongo.ts`](../examples/node/stack/13-fullstack-mongo.ts) | **The full first-party stack on one engine** — `@orbit/mongo` adapters (relations + `$in` batching), a Redis `CacheStore` with entity-precise eviction, Redis-backed distributed rate-limit buckets with standard headers, `@orbit/auth` read gates + row scoping, and per-request logging. Runs against an in-memory Mongo/Redis stand-in, or the real drivers via `MONGODB_URI`. |
 
 The book API is the reference architecture example: `examples/node/book/`
 holds the shared, framework-agnostic layers that all three hosts serve (see

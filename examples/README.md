@@ -25,12 +25,14 @@ examples/
 │   │   ├── 10-express.ts       the book API on Express
 │   │   ├── 11-hono.ts          the same book API on Hono
 │   │   └── 12-cloudflare-workers.ts the same book API on Cloudflare Workers
+│   ├── stack/             # The full first-party stack on one engine
+│   │   └── 13-fullstack-mongo.ts  MongoDB + Redis cache + distributed rate-limit + auth + logging
 │   ├── book/              # Shared layered book API (domain → engine → demo)
 │   │   ├── data.ts             → domain: entities + in-memory repository
 │   │   ├── engine.ts           → application: Orbit engine, adapters, auth policy, timing, caching
 │   │   ├── demo.ts             → book demo setup
 │   │   └── README.md           layering, authn/authz split & protocol walkthrough
-│   ├── run-all.ts           # runs 01–12 back to back
+│   ├── run-all.ts           # runs 01–13 back to back
 │   └── standalone-server.ts   # zero-dependency node:http endpoint
 └── web/                   interactive browser demos (one server, http://localhost:4321)
     ├── chat-realtime/       realtime chat over WebSocket (OpenAI-style)
