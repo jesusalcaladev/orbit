@@ -1,4 +1,4 @@
-# Orbit Protocol Spec (v2.0.🔮)
+# Orbit Protocol Spec
 
 **Modular Data Layer for the Modern Fullstack**
 
