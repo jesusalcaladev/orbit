@@ -1,4 +1,7 @@
-import { chatHistory, esc, orbit, orbitSocket, timeOf, toast } from '../shared.js';
+import { createClient } from '@orbit/client';
+import { esc, timeOf, toast } from '../shared.js';
+
+const client = createClient({ baseUrl: '/orbit' });
 
 const nameInput = document.getElementById('name');
 const textInput = document.getElementById('text');
@@ -91,7 +94,8 @@ function setStatus(state) {
 
 async function loadHistory() {
   try {
-    const messages = await chatHistory();
+    const { data } = await client.query('chat { id, author, text, ts, clientId }');
+    const messages = Array.isArray(data) ? data : [];
     loaded = true;
     seen.clear();
     clearFeed();
@@ -109,16 +113,9 @@ async function loadHistory() {
 const pending = new Map();
 let nextClientId = 1;
 
-void orbitSocket({
-  subscribe: 'chat { id, author, text, ts, clientId }',
-  onStatus: (state) => setStatus(state),
-  onAck: (_id, kind, seq) => {
-    if (!loaded || kind === 'subscribe') loadHistory();
-    else if (seq > 0) {
-      system('reconnected — caught up on missed messages');
-    }
-  },
-  onEvent: (event) => {
+const sub = client.subscribe(
+  'chat { id, author, text, ts, clientId }',
+  (event) => {
     if (event.type === 'deleted') {
       loadHistory();
       return;
@@ -129,7 +126,14 @@ void orbitSocket({
     if (isMine) pending.delete(message.clientId);
     addMessage(message, { mine: isMine });
   },
-  onError: (error) => toast(`${error.code}: ${error.message}`, true),
+  { onError: (error) => toast(`${error.code}: ${error.message}`, true) },
+);
+sub.onStatus((state) => setStatus(state));
+sub.onAck((_id, kind, seq) => {
+  if (!loaded || kind === 'subscribe') loadHistory();
+  else if (seq > 0) {
+    system('reconnected — caught up on missed messages');
+  }
 });
 
 // ---- actions ----
@@ -142,9 +146,8 @@ async function send() {
   textInput.value = '';
   textInput.focus();
   try {
-    await orbit({
-      do: 'chat.send',
-      args: { payload: { author: nameInput.value.trim() || 'anon', text, clientId } },
+    await client.mutate('chat.send', {
+      payload: { author: nameInput.value.trim() || 'anon', text, clientId },
     });
   } catch (error) {
     pending.delete(clientId);
@@ -154,7 +157,7 @@ async function send() {
 
 async function clearRoom() {
   try {
-    await orbit({ do: 'chat.clear', args: {} });
+    await client.mutate('chat.clear', {});
     seen.clear();
     clearFeed();
     countEl.textContent = '0';

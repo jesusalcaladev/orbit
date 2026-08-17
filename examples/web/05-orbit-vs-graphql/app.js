@@ -1,4 +1,7 @@
-import { chatHistory, esc, fmtBytes, fmtMs, orbitSocket, statsOf } from '../shared.js';
+import { createClient } from '@orbit/client';
+import { esc, fmtBytes, fmtMs, statsOf } from '../shared.js';
+
+const client = createClient({ baseUrl: '/orbit' });
 
 const nameInput = document.getElementById('name');
 const textInput = document.getElementById('text');
@@ -93,18 +96,17 @@ function setStatus(side, state) {
   status.textContent = state;
 }
 
-// Orbit side — reconnectable via the shared helper (subscribe → resume).
-orbitSocket({
-  subscribe: ORBIT_SUB,
-  subId: 'ab-feed',
-  onStatus: (state) => setStatus('orbit', state),
-  onAck: () => setStatus('orbit', 'live'),
-  onEvent: (event) => {
+// Orbit side — the client reconnects automatically (subscribe → resume).
+const orbitSub = client.subscribe(
+  ORBIT_SUB,
+  (event) => {
     const data = event.data;
     if (data) settle('orbit', data);
   },
-  onError: () => setStatus('orbit', 'error'),
-});
+  { id: 'ab-feed', onError: () => setStatus('orbit', 'error') },
+);
+orbitSub.onStatus((state) => setStatus('orbit', state));
+orbitSub.onAck(() => setStatus('orbit', 'live'));
 
 // GraphQL side — graphql-ws protocol with manual reconnect.
 let gqlWs = null;
@@ -583,7 +585,8 @@ function drawChart(groups) {
 
 async function seedFeeds() {
   try {
-    const messages = await chatHistory();
+    const { data } = await client.query('chat { id, author, text, ts, clientId }');
+    const messages = Array.isArray(data) ? data : [];
     for (const message of messages) {
       markFeed('orbit', message, null, '');
       markFeed('gql', message, null, '');

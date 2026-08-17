@@ -1,125 +1,19 @@
 /**
  * Orbit web demos — shared browser helpers.
+ *
+ * The transport (POST envelope, realtime subscribe/reconnect/resume) used to
+ * live here by hand; it is now `@orbit/client` — see docs/client.md. Each
+ * demo builds its client with `demoClient()` and keeps only UI helpers here.
  */
-
-/** POST an envelope to the Orbit handler and return the parsed JSON. */
-export async function orbit(envelope, options = {}) {
-  const { headers = {}, token } = options;
-  const res = await fetch('/orbit', {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      ...(token ? { 'x-orbit-token': token } : {}),
-      ...headers,
-    },
-    body: JSON.stringify(envelope),
-  });
-  const body = await res.json();
-  if (body.error) {
-    const error = new Error(body.error.message ?? 'Orbit error');
-    error.code = body.error.code;
-    error.status = res.status;
-    throw error;
-  }
-  return body;
-}
-
-/** Fetch the whole chat history (insertion order, oldest first). */
-export async function chatHistory() {
-  const { data } = await orbit({ query: 'chat { id, author, text, ts, clientId }' });
-  return Array.isArray(data) ? data : [];
-}
+import { createClient } from '@orbit/client';
 
 /**
- * Open the Orbit realtime socket with automatic reconnect + resume.
- *
- * - First connect sends `subscribe`; every reconnect sends `resume` with the
- *   last seen `seq`, so missed events are replayed from the retention log.
- * - If the retention window expired, the server answers ORBIT_SUBSCRIPTION_FAILED
- *   and we transparently fall back to a fresh `subscribe`.
- * - `onStatus` reports 'connecting' | 'live' | 'reconnecting'.
- *
- * Returns `{ send, close }`.
+ * A demo client pointed at the local server's `/orbit` endpoint. The realtime
+ * URL derives from the browser origin (baseUrl is relative), so `subscribe`
+ * and `socket` work without extra config.
  */
-export function orbitSocket({ subscribe, onEvent, onAck, onError, onStatus, subId = 'feed' }) {
-  const retry = [500, 1200, 2500, 5000];
-  let ws = null;
-  let lastSeq = 0;
-  let closed = false;
-  let everSubscribed = false;
-  let attempts = 0;
-  let reconnectTimer = null;
-
-  const scheduleReconnect = () => {
-    // One reconnect at a time — a second trigger (e.g. onclose right after an
-    // error) must not spin up a duplicate socket.
-    if (reconnectTimer !== null) return;
-    const delay = retry[Math.min(attempts, retry.length - 1)] ?? 5000;
-    attempts += 1;
-    reconnectTimer = setTimeout(() => {
-      reconnectTimer = null;
-      connect();
-    }, delay);
-  };
-
-  function connect() {
-    if (closed) return;
-    onStatus?.('connecting');
-    ws = new WebSocket(`ws://${location.host}/realtime`);
-    ws.onopen = () => {
-      attempts = 0;
-      onStatus?.('live');
-      const frame = everSubscribed ? { resume: subId, after: lastSeq } : { subscribe, id: subId };
-      everSubscribed = true;
-      ws.send(JSON.stringify(frame));
-    };
-    ws.onmessage = (event) => {
-      let message;
-      try {
-        message = JSON.parse(event.data);
-      } catch {
-        return;
-      }
-      if (message.error) {
-        // `resume` hit an expired/unknown subscription — drop the dead socket
-        // and start over with a fresh subscribe.
-        if (everSubscribed && message.error.code === 'ORBIT_SUBSCRIPTION_FAILED') {
-          everSubscribed = false;
-          ws?.close();
-          scheduleReconnect();
-          return;
-        }
-        onError?.(message.error);
-      } else if (message.id && message.event) {
-        if (typeof message.seq === 'number' && message.seq > lastSeq) lastSeq = message.seq;
-        onEvent?.(message.event, message.seq);
-      } else if (message.ack || message.resumed) {
-        const kind = message.resumed !== undefined ? 'resume' : 'subscribe';
-        onAck?.(message.ack ?? message.resumed, kind, lastSeq);
-      }
-    };
-    ws.onclose = () => {
-      if (closed) return;
-      onStatus?.('reconnecting');
-      scheduleReconnect();
-    };
-  }
-
-  connect();
-
-  return {
-    send: (frame) => {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify(frame));
-        return true;
-      }
-      return false;
-    },
-    close: () => {
-      closed = true;
-      ws?.close();
-    },
-  };
+export function demoClient() {
+  return createClient({ baseUrl: '/orbit' });
 }
 
 /** Format a millisecond duration for display. */

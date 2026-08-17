@@ -1,4 +1,7 @@
-import { orbit, toast } from '../shared.js';
+import { createClient } from '@orbit/client';
+import { toast } from '../shared.js';
+
+const client = createClient({ baseUrl: '/orbit' });
 
 const usernameInput = document.getElementById('username');
 const passwordInput = document.getElementById('password');
@@ -75,7 +78,7 @@ registerBtn.addEventListener('click', async () => {
 
 logoutBtn.addEventListener('click', async () => {
   try {
-    await orbit({ do: 'user.logout', args: {} }, { token });
+    await client.mutate('user.logout', {}, { headers: { 'x-orbit-token': token } });
   } catch {
     // The token is wiped client-side either way.
   }
@@ -100,7 +103,9 @@ copyTokenBtn.addEventListener('click', async () => {
 async function probe() {
   // With the token: the plugin stamps ctx.state.caller, the query resolves.
   try {
-    const { data } = await orbit({ query: 'user(me="true") { name }' }, { token });
+    const { data } = await client.query('user(me="true") { name }', {
+      headers: { 'x-orbit-token': token },
+    });
     meEl.textContent = data?.name ?? '?';
     meEl.classList.add('good');
     withToken.textContent = JSON.stringify(data, null, 2);
@@ -114,7 +119,7 @@ async function probe() {
 
   // Without the token: ORBIT_PERMISSION_DENIED from the onBeforeResolve hook.
   try {
-    await orbit({ query: 'user(me="true") { name }' });
+    await client.query('user(me="true") { name }');
     withoutToken.textContent = 'resolved?! (should be blocked)';
     withoutToken.classList.add('err');
   } catch (error) {

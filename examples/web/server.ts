@@ -507,6 +507,12 @@ useServer(
 // ---------------------------------------------------------------------------
 
 const WEB_DIR = fileURLToPath(new URL('.', import.meta.url));
+const ROOT_DIR = resolve(WEB_DIR, '..', '..');
+/** Built ESM directories served under /vendor for the demo import maps. */
+const VENDOR_PACKAGES: Record<string, string> = {
+  '@orbit/client': 'packages/client/dist',
+  '@orbit/core': 'packages/core/dist',
+};
 const CONTENT_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
@@ -609,6 +615,37 @@ const server = createServer(async (req, res) => {
       });
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify(result));
+      return;
+    }
+
+    // Vendor: the built ESM of the workspace packages, served for the import
+    // maps in the demo HTML. The demos stay bundler-free — the map points
+    // `@orbit/client` / `@orbit/core` at these files, which resolve their own
+    // relative imports the same way.
+    if (req.method === 'GET' && url.pathname.startsWith('/vendor/')) {
+      // Scoped packages: the specifier is '@scope/name/file', so the first
+      // two segments identify the package and the rest is the file.
+      const segments = decodeURIComponent(url.pathname.slice('/vendor/'.length)).split('/');
+      const pkg = segments.slice(0, 2).join('/');
+      const rest = segments.length > 2 ? segments.slice(2).join('/') : 'index.js';
+      const distDir = VENDOR_PACKAGES[pkg];
+      if (!distDir) {
+        res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+        res.end('404 — unknown vendor package');
+        return;
+      }
+      const filePath = normalize(resolve(ROOT_DIR, distDir, rest));
+      if (!filePath.startsWith(resolve(ROOT_DIR, distDir)) || !existsSync(filePath)) {
+        res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+        res.end('404 — not found. Did you run `npm run build` first?');
+        return;
+      }
+      const data = await readFile(filePath);
+      res.writeHead(200, {
+        'content-type':
+          CONTENT_TYPES[extname(filePath).toLowerCase()] ?? 'application/octet-stream',
+      });
+      res.end(data);
       return;
     }
 

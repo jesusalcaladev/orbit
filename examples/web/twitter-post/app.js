@@ -1,4 +1,7 @@
-import { esc, orbit, toast } from '../shared.js';
+import { createClient } from '@orbit/client';
+import { esc, toast } from '../shared.js';
+
+const client = createClient({ baseUrl: '/orbit' });
 
 const textInput = document.getElementById('text');
 const fileInput = document.getElementById('file');
@@ -86,7 +89,7 @@ function setStatus(state) {
 
 async function loadHistory() {
   try {
-    const { data } = await orbit({ query: 'posts { id, text, authorName, authorId, ts }' });
+    const { data } = await client.query('posts { id, text, authorName, authorId, ts }');
     seen.clear();
     clearFeed();
     const posts = Array.isArray(data) ? data : [];
@@ -100,10 +103,9 @@ async function loadHistory() {
 
 // ---- socket ----
 
-void orbitSocket({
-  subscribe: 'posts { id, text, authorName, authorId, ts }',
-  onStatus: (state) => setStatus(state),
-  onEvent: (event) => {
+const sub = client.subscribe(
+  'posts { id, text, authorName, authorId, ts }',
+  (event) => {
     if (event.type === 'deleted') {
       loadHistory();
       return;
@@ -112,8 +114,9 @@ void orbitSocket({
     if (!post) return;
     addPost(post);
   },
-  onError: (error) => toast(`${error.code}: ${error.message}`, true),
-});
+  { onError: (error) => toast(`${error.code}: ${error.message}`, true) },
+);
+sub.onStatus((state) => setStatus(state));
 
 // ---- actions ----
 
@@ -127,10 +130,7 @@ async function send() {
   // Always create a text post if there's text
   if (text) {
     try {
-      await orbit({
-        do: 'posts.create',
-        args: { payload: { text } },
-      });
+      await client.mutate('posts.create', { payload: { text } });
       await loadHistory();
     } catch (error) {
       toast(error.message, true);
@@ -160,17 +160,10 @@ async function uploadFile(file) {
     return false;
   }
 
-  const form = new FormData();
-  form.set('envelope', JSON.stringify({ do: 'image.upload', args: {} }));
-  form.set('upload', file);
-
   try {
-    const res = await fetch('/orbit', { method: 'POST', body: form });
-    const body = await res.json();
-    if (body.error) {
-      toast(`${body.error.code}: ${body.error.message}`, true);
-      return false;
-    }
+    // client.upload sends the multipart form — the `upload` field lands in
+    // ctx.files, the envelope carries the mutation (spec §7).
+    await client.upload('image.upload', {}, { upload: file });
     return true;
   } catch (error) {
     toast(error.message, true);
@@ -180,7 +173,7 @@ async function uploadFile(file) {
 
 async function clearRoom() {
   try {
-    await orbit({ do: 'posts.clear', args: {} });
+    await client.mutate('posts.clear', {});
     seen.clear();
     clearFeed();
     countEl.textContent = '0';

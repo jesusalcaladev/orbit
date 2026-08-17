@@ -16,10 +16,11 @@ book/
                             (relations via ctx.parent), an authorization
                             policy plugin, a timing plugin and client-driven
                             caching. Framework-agnostic.
-  demo.ts     client      — a protocol walkthrough that runs against any
-                            host: relational queries, gated identity, auth
-                            mutations, role checks, validation, MessagePack
-                            in+out, SSE streaming and caching.
+  demo.ts     client      — a protocol walkthrough on `@orbit/client` that
+                            runs against any host: relational queries, gated
+                            identity, auth mutations, role checks,
+                            validation, MessagePack in+out, SSE streaming,
+                            caching and realtime (subscribe + socket).
 ../10-express.ts  interface — Express host (thin: transport + authn only).
 ../11-hono.ts     interface — Hono host (same engine, same API).
 ../12-cloudflare-workers.ts  interface — the Workers fetch handler (same engine, same API).
@@ -43,9 +44,10 @@ directly.
 - Mutations require a key; `books.create` / `books.remove` require the admin role.
 - Bad input fails with the standard error contract, not a 500.
 - MessagePack round-trips in a single request; SSE streams the graph in frames.
-- **Cache lifecycle, honestly**: `x-orbit-cache: ttl=60` opts a query in (miss →
-  hit with `fromCache: true`), and a mutation that changes data clears the
-  store server-side, so the next identical query refetches (`fromCache: false`).
+- **Cache lifecycle, honestly**: `cache: 'ttl=60'` opts a query in (on the
+  envelope, equivalent to the `x-orbit-cache` header) — miss → hit with
+  `fromCache: true` — and a mutation that changes data clears the store
+  server-side, so the next identical query refetches (`fromCache: false`).
   Cache keys are opaque `orbit:<hash>` strings — see `engine.ts`.
 - **Realtime**: a WebSocket subscription to `reviews` receives the next
   `reviews.add` mutation as a `{ type: 'created', ... }` event pushed through

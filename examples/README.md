@@ -40,8 +40,10 @@ examples/
     ├── 03-mini-post/        nested relations + mutations feed
     ├── 04-mini-auth/        token auth through the plugin pipeline
     ├── 05-orbit-vs-graphql/ live A/B against graphql-js
-    ├── server.ts            the demo server (Orbit + graphql-js, same world)
-    ├── shared.js            shared browser helpers
+    ├── server.ts            the demo server (Orbit + graphql-js, same world;
+    │                        also serves /vendor for the import maps)
+    ├── shared.js            browser UI helpers + demoClient() (@orbit/client)
+    ├── check.ts             scripted smoke check (pages, vendor files, round-trips)
     ├── styles.css           shared base styles (OpenAI-inspired)
     └── uploads/             uploaded files directory
 ```
@@ -62,7 +64,7 @@ Each file is self-contained and prints its results — see `docs/examples.md` fo
 npm run web    # builds, then serves http://localhost:4321
 ```
 
-One server hosts the real engine (`/orbit` + `/realtime`) and a real graphql-js (`/graphql` + `/graphql-ws`) over the **same in-memory world**, so the A/B lab races them honestly. All demos are vanilla HTML/CSS/JS — no frameworks, no build step.
+One server hosts the real engine (`/orbit` + `/realtime`) and a real graphql-js (`/graphql` + `/graphql-ws`) over the **same in-memory world**, so the A/B lab races them honestly. All demos are vanilla HTML/CSS/JS — no frameworks, no build step: the transport is `@orbit/client`, wired into the browser via an import map served from `/vendor` (the built `packages/{client,core}/dist`). `node examples/web/check.ts` runs a scripted smoke check against a running server (pages, vendor files, and HTTP + realtime round-trips).
 
 ## Reference architecture
 

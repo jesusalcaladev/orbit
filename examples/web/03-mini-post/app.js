@@ -1,4 +1,7 @@
-import { esc, fmtMs, orbit, toast } from '../shared.js';
+import { createClient } from '@orbit/client';
+import { esc, fmtMs, toast } from '../shared.js';
+
+const client = createClient({ baseUrl: '/orbit' });
 
 const nameInput = document.getElementById('name');
 const textInput = document.getElementById('text');
@@ -27,7 +30,7 @@ function relTime(ts) {
 
 async function refresh(animate = true) {
   const t0 = performance.now();
-  const { data } = await orbit({ query: QUERY });
+  const { data } = await client.query(QUERY);
   lastEl.textContent = fmtMs(performance.now() - t0);
   lastEl.classList.add('good');
   const posts = data ?? [];
@@ -65,11 +68,8 @@ postBtn.addEventListener('click', async () => {
   if (!text) return;
   textInput.value = '';
   try {
-    await orbit({
-      do: 'posts.create',
-      args: {
-        payload: { text, authorName: nameInput.value.trim() || 'guest' },
-      },
+    await client.mutate('posts.create', {
+      payload: { text, authorName: nameInput.value.trim() || 'guest' },
     });
     await refresh();
   } catch (error) {
@@ -85,12 +85,9 @@ feed.addEventListener('click', async (event) => {
   const button = event.target.closest('.like');
   if (!button) return;
   try {
-    const { data } = await orbit({
-      do: 'posts.like',
-      args: {
-        filter: { id: button.dataset.id },
-        payload: { fingerprint },
-      },
+    const { data } = await client.mutate('posts.like', {
+      filter: { id: button.dataset.id },
+      payload: { fingerprint },
     });
     const { liked, likes } = data;
     button.innerHTML = `${liked ? '♥' : '♡'} <span>${likes}</span>`;
