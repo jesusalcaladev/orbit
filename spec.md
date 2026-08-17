@@ -582,7 +582,8 @@ Measured on real hardware by `npm run bench` (see `docs/benchmarks.md`).
 | B7 | Realtime HTTP (WebSocket fan-out) | Fan-out latency (200 sockets) | spec goal 200 ms | < 200 ms — ✅ 11.1 ms (write path ~7.6 ms) · resume 500 patches ~3.3 ms |
 | B8 | Wire path · real HTTP (node:http + keep-alive) | Requests/sec over HTTP | graphql-js measured on the same server | ✅ ~1.5× graphql-js (1,571 vs 1,029 RPS) — same client, same machine |
 | B9 | Deep nest · warm cache replay vs DataLoader | Warm replay P99 latency | graphql-js + DataLoader: 5 DB batches/request (measured) | < 200 ms — ✅ 0.17 ms · 0 DB calls warm (DataLoader still pays all 5 per request) |
-| B10 | Client overhead · real HTTP round-trip | P99 round-trip latency | raw fetch 3.79 ms (measured) | ≤ 15% added — ✅ 3.74 ms (≈0% overhead) |
+| B10 | Client overhead · real HTTP round-trip | P99 round-trip latency | raw fetch 1.993 ms (measured) | ≤ 15% added — ✅ 1.886 ms (≈0% overhead) |
+| B11 | React layer (hooks + cache) · warm hit vs raw fetch | P99 latency (warm cache hit) | raw fetch 1.821 ms (measured) | < 0.5 ms warm — ✅ 0.003 ms (0 HTTP); miss overhead vs bare client +7.7% |
 
 > Competition column note: graphql-js and dataloader numbers are MEASURED on
 > the benchmark machine (both are devDependencies of the bench harness only —
@@ -595,7 +596,7 @@ Measured on real hardware by `npm run bench` (see `docs/benchmarks.md`).
 
 | Version | Contents | Status |
 | --- | --- | --- |
-| **0.0.1** | Core engine, OQS, envelope, errors, JSON/msgpack/SSE, gzip, caching, plugin pipeline, frozen `DataAdapter` + envelope, memoryAdapter, WebSocket realtime transport + security suite, prototype-pollution hardening, 12 node examples + 5 interactive web demos + the layered book API, benchmark suite (B1–B10) incl. real-HTTP wire path + cache-vs-DataLoader head-to-heads + client-overhead head-to-head, CI (GitHub Actions matrix), frozen public API surface (spec §13), spec. | ✅ shipped |
+| **0.0.1** | Core engine, OQS, envelope, errors, JSON/msgpack/SSE, gzip, caching, plugin pipeline, frozen `DataAdapter` + envelope, memoryAdapter, WebSocket realtime transport + security suite, prototype-pollution hardening, 12 node examples + 5 interactive web demos + the layered book API, benchmark suite (B1–B11) incl. real-HTTP wire path + cache-vs-DataLoader head-to-heads + client/react-layer overhead head-to-heads, CI (GitHub Actions matrix), frozen public API surface (spec §13), spec. | ✅ shipped |
 | **0.1.x** | First real adapters (Postgres, Redis cache store), federation-friendly relation semantics. | 🔜 |
 | **1.0** | Envelope & error codes locked for backwards compatibility; audit of every section in this spec. | 🔜 |
 | **2.0 🔮** | Federated Orbit servers, native (WASM/C++) parsers to close the B3 wire-path gap (engine core already exceeds the goal), first-party client SDKs. | 🔜 |

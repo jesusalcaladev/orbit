@@ -186,7 +186,7 @@ curl -s localhost:3000/orbit \
 { "data": { "name": "Ana", "posts": [{ "title": "Why Orbit?" }] } }
 ```
 
-See [examples/node/standalone-server.ts](./examples/node/standalone-server.ts) for a complete zero-dependency server (`npm run example`), the [twelve runnable examples](./docs/examples.md) for one facet each, [docs/benchmarks.md](./docs/benchmarks.md) for the B1–B10 numbers against measured graphql-js (including the real-HTTP wire path, the client-overhead vs raw fetch story and the cache-vs-DataLoader comparison), [docs/use-cases.md](./docs/use-cases.md) for where Orbit fits, [docs/security.md](./docs/security.md) for the threat model, [docs/ecosystem.md](./docs/ecosystem.md) for the first-party `@orbit/*` package plan, [docs/protocol-audit.md](./docs/protocol-audit.md) for the spec-vs-code verification, and [docs/spec-vision.md](./docs/spec-vision.md) for the north star behind the spec.
+See [examples/node/standalone-server.ts](./examples/node/standalone-server.ts) for a complete zero-dependency server (`npm run example`), the [twelve runnable examples](./docs/examples.md) for one facet each, [docs/benchmarks.md](./docs/benchmarks.md) for the B1–B11 numbers against measured graphql-js (including the real-HTTP wire path, the client/react-layer overhead stories and the cache-vs-DataLoader comparison), [docs/use-cases.md](./docs/use-cases.md) for where Orbit fits, [docs/security.md](./docs/security.md) for the threat model, [docs/ecosystem.md](./docs/ecosystem.md) for the first-party `@orbit/*` package plan, [docs/protocol-audit.md](./docs/protocol-audit.md) for the spec-vs-code verification, and [docs/spec-vision.md](./docs/spec-vision.md) for the north star behind the spec.
 
 ## Query syntax at a glance
 
@@ -256,7 +256,7 @@ Every failure is an `OrbitError` with a standard code and a correct HTTP status:
 | [Adapters](./docs/adapters.md) | The frozen adapter contract, batching, mutations, realtime `subscribe` |
 | [Realtime](./docs/realtime.md) | WebSocket subscriptions, resume/delta sync, heartbeats — zero-dep RFC 6455 |
 | [Serialization](./docs/serialization.md) | JSON, MessagePack, SSE streaming, gzip — `Accept`/`Accept-Encoding` negotiation |
-| [Benchmarks](./docs/benchmarks.md) | B1–B10 vs measured graphql-js — latency, round-trips, throughput, payload, streaming, realtime, real-HTTP wire path, client overhead, cache-vs-DataLoader |
+| [Benchmarks](./docs/benchmarks.md) | B1–B11 vs measured graphql-js — latency, round-trips, throughput, payload, streaming, realtime, real-HTTP wire path, client + react-layer overhead, cache-vs-DataLoader |
 | [Security](./docs/security.md) | Threat model: payload/depth limits, prototype-pollution hardening, realtime protocol defenses |
 | [Examples](./docs/examples.md) | The twelve runnable examples, tour and reading order |
 | [Architecture](./docs/architecture.md) | How the engine executes a query, serialization, extension points |
@@ -283,7 +283,7 @@ pnpm run build       # ESM + .d.ts → dist/ in every package
 pnpm run example     # zero-dep demo server on localhost:3000 (examples/node/standalone-server.ts)
 pnpm run examples    # all twelve headless examples, back to back (examples/node/)
 pnpm run web         # interactive demos on localhost:4321 — chat, uploads, posts, auth + the Orbit-vs-GraphQL A/B lab (examples/web/, see docs/examples.md)
-pnpm run bench       # B1–B10 benchmarks + chart (docs/benchmarks.md)
+pnpm run bench       # B1–B11 benchmarks + chart (docs/benchmarks.md)
 pnpm run size        # core package weight vs graphql-js (docs/benchmarks.md)
 ```
 

@@ -204,7 +204,7 @@ changes).
 
 ### §12 Benchmarks
 
-- The B1–B10 harness exists (`bench/`) and asserts its goals (`npm run bench`).
+- The B1–B11 harness exists (`bench/`) and asserts its goals (`npm run bench`).
   Numbers are machine-measured; not re-run in this audit. The `resume`
   benchmark uses the numeric `seq` cursor, consistent with the transport (#2).
 

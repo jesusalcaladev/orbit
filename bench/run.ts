@@ -1,5 +1,5 @@
 /**
- * Orbit benchmark suite — scenarios B1–B10 from the protocol spec.
+ * Orbit benchmark suite — scenarios B1–B11 from the protocol spec.
  *
  * Every measurement runs against the real `@orbit/core` engine (dist build)
  * on this machine. The competition is now MEASURED, not assumed: the
@@ -29,6 +29,7 @@ import { buildDeepNest, buildFeed, users } from './fixtures.ts';
 import { graphqlB1, graphqlB2, graphqlB3, graphqlB4, graphqlB9 } from './graphql.ts';
 import { httpB8 } from './http-bench.ts';
 import { createClient } from '@orbit/client';
+import { createReactClient } from '@orbit/react';
 import { gzip, measure, measureThroughput, now, pct } from './measure.ts';
 import { renderChart } from './svg.ts';
 import type { ChartRow } from './svg.ts';
@@ -706,6 +707,114 @@ async function benchB10(): Promise<{
 }
 
 // ---------------------------------------------------------------------------
+// B11 — @orbit/react layer vs @orbit/client bare vs raw fetch
+//
+// Three paths against the SAME node:http server + orbit.handler:
+//   raw fetch         → POST a JSON envelope, parse the reply
+//   @orbit/client     → query(): validation + envelope + HTTP + mapping
+//   @orbit/react      → ensureQuery(): the SAME transport PLUS the cache
+//                       layer — on a miss (invalidate + refetch) it should
+//                       add ~0% over the vanilla client, and on a WARM cache
+//                       hit it serves the entry with ZERO HTTP round-trips
+//                       (what the hooks give every repeated read for free).
+// ---------------------------------------------------------------------------
+
+async function benchB11(): Promise<{
+  rawMs: number;
+  clientMs: number;
+  reactMissMs: number;
+  reactHitMs: number;
+  competitionMs: number;
+}> {
+  const orbit = createOrbit({
+    adapters: memoryAdapter([
+      { entity: 'user', resolve: ({ id }) => users.find((u) => u.id === id) },
+    ]),
+  });
+  const server = createServer(async (req, res) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(chunk as Buffer);
+    const request = new Request('http://localhost/orbit', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: Buffer.concat(chunks),
+    });
+    const response = await orbit.handler(request);
+    res.writeHead(response.status, {
+      'content-type': response.headers.get('content-type') ?? 'application/json',
+    });
+    res.end(await response.text());
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = (server.address() as { port: number }).port;
+  const baseUrl = `http://127.0.0.1:${port}/orbit`;
+
+  const client = createClient({ baseUrl });
+  const react = createReactClient({ baseUrl, client });
+  const key = ['user', '1'] as const;
+  const query = 'user(id="1") { name, email }';
+
+  const rawFetch = async () => {
+    const res = await fetch(baseUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({ query }),
+    });
+    await res.json();
+  };
+  const clientQuery = async () => {
+    await client.query(query);
+  };
+  // Full react path: evict the key, then a miss goes through the vanilla
+  // transport AND the cache bookkeeping (write + version bump + eviction).
+  const reactMiss = async () => {
+    react.invalidate(key);
+    await react.ensureQuery(key, query, { ttl: 60_000 });
+  };
+  // Warm path: the entry is fresh, so ensureQuery resolves from the client
+  // cache with no transport call — the hook's steady-state read.
+  const reactHit = async () => {
+    await react.ensureQuery(key, query, { ttl: 60_000 });
+  };
+
+  // Warm every path (JIT + connection pool), alternating so neither side
+  // benefits from being second.
+  for (let i = 0; i < scale(300, 100); i += 1) {
+    await rawFetch();
+    await clientQuery();
+    await reactMiss();
+    await reactHit();
+  }
+  await reactHit(); // the cache is now primed for the hit path
+
+  const samples = scale(2000, 400);
+  const raw = await measure(rawFetch, samples);
+  const clientRun = await measure(clientQuery, samples);
+  const hit = await measure(reactHit, samples);
+  const miss = await measure(reactMiss, samples);
+  const miss2 = await measure(reactMiss, samples);
+  const hit2 = await measure(reactHit, samples);
+  const clientRun2 = await measure(clientQuery, samples);
+  const raw2 = await measure(rawFetch, samples);
+
+  const rawMs = (pct(raw, 99) + pct(raw2, 99)) / 2;
+  const clientMs = (pct(clientRun, 99) + pct(clientRun2, 99)) / 2;
+  const reactMissMs = (pct(miss, 99) + pct(miss2, 99)) / 2;
+  const reactHitMs = (pct(hit, 99) + pct(hit2, 99)) / 2;
+  const missOverhead = (reactMissMs / clientMs - 1) * 100;
+  const speedup = rawMs / reactHitMs;
+
+  console.log(
+    `    raw fetch p99: ${rawMs.toFixed(3)} ms · client p99: ${clientMs.toFixed(3)} ms · react miss p99: ${reactMissMs.toFixed(3)} ms (${missOverhead.toFixed(1)}% overhead) · react warm hit p99: ${reactHitMs.toFixed(3)} ms (${speedup.toFixed(0)}× vs raw fetch)`,
+  );
+
+  react.close();
+  server.closeAllConnections?.();
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  return { rawMs, clientMs, reactMissMs, reactHitMs, competitionMs: rawMs };
+}
+
+// ---------------------------------------------------------------------------
 // Orchestration
 // ---------------------------------------------------------------------------
 
@@ -726,7 +835,7 @@ interface Result {
 const ok = (met: boolean): string => (met ? '✅' : '⚠️ ');
 
 async function main(): Promise<void> {
-  console.log('Orbit benchmark suite (B1–B10)\n');
+  console.log('Orbit benchmark suite (B1–B11)\n');
 
   const results: Result[] = [];
 
@@ -959,6 +1068,30 @@ async function main(): Promise<void> {
     );
   }
 
+  // B11
+  {
+    const r = await benchB11();
+    const missOverhead = (r.reactMissMs / r.clientMs - 1) * 100;
+    const speedup = r.rawMs / r.reactHitMs;
+    const met = r.reactHitMs < 0.5;
+    results.push({
+      id: 'B11',
+      label: 'React layer · warm cache hit vs raw fetch',
+      metric: 'P99 latency · warm cache hit',
+      unit: 'ms',
+      lowerIsBetter: true,
+      orbitValue: r.reactHitMs,
+      orbitLabel: `${r.reactHitMs.toFixed(3)} ms (0 HTTP — client cache)`,
+      competitionValue: r.competitionMs,
+      competitionLabel: `${r.competitionMs.toFixed(3)} ms (raw fetch, measured)`,
+      goal: '< 0.5 ms warm (0 HTTP round-trips)',
+      goalMet: met,
+    });
+    console.log(
+      `B11 · React cache layer warm hit     ${ok(met)} orbit ${r.reactHitMs.toFixed(3)} ms (0 HTTP)  vs  raw fetch ${r.rawMs.toFixed(3)} ms  (${speedup.toFixed(0)}× faster; miss overhead over client: ${missOverhead.toFixed(1)}%)  (goal < 0.5 ms warm)`,
+    );
+  }
+
   // Persist machine-readable results.
   writeFileSync(join(benchDir, 'benchmarks.json'), JSON.stringify(results, null, 2));
 
@@ -974,7 +1107,7 @@ async function main(): Promise<void> {
     lowerIsBetter: r.lowerIsBetter,
     goalMet: r.goalMet,
   }));
-  const svg = renderChart('Orbit benchmark suite — B1 to B10', rows);
+  const svg = renderChart('Orbit benchmark suite — B1 to B11', rows);
   writeFileSync(join(benchDir, 'chart.svg'), svg);
 
   console.log('\nBenchmark results written to bench/results/ (benchmarks.json + chart.svg).');
