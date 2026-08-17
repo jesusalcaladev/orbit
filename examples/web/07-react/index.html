@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>07 · Orbit × React — Orbit</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="demo">
+      <div class="demo-head">
+        <a class="back" href="/">← demos</a>
+        <h1>Orbit × React</h1>
+        <span class="pill orbit">hooks</span>
+        <span class="pill orbit">devtools</span>
+      </div>
+      <p class="demo-sub">
+        The same TikTok world through <code>@orbit/react</code> — the TikTok-style feed is a
+        <code>useOrbitQuery</code> with a TTL cache, likes are <code>useOrbitMutation</code> with
+        <strong>entity invalidation</strong>, and live updates arrive through a
+        <code>useOrbitSubscription</code>. Open the <strong>🔮 devtools</strong> (bottom-right) to watch
+        queries, subscriptions and activity as they happen — the same panel works in
+        React Native.
+      </p>
+
+      <div id="root"></div>
+    </div>
+
+    <script type="module" src="./app.jsx"></script>
+  </body>
+</html>

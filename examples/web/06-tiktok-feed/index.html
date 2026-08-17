@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>06 · TikTok-style feed — Orbit</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="demo">
+      <div class="demo-head">
+        <a class="back" href="/">← demos</a>
+        <h1>TikTok-style feed</h1>
+        <span class="pill orbit">realtime</span>
+      </div>
+      <p class="demo-sub">
+        The whole feed — <code>clips { … creator { … }, comments { … } }</code> — in one round-trip,
+        likes broadcast over the WebSocket to every tab, and a server cache with
+        <strong>entity eviction</strong>: a like invalidates <code>clips</code>, so the next reload is cold.
+      </p>
+
+      <div class="panel">
+        <div class="row composer">
+          <label>
+            <span>Your name</span>
+            <input id="name" type="text" value="Ada" maxlength="24" />
+          </label>
+          <label>
+            <span>Emoji</span>
+            <select id="emoji">
+              <option>🎬</option>
+              <option>🏔️</option>
+              <option>🍜</option>
+              <option>🎹</option>
+              <option>🌮</option>
+              <option>🎮</option>
+              <option>🛹</option>
+              <option>☕</option>
+            </select>
+          </label>
+          <label style="flex: 1; min-width: 220px">
+            <span>Caption</span>
+            <input id="caption" type="text" placeholder="What is the vibe?" autocomplete="off" />
+          </label>
+          <button id="post" style="align-self: flex-end">Post clip</button>
+          <button id="reload" class="ghost" style="align-self: flex-end">⟳ reload (cache)</button>
+        </div>
+      </div>
+
+      <div class="stats">
+        <div class="stat">
+          <div class="k">Feed round-trip</div>
+          <div class="v" id="last">—</div>
+        </div>
+        <div class="stat">
+          <div class="k">Cache</div>
+          <div class="v" id="cache">—</div>
+        </div>
+        <div class="stat">
+          <div class="k">Clips</div>
+          <div class="v" id="count">0</div>
+        </div>
+        <div class="stat">
+          <div class="k">Live events</div>
+          <div class="v" id="events">0</div>
+        </div>
+        <div class="stat">
+          <div class="k">Socket</div>
+          <div class="v pill" id="conn-pill">—</div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div id="feed" class="feed"></div>
+      </div>
+    </div>
+
+    <script type="importmap">
+      {
+        "imports": {
+          "@orbit/core": "/vendor/@orbit/core/browser.js",
+          "@orbit/client": "/vendor/@orbit/client/index.js"
+        }
+      }
+    </script>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

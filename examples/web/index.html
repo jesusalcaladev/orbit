@@ -11,7 +11,7 @@
       <div class="logo">🔮 <span>Orbit</span></div>
       <p class="tagline">
         One round-trip for the whole graph — <strong>zero runtime dependencies</strong>.
-        Five interactive demos running on the real engine, same server, same in-memory world.
+        Six interactive demos running on the real engine, same server, same in-memory world.
       </p>
     </header>
 
@@ -65,6 +65,28 @@
           realtime sends and watch each subscription event arrive — timed, crowned and compared.
         </p>
         <span class="tags"><i>benchmark</i><i>graphql</i><i>realtime</i></span>
+      </a>
+
+      <a class="card" href="/06-tiktok-feed/" style="--accent: #fe2c55">
+        <span class="num">06</span>
+        <h2>TikTok-style feed</h2>
+        <p>
+          A vertical clip feed where one query pulls clips, creators and comments together; likes
+          broadcast over the WebSocket to every tab; and the server cache evicts by entity, so a
+          like makes the next reload cold.
+        </p>
+        <span class="tags"><i>relations</i><i>realtime</i><i>cache</i><i>entity-eviction</i></span>
+      </a>
+
+      <a class="card" href="/07-react/" style="--accent: #61dafb">
+        <span class="num">07</span>
+        <h2>Orbit × React</h2>
+        <p>
+          The same clip world through @orbit/react: a TTL-cached useOrbitQuery feed,
+          useOrbitMutation likes with entity invalidation, live WebSocket updates via
+          useOrbitSubscription, and the cross-platform devtools panel.
+        </p>
+        <span class="tags"><i>react</i><i>hooks</i><i>cache</i><i>devtools</i></span>
       </a>
     </main>
 

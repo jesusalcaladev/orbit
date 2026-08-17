@@ -21,6 +21,7 @@ import { createServer } from 'node:http';
 import { existsSync } from 'node:fs';
 import { extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { build } from 'esbuild';
 import { WebSocketServer } from 'ws';
 import { useServer } from 'graphql-ws/use/ws';
 import {
@@ -365,6 +366,200 @@ const imageAdapter: DataAdapter = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// TikTok world: clips — the relational feed + realtime likes + cache demo
+// ---------------------------------------------------------------------------
+
+interface ClipComment {
+  id: string;
+  author: string;
+  text: string;
+  ts: number;
+}
+
+interface Clip {
+  id: string;
+  creatorId: string;
+  creatorName: string;
+  handle: string;
+  caption: string;
+  emoji: string;
+  likes: number;
+  likedBy: string[];
+  comments: ClipComment[];
+  ts: number;
+}
+
+let clipSeq = 0;
+let commentSeq = 0;
+const clips: Clip[] = [
+  {
+    id: 'c1',
+    creatorId: '1',
+    creatorName: 'Ada',
+    handle: '@ada',
+    caption: 'Ship it — the whole graph in one round-trip. 🚀',
+    emoji: '🎬',
+    likes: 42,
+    likedBy: ['2', 'guest-demo'],
+    comments: [
+      { id: 'm1', author: 'grace', text: 'the N+1 fix hits different', ts: Date.now() - 300_000 },
+      {
+        id: 'm2',
+        author: 'linus',
+        text: '5 queries instead of 1,112 — insanity',
+        ts: Date.now() - 120_000,
+      },
+    ],
+    ts: Date.now() - 3_000_000,
+  },
+  {
+    id: 'c2',
+    creatorId: '2',
+    creatorName: 'Grace',
+    handle: '@grace',
+    caption: 'Summit day. No signal, no problem — the feed replayed 500 patches on resume. 🏔️',
+    emoji: '🏔️',
+    likes: 28,
+    likedBy: ['1'],
+    comments: [
+      {
+        id: 'm3',
+        author: 'maria',
+        text: 'delta sync is the killer feature',
+        ts: Date.now() - 900_000,
+      },
+    ],
+    ts: Date.now() - 1_800_000,
+  },
+  {
+    id: 'c3',
+    creatorId: 'guest',
+    creatorName: 'Linus',
+    handle: '@linus',
+    caption: 'Cache with entity eviction: like something, the next cold hit knows. 🍜',
+    emoji: '🍜',
+    likes: 15,
+    likedBy: ['1', '2'],
+    comments: [],
+    ts: Date.now() - 600_000,
+  },
+  {
+    id: 'c4',
+    creatorId: 'guest',
+    creatorName: 'María',
+    handle: '@maria',
+    caption: 'One WebSocket, every tab hears the like instantly. 🎹',
+    emoji: '🎹',
+    likes: 9,
+    likedBy: [],
+    comments: [],
+    ts: Date.now() - 120_000,
+  },
+];
+
+const clipHandlers = new Set<(event: SubscriptionEvent) => void>();
+const emitClip = (event: SubscriptionEvent) => {
+  for (const handler of clipHandlers) handler(event);
+};
+
+const clipsAdapter: DataAdapter = {
+  entity: 'clips',
+  resolve: (filters: Filters) => {
+    if (filters.id) return clips.find((c) => c.id === filters.id) ?? null;
+    if (filters.creatorId) return clips.filter((c) => c.creatorId === filters.creatorId);
+    // Newest first — a feed, not an archive.
+    return [...clips].reverse();
+  },
+  mutate: (action: string, args: MutationArgs, ctx: OrbitContext): MutationResult => {
+    const caller = ctx.state?.caller as User | undefined;
+    const payload = (args.payload ?? {}) as Record<string, string>;
+    if (action === 'create') {
+      const creatorName = payload.creatorName?.trim() || 'guest';
+      const clip: Clip = {
+        id: `c${++clipSeq}`,
+        creatorId: caller?.id ?? 'guest',
+        creatorName,
+        handle: payload.handle?.trim()
+          ? `@${payload.handle.trim().replace(/^@/, '')}`
+          : `@${creatorName.toLowerCase().replace(/\s+/g, '_')}`,
+        caption: payload.caption ?? '',
+        emoji: payload.emoji ?? '🎬',
+        likes: 0,
+        likedBy: [],
+        comments: [],
+        ts: Date.now(),
+      };
+      clips.unshift(clip);
+      emitClip({ type: 'created', id: clip.id, data: clip, patch: { ...clip } });
+      return { id: clip.id };
+    }
+    if (action === 'like') {
+      const clip = clips.find((c) => c.id === args.filter?.id);
+      if (!clip) throw new OrbitError(ErrorCode.FILTER_INVALID, 'Clip not found');
+      const voter = caller?.id ?? `guest-${payload.fingerprint ?? 'anon'}`;
+      const liked = clip.likedBy.includes(voter);
+      if (liked) {
+        clip.likedBy = clip.likedBy.filter((v) => v !== voter);
+        clip.likes -= 1;
+      } else {
+        clip.likedBy.push(voter);
+        clip.likes += 1;
+      }
+      emitClip({
+        type: 'updated',
+        id: clip.id,
+        data: clip,
+        patch: { id: clip.id, likes: clip.likes, likedBy: clip.likedBy },
+      });
+      return { id: clip.id, likes: clip.likes, liked: !liked };
+    }
+    if (action === 'comment') {
+      const clip = clips.find((c) => c.id === args.filter?.id);
+      if (!clip) throw new OrbitError(ErrorCode.FILTER_INVALID, 'Clip not found');
+      const comment: ClipComment = {
+        id: `m${++commentSeq}`,
+        author: (payload.author ?? '').trim() || 'anon',
+        text: payload.text ?? '',
+        ts: Date.now(),
+      };
+      clip.comments.push(comment);
+      emitClip({
+        type: 'updated',
+        id: clip.id,
+        data: clip,
+        patch: { id: clip.id, comments: clip.comments },
+      });
+      return { id: clip.id, commentId: comment.id };
+    }
+    throw new Error(`unknown clips action '${action}'`);
+  },
+  subscribe: (_filters: Filters, handler: (event: SubscriptionEvent) => void) => {
+    clipHandlers.add(handler);
+    return () => clipHandlers.delete(handler);
+  },
+};
+
+/** Resolves the `creator { … }` relation of a clip (a role-shaped adapter). */
+const creatorAdapter: DataAdapter = {
+  entity: 'creator',
+  resolve: (_filters: Filters, ctx: OrbitContext) => {
+    const clip = ctx.parent?.data as Clip | undefined;
+    if (!clip) return null;
+    return { id: clip.creatorId, name: clip.creatorName, handle: clip.handle };
+  },
+};
+
+/** Resolves the `comments { … }` relation of a clip (a role-shaped adapter). */
+const commentsAdapter: DataAdapter = {
+  entity: 'comments',
+  resolve: (_filters: Filters, ctx: OrbitContext) => {
+    const clip = ctx.parent?.data as Clip | undefined;
+    if (!clip) return null;
+    return clip.comments;
+  },
+};
+
 /** Reads `x-orbit-token` and stamps `ctx.state.caller` for the pipeline. */
 function authPlugin(): OrbitPlugin {
   return {
@@ -387,7 +582,16 @@ function authPlugin(): OrbitPlugin {
 }
 
 const orbit = createOrbit({
-  adapters: [chatAdapter, userAdapter, postAdapter, authorAdapter, imageAdapter],
+  adapters: [
+    chatAdapter,
+    userAdapter,
+    postAdapter,
+    authorAdapter,
+    imageAdapter,
+    clipsAdapter,
+    creatorAdapter,
+    commentsAdapter,
+  ],
   plugins: [createCachePlugin(), authPlugin()],
 });
 
@@ -488,6 +692,7 @@ const rootValue = {
 };
 
 const wsServer = new WebSocketServer({ noServer: true });
+// biome-ignore lint/correctness/useHookAtTopLevel: graphql-ws's `useServer` is not a React hook.
 useServer(
   {
     schema,
@@ -526,6 +731,31 @@ const CONTENT_TYPES: Record<string, string> = {
   '.ico': 'image/x-icon',
   '.json': 'application/json; charset=utf-8',
 };
+
+/**
+ * Bundle a React demo (`.jsx`) on the fly: esbuild resolves the workspace
+ * packages from the root node_modules and inlines react + @orbit/react.
+ * `@orbit/core` is aliased to its browser barrel — the same redirect the
+ * import maps use — so the Node-only realtime transport never ships to the
+ * browser. Returns the ESM text (with an inline sourcemap).
+ */
+async function bundleJsx(filePath: string): Promise<string> {
+  const result = await build({
+    entryPoints: [filePath],
+    bundle: true,
+    format: 'esm',
+    jsx: 'automatic',
+    platform: 'browser',
+    target: ['es2020'],
+    sourcemap: 'inline',
+    write: false,
+    logLevel: 'silent',
+    alias: {
+      '@orbit/core': resolve(ROOT_DIR, 'packages/core/dist/browser.js'),
+    },
+  });
+  return result.outputFiles?.[0]?.text ?? '';
+}
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
@@ -665,7 +895,8 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    // Static demos.
+    // Static demos. React demos (`.jsx`) are bundled on the fly with esbuild
+    // so the showcase needs no build step — `npm run web` is enough.
     if (req.method === 'GET') {
       let requested = url.pathname === '/' ? '/index.html' : url.pathname;
       if (requested.endsWith('/')) requested += 'index.html';
@@ -673,6 +904,20 @@ const server = createServer(async (req, res) => {
       if (!filePath.startsWith(WEB_DIR) || !existsSync(filePath)) {
         res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
         res.end('404 — not found. Is this the web demos server? (npm run web)');
+        return;
+      }
+      const isJsx = extname(filePath).toLowerCase() === '.jsx';
+      if (isJsx) {
+        let output: string;
+        try {
+          output = await bundleJsx(filePath);
+        } catch (bundleError) {
+          res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' });
+          res.end(`500 — esbuild failed: ${(bundleError as Error).message}`);
+          return;
+        }
+        res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8' });
+        res.end(output);
         return;
       }
       const data = await readFile(filePath);

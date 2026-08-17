@@ -1,0 +1,120 @@
+.demo-head-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 4px 0 12px;
+  flex-wrap: wrap;
+}
+
+.live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--dim, #9a9a9a);
+  font-variant-numeric: tabular-nums;
+}
+
+.live .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #555;
+}
+
+.live .dot.on {
+  background: var(--accent, #10a37f);
+  box-shadow: 0 0 6px var(--accent, #10a37f);
+}
+
+.composer label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.composer input {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border, #2a2a2a);
+  background: #101010;
+  color: var(--text, #ececec);
+  font: inherit;
+}
+
+.composer input:focus {
+  outline: none;
+  border-color: var(--accent, #10a37f);
+}
+
+.feed {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.feed > .ghost {
+  align-self: flex-start;
+}
+
+.clip {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 12px;
+  background: #121212;
+}
+
+.clip-emoji {
+  font-size: 28px;
+}
+
+.clip-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.clip-caption {
+  font-weight: 600;
+}
+
+.clip-meta {
+  font-size: 12px;
+  color: var(--dim, #9a9a9a);
+  margin-top: 2px;
+}
+
+.like {
+  border: 1px solid var(--border, #2a2a2a);
+  background: transparent;
+  color: var(--text, #ececec);
+  border-radius: 999px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  transition: transform 0.06s ease;
+}
+
+.like:hover {
+  border-color: var(--accent, #10a37f);
+}
+
+.like.liked {
+  border-color: var(--accent, #10a37f);
+  color: var(--accent, #10a37f);
+}
+
+.like:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.toast-error {
+  margin-top: 8px;
+  color: var(--danger, #f15d6c);
+  font-size: 12px;
+}

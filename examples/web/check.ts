@@ -20,6 +20,8 @@ const pages = [
   '/03-mini-post/',
   '/04-mini-auth/',
   '/05-orbit-vs-graphql/',
+  '/06-tiktok-feed/',
+  '/07-react/',
 ];
 
 const vendorFiles = [
@@ -54,6 +56,19 @@ for (const file of vendorFiles) {
   check(`vendor ${file}`, res.status === 200 && body.trim().length > 0, String(res.status));
 }
 
+// The React demo is bundled on the fly: the .jsx must serve as JavaScript.
+const bundle = await get('/07-react/app.jsx');
+const bundleBody = await bundle.text();
+// esbuild inlines @orbit/react — the bundled symbols prove it resolved.
+check(
+  'react demo bundle (.jsx served as JS)',
+  bundle.status === 200 &&
+    bundleBody.includes('createRoot') &&
+    bundleBody.includes('useOrbitQuery') &&
+    bundleBody.includes('OrbitDevtools'),
+  String(bundle.status),
+);
+
 // Import-map wiring: the served HTML must map @orbit/client to /vendor.
 const chatHtml = await (await get('/chat-realtime/')).text();
 check(
@@ -65,6 +80,19 @@ check(
 const client = createClient({ baseUrl: `${BASE}/orbit` });
 const { data } = await client.query('chat { id, author, text, ts }');
 check('client.query over HTTP', Array.isArray(data), JSON.stringify(data).slice(0, 60));
+
+// The TikTok feed: the relational graph resolves in one round-trip.
+const feed = await client.query(
+  'clips { id, caption, likes, creator { name, handle }, comments { id, author } }',
+);
+const firstClip = (Array.isArray(feed.data) ? feed.data : [])[0] as
+  | { creator?: { name?: string }; comments?: unknown[] }
+  | undefined;
+check(
+  'clips relational feed (creator + comments in one round-trip)',
+  firstClip?.creator?.name !== undefined && Array.isArray(firstClip.comments),
+  JSON.stringify(feed.data).slice(0, 80),
+);
 
 // Realtime: subscribe, then mutate through the socket and receive the event.
 // The mutation only fires after the server acked the subscription — an emit

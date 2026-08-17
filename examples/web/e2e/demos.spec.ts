@@ -18,6 +18,8 @@ const DEMOS: Array<{ path: string; heading: RegExp; allow403?: boolean }> = [
   // those two 403 responses as console errors, which are expected.
   { path: '/04-mini-auth/', heading: /Mini-auth/, allow403: true },
   { path: '/05-orbit-vs-graphql/', heading: /Orbit vs GraphQL/ },
+  { path: '/06-tiktok-feed/', heading: /TikTok/ },
+  { path: '/07-react/', heading: /Orbit × React/ },
 ];
 
 /** Collect browser console/page errors on a page as it loads. */
@@ -85,4 +87,78 @@ test('chat-realtime: the event reaches a second tab live (server broadcast)', as
     await first.close();
     await second.close();
   }
+});
+
+test('tiktok-feed: a like mutates, returns over the WebSocket and re-renders the count', async ({
+  page,
+}) => {
+  await page.goto('/06-tiktok-feed/');
+  await expect(page.locator('h1')).toHaveText(/TikTok/);
+  await expect(page.locator('.clip').first()).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('#conn-pill')).toHaveClass(/live/, { timeout: 15_000 });
+
+  const like = page.locator('.clip .like').first();
+  await expect(like).toBeVisible();
+  const before = Number((await like.textContent())?.match(/\d+/)?.[0]);
+  await like.click();
+
+  // The mutation is broadcast as a WS event; the card re-renders from it.
+  await expect(like).toHaveText(new RegExp(`[♥♡] ${before + 1}`), { timeout: 10_000 });
+});
+
+test('tiktok-feed: a like in one tab updates the same card in another tab live', async ({
+  browser,
+}) => {
+  const first = await browser.newContext();
+  const second = await browser.newContext();
+  const pageA = await first.newPage();
+  const pageB = await second.newPage();
+  try {
+    await pageA.goto('/06-tiktok-feed/');
+    await pageB.goto('/06-tiktok-feed/');
+    await expect(pageA.locator('.clip').first()).toBeVisible({ timeout: 10_000 });
+    await expect(pageB.locator('.clip').first()).toBeVisible({ timeout: 10_000 });
+    await expect(pageA.locator('#conn-pill')).toHaveClass(/live/, { timeout: 15_000 });
+    await expect(pageB.locator('#conn-pill')).toHaveClass(/live/, { timeout: 15_000 });
+
+    const likeB = pageB.locator('.clip .like').first();
+    const before = Number((await likeB.textContent())?.match(/\d+/)?.[0]);
+
+    await pageA.locator('.clip .like').first().click();
+
+    // The same event lands in the OTHER tab — one server, live fan-out.
+    await expect(likeB).toHaveText(new RegExp(`[♥♡] ${before + 1}`), { timeout: 10_000 });
+  } finally {
+    await first.close();
+    await second.close();
+  }
+});
+
+test('react: the feed renders, a like round-trips over the WebSocket and the devtools opens', async ({
+  page,
+}) => {
+  await page.goto('/07-react/');
+  await expect(page.locator('h1')).toHaveText(/Orbit × React/);
+
+  // The React tree mounted: feed cards + the live subscription badge.
+  const feed = page.locator('[data-testid="react-feed"]');
+  await expect(feed.locator('.clip').first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('[data-testid="live-badge"]')).toContainText('live', {
+    timeout: 15_000,
+  });
+
+  // A like goes through useOrbitMutation; the WS event re-renders the card.
+  const like = feed.locator('.clip .like').first();
+  const before = Number((await like.textContent())?.match(/\d+/)?.[0]);
+  await like.click();
+  await expect(like).toHaveText(new RegExp(`♥ ${before + 1}`), { timeout: 10_000 });
+
+  // The cross-platform devtools: open the panel and see the cached query.
+  await page.locator('[data-testid="orbit-devtools-toggle"]').click();
+  const panel = page.locator('[data-testid="orbit-devtools-panel"]');
+  await expect(panel).toBeVisible({ timeout: 5_000 });
+  await expect(panel).toContainText('Orbit devtools');
+  await expect(panel).toContainText(/clips \{/);
+  // Both subscriptions share the clips query — the devtools dedupes by key.
+  await expect(panel).toContainText(/Subscriptions \(1\)/);
 });

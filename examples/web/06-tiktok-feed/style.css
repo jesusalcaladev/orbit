@@ -1,0 +1,201 @@
+/* 06 · TikTok-style feed — vertical clip cards */
+
+.feed {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.empty-posts {
+  text-align: center;
+  color: var(--text-faint);
+  font-size: 13.5px;
+  padding: 40px 12px;
+}
+
+.clip {
+  display: flex;
+  gap: 14px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px;
+  animation: pop 0.22s ease;
+}
+
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* The "video" — a big emoji tile standing in for media. */
+.tile {
+  flex: 0 0 96px;
+  height: 128px;
+  display: grid;
+  place-items: center;
+  font-size: 44px;
+  border-radius: 12px;
+  background: linear-gradient(180deg, var(--panel-2), var(--bg-soft));
+  border: 1px solid var(--border-soft);
+  user-select: none;
+}
+
+.clip-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.creator {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.avatar {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  font-weight: 800;
+  font-size: 14px;
+  color: #0a0a0a;
+}
+
+.meta .name {
+  font-weight: 700;
+  font-size: 13.5px;
+}
+
+.meta .handle {
+  font: 500 11.5px var(--mono);
+  color: var(--text-dim);
+}
+
+.meta .when {
+  font: 500 11px var(--mono);
+  color: var(--text-faint);
+  margin-top: 1px;
+}
+
+.caption {
+  font-size: 14.5px;
+  line-height: 1.45;
+  margin: 0 0 10px;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.like,
+.cmts {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: 600 12.5px system-ui, sans-serif;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 5px 12px;
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease,
+    transform 0.1s ease;
+}
+
+.like:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+  transform: translateY(-1px);
+}
+
+.like:active {
+  transform: translateY(0) scale(0.96);
+}
+
+.like.liked {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
+.cmts:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.comments {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border-soft);
+}
+
+.comment {
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.comment-who {
+  font-weight: 700;
+  margin-right: 6px;
+  color: var(--text-dim);
+}
+
+.comment-text {
+  color: var(--text);
+}
+
+/* stats */
+
+#cache.warm {
+  color: var(--accent);
+}
+
+#conn-pill.pill {
+  font: 600 11px var(--mono);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 10px;
+}
+
+#conn-pill.pill.live {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+#conn-pill.pill.warn {
+  color: var(--text-dim);
+}
+
+#conn-pill.pill.err {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+}
+
+/* composer */
+
+.composer select {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 15px;
+}
