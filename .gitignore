@@ -8,3 +8,4 @@ examples/web/uploads/
 
 *.tsbuildinfo
 test-results/
+.freebuff/
