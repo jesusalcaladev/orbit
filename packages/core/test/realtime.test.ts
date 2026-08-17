@@ -295,6 +295,28 @@ describe('RealtimeServer (websocket)', () => {
     ws.close();
   });
 
+  it('releases a subscription whose socket closed mid-subscribe (race)', async () => {
+    const world = await start({ retentionMs: 100 });
+    const first = await connect();
+    // Close IMMEDIATELY after sending subscribe — the socket is gone before
+    // the server finishes the async subscription gate. The subscription must
+    // still be tracked (detach + retention) so the adapter hook is released
+    // instead of leaking attached forever.
+    first.ws.send(JSON.stringify({ subscribe: 'post { id }', id: 'sub-1' }));
+    first.ws.close();
+    await waitFor(() => realtime.sessionCount === 0, 'session closed');
+    await waitFor(
+      () => world.counters.unsubscribeCount === world.counters.subscribeCount,
+      'adapter hook released after retention',
+    );
+
+    // A fresh connection can take the id again — no 'already exists'.
+    const second = await connect();
+    second.ws.send(JSON.stringify({ subscribe: 'post { id }', id: 'sub-1' }));
+    await waitFor(() => second.messages.some((m) => m.ack === 'sub-1'), 'ack on resubscribe');
+    second.ws.close();
+  });
+
   it('reconnects and resumes events missed while offline (retention)', async () => {
     const { create } = await start({ retentionMs: 5000 });
     const first = await connect();

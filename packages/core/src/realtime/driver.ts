@@ -156,12 +156,23 @@ export function createSessionDriver(
         }
         const onEvent = (seq: number, event: SubscriptionEvent) =>
           send({ id: clientId, seq, event });
-        // Subscription gates run the query pipeline with the session ctx:
-        // auth plugins that deny a query throw here, rejecting the
-        // subscription (e.g. ORBIT_PERMISSION_DENIED) before any adapter
-        // hook is registered (spec §10).
-        await hub.authorizedSubscribe(message.subscribe, clientId, onEvent, hooks.ctx ?? {});
+        // Track the subscription BEFORE the async gate: a socket that closes
+        // while `authorizedSubscribe` is still running must still have its
+        // subscription released (detach + retention). Registered after the
+        // await, a racing `dispose` sees an empty session and the adapter
+        // hook leaks attached forever (reproduced: subscribe + immediate
+        // close). Failure paths remove the entry and rethrow.
         clientSubs.set(clientId, { onEvent });
+        try {
+          // Subscription gates run the query pipeline with the session ctx:
+          // auth plugins that deny a query throw here, rejecting the
+          // subscription (e.g. ORBIT_PERMISSION_DENIED) before any adapter
+          // hook is registered (spec §10).
+          await hub.authorizedSubscribe(message.subscribe, clientId, onEvent, hooks.ctx ?? {});
+        } catch (error) {
+          clientSubs.delete(clientId);
+          throw error;
+        }
         hooks.onAttach?.(clientId);
         send({ ack: clientId });
         return;

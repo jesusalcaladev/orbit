@@ -310,7 +310,14 @@ class Session {
     // session can cancel it).
     this.#driver = createSessionDriver(orbit, hub, (message) => this.#send(this.#encode(message)), {
       ctx: this.#authCtx,
-      onAttach: (clientId) => this.#cancelRelease(clientId),
+      onAttach: (clientId) => {
+        // A subscription that finished attaching AFTER its socket was disposed
+        // must not cancel the retention release that dispose armed — the
+        // socket is dead, so the release has to fire (otherwise the adapter
+        // hook leaks attached forever).
+        if (this.#closing) return;
+        this.#cancelRelease(clientId);
+      },
     });
     this.#heartbeat = setInterval(() => this.#tickHeartbeat(), options.heartbeatMs);
     this.#heartbeat.unref();
