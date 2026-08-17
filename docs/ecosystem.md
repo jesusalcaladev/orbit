@@ -40,8 +40,12 @@ packages/
   servers/   @orbit/hono            ✅ shipped — thin handler wrapper for Hono
              @orbit/express         ✅ shipped — thin handler wrapper for Express
              @orbit/cloudflare-workers ✅ shipped — fetch handler + Workers-native realtime
-  clients/   @orbit/client          ⬜ core frontend client (deferred)
-             @orbit/client-react    ⬜ cache-aware React bindings (deferred)
+  clients/   @orbit/client          ✅ shipped — vanilla frontend client: envelope requests
+                                    in JSON/MessagePack, SSE streaming, multipart uploads,
+                                    WebSocket realtime with reconnect + resume, abort/timeout
+             @orbit/react           ✅ shipped — cache-aware React/RN bindings over
+                                    @orbit/client (hooks, TTL + SWR cache, protocol-driven
+                                    invalidation, dehydrate/hydrate, persistence, devtools)
 ```
 
 ## Package lifecycle

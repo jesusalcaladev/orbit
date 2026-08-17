@@ -1,0 +1,71 @@
+{
+  "name": "@orbit/react",
+  "version": "0.0.1",
+  "description": "Hooks & cache for React and React Native over @orbit/client — query/mutation/subscription/stream hooks, TTL + stale-while-revalidate cache, protocol-driven invalidation, dehydrate/hydrate, optional persistence and a cross-platform devtools panel. Zero transport: every byte rides the vanilla client.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./devtools": {
+      "types": "./dist/devtools/index.d.ts",
+      "import": "./dist/devtools/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "keywords": [
+    "orbit",
+    "react",
+    "react-native",
+    "hooks",
+    "cache",
+    "data-layer",
+    "query",
+    "devtools"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@orbit/client": "workspace:*"
+  },
+  "peerDependencies": {
+    "@orbit/core": "0.x",
+    "react": "^18.0.0 || ^19.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react-dom": {
+      "optional": true
+    },
+    "@react-native-async-storage/async-storage": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@orbit/core": "workspace:*",
+    "@testing-library/react": "^16.3.2",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitest/coverage-v8": "^4.1.10",
+    "jsdom": "^30.0.1",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}

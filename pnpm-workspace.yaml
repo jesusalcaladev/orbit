@@ -1,4 +1,8 @@
 packages:
   - packages/*
-# No allowBuilds entries: the toolchain (vite 8/rolldown, vitest 4) installs
-# platform binaries via optional dependencies and needs no build scripts.
+allowBuilds:
+  # esbuild powers the on-the-fly bundling of the React web demo (server.ts).
+  esbuild: true
+
+# No other allowBuilds entries: the toolchain (vite 8/rolldown, vitest 4)
+# installs platform binaries via optional dependencies and needs no build scripts.

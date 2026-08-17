@@ -47,6 +47,7 @@
     "@orbit/mongo": "workspace:*",
     "@orbit/rate-limit": "workspace:*",
     "@orbit/redis": "workspace:*",
+    "@orbit/react": "workspace:*",
     "@playwright/test": "^1.62.1",
     "@types/express": "^4.17.21",
     "@types/node": "^24.0.0",
@@ -58,7 +59,10 @@
     "hono": "^4.2.0",
     "husky": "^9.1.7",
     "lint-staged": "^17.3.0",
+    "esbuild": "^0.25.0",
     "mongodb": "^6.21.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
     "typescript": "^7.0.2",
     "ws": "^8.21.3"
   }
