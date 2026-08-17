@@ -38,7 +38,12 @@ export async function sendRequest(deps: HttpDeps, request: WireRequest): Promise
     ...request.headers,
   };
   try {
-    return await deps.fetchImpl(deps.baseUrl, {
+    // Call detached — never as a method on `deps`. In browsers `fetch` is a
+    // WebIDL method on Window that rejects any other `this` with "Illegal
+    // invocation" (Node's undici fetch ignores `this`, so this only breaks
+    // in the browser). Extracting the reference first makes `this` undefined.
+    const fetchImpl = deps.fetchImpl;
+    return await fetchImpl(deps.baseUrl, {
       method: 'POST',
       headers,
       body: request.body,

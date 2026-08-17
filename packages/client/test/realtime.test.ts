@@ -367,6 +367,19 @@ describe('realtime — unit (fake socket frames)', () => {
     }
   });
 
+  it('defaults to ids unique per client instance (two tabs do not collide)', () => {
+    const clientA = unitClient();
+    const clientB = unitClient();
+    const subA = clientA.subscribe('chat { id }', () => {});
+    const subB = clientB.subscribe('chat { id }', () => {});
+    // The server's hub namespace spans all connections — two clients must
+    // never both default to `sub-1` or the second subscribe is rejected.
+    expect(subA.id).not.toBe(subB.id);
+    expect(subA.id).toMatch(/^sub-[a-z0-9]+-1$/);
+    clientA.close();
+    clientB.close();
+  });
+
   it('exposes RealtimeClient.status for direct use', () => {
     const realtime = new RealtimeClient(
       'ws://orbit.invalid/realtime',
@@ -374,7 +387,7 @@ describe('realtime — unit (fake socket frames)', () => {
     );
     expect(realtime.status).toBe('closed');
     const sub = realtime.subscribe('chat { id }', () => {});
-    expect(sub.id).toBe('sub-1');
+    expect(sub.id).toMatch(/^sub-[a-z0-9]+-1$/); // per-instance unique default
     realtime.close();
     expect(realtime.status).toBe('closed');
   });
@@ -382,13 +395,13 @@ describe('realtime — unit (fake socket frames)', () => {
   it('supports onAck as a subscribe option and sends immediately on an open socket', () => {
     const client = unitClient();
     const acks: Array<{ id: string; kind: string }> = [];
-    const _first = client.subscribe('chat { id }', () => {}, {
+    const first = client.subscribe('chat { id }', () => {}, {
       onAck: (id, kind) => acks.push({ id, kind }),
     });
     const ws = FakeWebSocket.instances[0]!;
     ws.open();
-    ws.receive({ ack: 'sub-1' });
-    expect(acks).toEqual([{ id: 'sub-1', kind: 'subscribe' }]);
+    ws.receive({ ack: first.id });
+    expect(acks).toEqual([{ id: first.id, kind: 'subscribe' }]);
 
     // A subscription added while the socket is already open is sent at once.
     const _second = client.subscribe('chat { id }', () => {}, { id: 'feed-2' });
@@ -491,11 +504,11 @@ describe('realtime — unit (fake socket frames)', () => {
     const ws = FakeWebSocket.instances[0]!;
     ws.open();
     // No seq field → the entry's current seq (0) is used.
-    ws.receive({ id: 'sub-1', event: { type: 'created', id: '1', data: null } });
+    ws.receive({ id: sub.id, event: { type: 'created', id: '1', data: null } });
     expect(seen).toEqual([{ event: { type: 'created', id: '1', data: null }, seq: 0 }]);
     // A stale (lower) seq does not roll the cursor back.
-    ws.receive({ id: 'sub-1', seq: 5, event: { type: 'created', id: '2', data: null } });
-    ws.receive({ id: 'sub-1', seq: 3, event: { type: 'created', id: '3', data: null } });
+    ws.receive({ id: sub.id, seq: 5, event: { type: 'created', id: '2', data: null } });
+    ws.receive({ id: sub.id, seq: 3, event: { type: 'created', id: '3', data: null } });
     expect(sub.seq).toBe(5); // the cursor ignores the stale 3
     expect(seen[2]!.seq).toBe(3); // meta.seq is the frame's value
   });
@@ -647,7 +660,7 @@ describe('@orbit/client — realtime (real WebSocket server)', () => {
     // Emit only after the server confirmed the subscription (the adapter hook
     // is registered by the time the ack lands).
     await waitFor(() => acks.length === 1);
-    expect(acks[0]).toEqual({ id: 'sub-1', kind: 'subscribe', seq: 0 });
+    expect(acks[0]).toEqual({ id: sub.id, kind: 'subscribe', seq: 0 });
 
     world.emit({ type: 'created', id: '1', data: { id: '1', text: 'hola' } });
     await waitFor(() => seen.length === 1);
@@ -668,7 +681,7 @@ describe('@orbit/client — realtime (real WebSocket server)', () => {
     await waitForStatus(first, 'live');
 
     expect(TestWebSocket.instances).toHaveLength(1);
-    expect(allFrames()).toContainEqual({ subscribe: 'chat { id }', id: 'sub-1' });
+    expect(allFrames()).toContainEqual({ subscribe: 'chat { id }', id: first.id });
     expect(allFrames()).toContainEqual({ subscribe: 'chat { id }', id: 'feed-2' });
 
     // Closing one subscription keeps the socket open…
@@ -720,7 +733,7 @@ describe('@orbit/client — realtime (real WebSocket server)', () => {
     expect(seen[1]!.event).toMatchObject({ id: '2', data: { id: '2', text: 'two' } });
     // The client resumed from the last applied seq.
     const resume = allFrames().find((frame) => frame.resume !== undefined);
-    expect(resume).toMatchObject({ resume: 'sub-1', after: 1 });
+    expect(resume).toMatchObject({ resume: sub.id, after: 1 });
   });
 
   it('falls back to a fresh subscribe when resume hits an expired retention', async () => {

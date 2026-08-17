@@ -208,6 +208,25 @@ describe('error mapping (spec §6)', () => {
 });
 
 describe('transport failures', () => {
+  it('calls fetch detached so browsers accept the call (Illegal invocation regression)', async () => {
+    // `window.fetch` is a WebIDL method that throws "Illegal invocation" when
+    // invoked with any `this` other than the Window. This guard reproduces
+    // that: it rejects the call if `sendRequest` invokes the impl as a
+    // method on `deps` instead of detached (Node's undici ignores `this`, so
+    // the bug only showed in real browsers).
+    const fetchImpl = function (
+      this: unknown,
+      _url: unknown,
+      _init?: RequestInit,
+    ): Promise<Response> {
+      if (this !== undefined) throw new TypeError('Illegal invocation');
+      return Promise.resolve(jsonRes({ data: { ok: true } }));
+    } as unknown as typeof fetch;
+    const client = new OrbitClient({ baseUrl: '/orbit', fetch: fetchImpl });
+    const res = await client.query('user { id }');
+    expect(res.data).toEqual({ ok: true });
+  });
+
   it('wraps a network rejection in OrbitNetworkError with cause', async () => {
     const boom = new Error('ECONNREFUSED');
     const { fetchImpl } = mockFetch(() => {

@@ -8,7 +8,12 @@ const RETRY_DELAYS = [500, 1200, 2500, 5000];
 const CONNECT_TIMEOUT_MS = 10_000;
 
 export interface SubscribeOptions {
-  /** Names the subscription on the server (echoed in `ack`/events). Defaults to `sub-1`, `sub-2`, … */
+  /**
+   * Names the subscription on the server (echoed in `ack`/events). Defaults
+   * to an id unique to this client instance (`sub-<token>-1`, …) — the
+   * server's hub is shared across connections, so two clients both defaulting
+   * to `sub-1` would collide. Pass an explicit id to control resume ids.
+   */
   id?: string;
   /** Called for subscription-control errors (e.g. a denied subscribe). */
   onError?: (error: OrbitError) => void;
@@ -61,6 +66,7 @@ export class RealtimeClient {
   readonly #WebSocket: typeof WebSocket;
   readonly #subs = new Map<string, SubEntry>();
   readonly #pending = new Map<string, PendingRequest>();
+  readonly #instanceId: string;
   #socket: WebSocket | null = null;
   #connecting = false;
   #closed = false;
@@ -74,6 +80,11 @@ export class RealtimeClient {
   constructor(url: string, WebSocketImpl: typeof WebSocket) {
     this.#url = url;
     this.#WebSocket = WebSocketImpl;
+    // Default subscription ids are shared with the server's hub namespace,
+    // which spans ALL connections (retention + resume re-attach by id from
+    // any session). A per-instance token keeps two tabs/clients from both
+    // defaulting to `sub-1` and colliding server-side.
+    this.#instanceId = Math.random().toString(36).slice(2, 10);
   }
 
   get status(): RealtimeStatus {
@@ -93,7 +104,7 @@ export class RealtimeClient {
     options: SubscribeOptions = {},
   ): SubscriptionHandle {
     if (this.#closed) throw new OrbitNetworkError('Client is closed');
-    const id = options.id ?? `sub-${++this.#subSeq}`;
+    const id = options.id ?? `sub-${this.#instanceId}-${++this.#subSeq}`;
     if (this.#subs.has(id)) {
       throw new OrbitError(ErrorCode.SUBSCRIPTION_FAILED, `A subscription '${id}' already exists`);
     }
