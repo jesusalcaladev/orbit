@@ -1,0 +1,48 @@
+{
+  "name": "@orbit/client",
+  "version": "0.0.1",
+  "description": "Vanilla, framework-agnostic Orbit client — the transport layer: fetch envelope, JSON/MessagePack negotiation, gzip, SSE streaming, WebSocket realtime and multipart uploads. Zero third-party runtime dependencies.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "keywords": [
+    "orbit",
+    "client",
+    "data-layer",
+    "fetch",
+    "websocket",
+    "sse",
+    "msgpack",
+    "zero-dependency"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@orbit/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@vitest/coverage-v8": "^4.1.10",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}

@@ -23,6 +23,9 @@ importers:
       '@orbit/auth':
         specifier: workspace:*
         version: link:packages/auth
+      '@orbit/client':
+        specifier: workspace:*
+        version: link:packages/client
       '@orbit/cloudflare-workers':
         specifier: workspace:*
         version: link:packages/cloudflare-workers
@@ -112,6 +115,25 @@ importers:
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.3
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: ^4.1.10
+        version: 4.1.10(@types/node@24.13.3)(@vitest/coverage-v8@4.1.10)(vite@8.2.1(@types/node@24.13.3)(jiti@2.6.1)(yaml@2.9.0))
+
+  packages/client:
+    dependencies:
+      '@orbit/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.3
+      '@vitest/coverage-v8':
+        specifier: ^4.1.10
+        version: 4.1.10(vitest@4.1.10)
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
