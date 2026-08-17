@@ -1,5 +1,5 @@
 /**
- * Orbit benchmark suite — scenarios B1–B9 from the protocol spec.
+ * Orbit benchmark suite — scenarios B1–B10 from the protocol spec.
  *
  * Every measurement runs against the real `@orbit/core` engine (dist build)
  * on this machine. The competition is now MEASURED, not assumed: the
@@ -28,6 +28,7 @@ import type { DataAdapter, SubscriptionEvent } from '@orbit/core';
 import { buildDeepNest, buildFeed, users } from './fixtures.ts';
 import { graphqlB1, graphqlB2, graphqlB3, graphqlB4, graphqlB9 } from './graphql.ts';
 import { httpB8 } from './http-bench.ts';
+import { createClient } from '@orbit/client';
 import { gzip, measure, measureThroughput, now, pct } from './measure.ts';
 import { renderChart } from './svg.ts';
 import type { ChartRow } from './svg.ts';
@@ -628,6 +629,83 @@ async function benchB7(): Promise<{
 }
 
 // ---------------------------------------------------------------------------
+// B10 — @orbit/client overhead vs a hand-rolled fetch (real HTTP round-trip)
+//
+// Both paths hit the EXACT same node:http server + orbit.handler: a raw
+// fetch that POSTs a JSON envelope and parses the reply (what a hand-written
+// client does) vs `createClient(...).query()` — validation + envelope + HTTP
+// + response mapping. The engine work is identical; this measures how much
+// the client ADDS on top of a bare round-trip.
+// ---------------------------------------------------------------------------
+
+async function benchB10(): Promise<{
+  rawMs: number;
+  clientMs: number;
+  competitionMs: number;
+}> {
+  const orbit = createOrbit({
+    adapters: memoryAdapter([
+      { entity: 'user', resolve: ({ id }) => users.find((u) => u.id === id) },
+    ]),
+  });
+  const server = createServer(async (req, res) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(chunk as Buffer);
+    const request = new Request('http://localhost/orbit', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: Buffer.concat(chunks),
+    });
+    const response = await orbit.handler(request);
+    res.writeHead(response.status, {
+      'content-type': response.headers.get('content-type') ?? 'application/json',
+    });
+    res.end(await response.text());
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = (server.address() as { port: number }).port;
+  const baseUrl = `http://127.0.0.1:${port}/orbit`;
+  const client = createClient({ baseUrl });
+
+  const query = 'user(id="1") { name, email }';
+  const rawFetch = async () => {
+    const res = await fetch(baseUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({ query }),
+    });
+    await res.json();
+  };
+  const clientQuery = async () => {
+    await client.query(query);
+  };
+
+  // Warm both paths (connection pool + JIT), then measure in alternating
+  // order so neither side benefits from being second.
+  for (let i = 0; i < scale(300, 100); i += 1) {
+    await rawFetch();
+    await clientQuery();
+  }
+  const samples = scale(2000, 400);
+  const raw = await measure(rawFetch, samples);
+  const clientRun = await measure(clientQuery, samples);
+  const clientRun2 = await measure(clientQuery, samples);
+  const raw2 = await measure(rawFetch, samples);
+  const rawMs = (pct(raw, 99) + pct(raw2, 99)) / 2;
+  const clientMs = (pct(clientRun, 99) + pct(clientRun2, 99)) / 2;
+  const overhead = (clientMs / rawMs - 1) * 100;
+
+  console.log(
+    `    raw fetch p99: ${rawMs.toFixed(3)} ms · client.query p99: ${clientMs.toFixed(3)} ms · overhead ${overhead.toFixed(1)}%`,
+  );
+
+  client.close();
+  server.closeAllConnections?.();
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  return { rawMs, clientMs, competitionMs: rawMs };
+}
+
+// ---------------------------------------------------------------------------
 // Orchestration
 // ---------------------------------------------------------------------------
 
@@ -648,7 +726,7 @@ interface Result {
 const ok = (met: boolean): string => (met ? '✅' : '⚠️ ');
 
 async function main(): Promise<void> {
-  console.log('Orbit benchmark suite (B1–B9)\n');
+  console.log('Orbit benchmark suite (B1–B10)\n');
 
   const results: Result[] = [];
 
@@ -858,6 +936,29 @@ async function main(): Promise<void> {
     );
   }
 
+  // B10
+  {
+    const r = await benchB10();
+    const overheadPct = (r.clientMs / r.rawMs - 1) * 100;
+    const met = overheadPct < 15;
+    results.push({
+      id: 'B10',
+      label: 'Client overhead · real HTTP round-trip',
+      metric: 'P99 round-trip latency',
+      unit: 'ms',
+      lowerIsBetter: true,
+      orbitValue: r.clientMs,
+      orbitLabel: `${r.clientMs.toFixed(3)} ms`,
+      competitionValue: r.competitionMs,
+      competitionLabel: `${r.competitionMs.toFixed(3)} ms (raw fetch, measured)`,
+      goal: '≤ 15% overhead vs raw fetch',
+      goalMet: met,
+    });
+    console.log(
+      `B10 · Client overhead round-trip     ${ok(met)} orbit ${r.clientMs.toFixed(3)} ms  vs  raw fetch ${r.rawMs.toFixed(3)} ms  (${overheadPct.toFixed(1)}% overhead; goal ≤ 15%)`,
+    );
+  }
+
   // Persist machine-readable results.
   writeFileSync(join(benchDir, 'benchmarks.json'), JSON.stringify(results, null, 2));
 
@@ -873,7 +974,7 @@ async function main(): Promise<void> {
     lowerIsBetter: r.lowerIsBetter,
     goalMet: r.goalMet,
   }));
-  const svg = renderChart('Orbit benchmark suite — B1 to B9', rows);
+  const svg = renderChart('Orbit benchmark suite — B1 to B10', rows);
   writeFileSync(join(benchDir, 'chart.svg'), svg);
 
   console.log('\nBenchmark results written to bench/results/ (benchmarks.json + chart.svg).');
