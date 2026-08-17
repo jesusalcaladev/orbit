@@ -1,15 +1,16 @@
 /**
- * 08 — Realtime: WebSocket subscriptions with reconnect + resume
+ * 08 — Realtime: WebSocket subscriptions with reconnect + resume, via @orbit/client
  *
  * The full realtime story in one file: a node:http server mounts Orbit's
- * WebSocket transport (`createRealtimeServer`), a client subscribes to
+ * WebSocket transport (`createRealtimeServer`), the client subscribes to
  * `post(status="live")`, mutations stream events over the socket, and — the
- * good part — when the client drops, the server RETAINS the subscription for
- * a window and replays the missed patches on `resume`. Zero dependencies:
- * the WebSocket protocol (RFC 6455) is hand-rolled, and the client is Node's
- * built-in `WebSocket`.
+ * good part — when the network drops, the server RETAINS the subscription for
+ * a window and the client RECONNECTS + RESUMES automatically, replaying the
+ * missed patches from its last `seq`. Zero dependencies on the server: the
+ * WebSocket protocol (RFC 6455) is hand-rolled. The client is `@orbit/client`
+ * with an injectable WebSocket so the demo can simulate the drop.
  *
- * Run:  node examples/node/08-realtime.ts   (after `npm run build`)
+ * Run:  node examples/node/streaming/08-realtime.ts   (after `npm run build`)
  */
 import { createServer } from 'node:http';
 import { pathToFileURL } from 'node:url';
@@ -22,6 +23,8 @@ import type {
   OrbitContext,
   SubscriptionEvent,
 } from '@orbit/core';
+import { createClient } from '@orbit/client';
+import type { RealtimeStatus } from '@orbit/client';
 
 interface Post {
   id: string;
@@ -74,12 +77,108 @@ const postAdapter: DataAdapter = {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * A controllable WebSocket: delegates to Node's built-in WebSocket but records
+ * every instance, so the demo can force a network `drop()` mid-session — the
+ * client cannot tell it apart from a real outage, and its reconnect + resume
+ * machinery takes over (the same injection point documented for RN/Workers).
+ */
+class ControllableWebSocket {
+  static instances: ControllableWebSocket[] = [];
+  static readonly OPEN = WebSocket.OPEN;
+  static readonly CONNECTING = WebSocket.CONNECTING;
+  static readonly CLOSING = WebSocket.CLOSING;
+  static readonly CLOSED = WebSocket.CLOSED;
+  readonly #ws: WebSocket;
+  onopen: ((event: Event) => void) | null = null;
+  onmessage: ((event: MessageEvent) => void) | null = null;
+  onclose: ((event: CloseEvent) => void) | null = null;
+  onerror: ((event: Event) => void) | null = null;
+
+  constructor(url: string | URL) {
+    this.#ws = new WebSocket(url);
+    ControllableWebSocket.instances.push(this);
+    this.#ws.onopen = (event) => this.onopen?.(event);
+    this.#ws.onmessage = (event) => this.onmessage?.(event);
+    this.#ws.onclose = (event) => this.onclose?.(event);
+    this.#ws.onerror = (event) => this.onerror?.(event);
+  }
+
+  get readyState(): number {
+    return this.#ws.readyState;
+  }
+
+  send(data: Parameters<WebSocket['send']>[0]): void {
+    this.#ws.send(data);
+  }
+
+  close(code?: number, reason?: string): void {
+    this.#ws.close(code, reason);
+  }
+
+  addEventListener(type: string, listener: EventListenerOrEventListenerObject): void {
+    this.#ws.addEventListener(type, listener);
+  }
+
+  removeEventListener(type: string, listener: EventListenerOrEventListenerObject): void {
+    this.#ws.removeEventListener(type, listener);
+  }
+
+  dispatchEvent(event: Event): boolean {
+    return this.#ws.dispatchEvent(event);
+  }
+
+  /** Simulate a network drop — the client must NOT know it was intentional. */
+  drop(): void {
+    this.#ws.close();
+  }
+}
+
+async function waitFor(cond: () => boolean, label: string, timeoutMs = 5000): Promise<void> {
+  const start = Date.now();
+  while (!cond()) {
+    if (Date.now() - start > timeoutMs) throw new Error(`timed out waiting for ${label}`);
+    await sleep(10);
+  }
+}
+
 /** True when this module is the process entry point (not imported by run-all). */
 const isEntry = import.meta.url === pathToFileURL(process.argv[1] ?? '').href;
 
 export async function main(): Promise<void> {
   const orbit = createOrbit({ adapters: [postAdapter] });
-  const server = createServer();
+
+  // One http server hosts BOTH the Orbit handler (for client.mutate) and the
+  // realtime transport (the client derives ws://…/realtime from its baseUrl).
+  const server = createServer(async (req, res) => {
+    if (req.method === 'POST' && req.url === '/orbit') {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(chunk as Buffer);
+      const response = await orbit.handler(
+        new Request('http://localhost/orbit', {
+          method: 'POST',
+          headers: {
+            'content-type': req.headers['content-type'] ?? 'application/json',
+            accept: req.headers.accept ?? 'application/json',
+            ...(req.headers['accept-encoding']
+              ? { 'accept-encoding': String(req.headers['accept-encoding']) }
+              : {}),
+          },
+          body: Buffer.concat(chunks),
+        }),
+      );
+      res.writeHead(response.status, {
+        'content-type': response.headers.get('content-type') ?? 'application/json',
+        ...(response.headers.get('content-encoding')
+          ? { 'content-encoding': response.headers.get('content-encoding')! }
+          : {}),
+      });
+      res.end(Buffer.from(await response.arrayBuffer()));
+      return;
+    }
+    res.writeHead(404, { 'content-type': 'text/plain' });
+    res.end('POST /orbit (HTTP) or a WebSocket upgrade to /realtime');
+  });
   const realtime = createRealtimeServer(orbit, { path: '/realtime', retentionMs: 10_000 });
   realtime.attach(server);
   await new Promise<void>((resolve) => server.listen(0, resolve));
@@ -87,53 +186,60 @@ export async function main(): Promise<void> {
 
   console.log(`🛰  realtime endpoint  ws://localhost:${port}/realtime`);
 
-  const messages: Array<Record<string, unknown>> = [];
-  const connect = (): Promise<WebSocket> =>
-    new Promise((resolve, reject) => {
-      const ws = new WebSocket(`ws://localhost:${port}/realtime`);
-      ws.onmessage = (event) => {
-        const message = JSON.parse(String(event.data)) as Record<string, unknown>;
-        messages.push(message);
-        if (message.id !== undefined) {
-          console.log(
-            `    event:      ${String(message.seq)} · ${String((message.event as SubscriptionEvent).type)} ${String((message.event as SubscriptionEvent).id)}`,
-          );
-        }
-      };
-      ws.onopen = () => resolve(ws);
-      ws.onerror = () => reject(new Error('websocket failed to open'));
-    });
-
-  // 1. Subscribe and stream live events.
-  const ws1 = await connect();
-  ws1.send(JSON.stringify({ subscribe: 'post(status="live") { id, title }', id: 'feed' }));
-  await sleep(100);
-  await orbit.execute({
-    do: 'post.create',
-    args: { payload: { id: 'p3', title: 'Delta sync', status: 'live' } },
+  const client = createClient({
+    baseUrl: `http://localhost:${port}/orbit`,
+    WebSocket: ControllableWebSocket as unknown as typeof WebSocket,
   });
-  await sleep(100);
+
+  // 1. Subscribe — one shared socket, seq-numbered events.
+  const seen: Array<{ seq: number; event: SubscriptionEvent }> = [];
+  const acks: Array<{ kind: 'subscribe' | 'resume'; seq: number }> = [];
+  const sub = client.subscribe(
+    'post(status="live") { id, title }',
+    (event, meta) => {
+      seen.push({ seq: meta.seq, event });
+      console.log(`    event:      ${meta.seq} · ${event.type} ${event.id}`);
+    },
+    { id: 'feed', onAck: (_id, kind, seq) => acks.push({ kind, seq }) },
+  );
+  sub.onStatus((status: RealtimeStatus) => console.log(`    status:     ${status}`));
+
+  // Fire the mutation only after the server acked the subscription — an emit
+  // before the adapter hook attaches would be lost.
+  await waitFor(() => acks.some((ack) => ack.kind === 'subscribe'), 'subscribe ack');
   console.log('    subscribed: feed (shared adapter hook, seq numbers)');
 
-  // 2. Drop the connection; the server keeps the subscription (retention).
-  ws1.close();
-  await sleep(150);
-  await orbit.execute({
-    do: 'post.create',
-    args: { payload: { id: 'p4', title: 'Missed while offline', status: 'live' } },
+  // 2. A mutation streams over the socket as an event.
+  await client.mutate('post.create', {
+    payload: { id: 'p3', title: 'Delta sync', status: 'live' },
+  });
+  await waitFor(() => seen.some((entry) => entry.event.id === 'p3'), 'p3 event');
+
+  // 3. The network drops: the server detaches (retention window) and the
+  // client schedules a reconnect with backoff — it does not know it was
+  // intentional.
+  ControllableWebSocket.instances.at(-1)!.drop();
+  await waitFor(() => realtime.sessionCount === 0, 'session detached');
+  console.log('    offline:    p3 seen, socket dropped (server retains)');
+
+  // 4. A mutation while nobody is connected — the event is logged, not lost.
+  await client.mutate('post.create', {
+    payload: { id: 'p4', title: 'Missed while offline', status: 'live' },
   });
   console.log('    offline:    p4 created (nobody is connected)');
 
-  // 3. Reconnect and resume — the missed patch replays, not the whole graph.
-  const ws2 = await connect();
-  ws2.send(JSON.stringify({ resume: 'feed', after: 0 }));
-  await sleep(100);
-  const replayed = messages.some(
-    (m) => m.id === 'feed' && (m.event as SubscriptionEvent | undefined)?.id === 'p4',
+  // 5. The client reconnects and resumes from its last seq — p4 replays.
+  // The server sends the replayed events BEFORE the `resumed` ack, so wait
+  // for both before declaring victory.
+  await waitFor(
+    () =>
+      seen.some((entry) => entry.event.id === 'p4') && acks.some((ack) => ack.kind === 'resume'),
+    'p4 replayed via resume',
   );
+  const replayed = seen.find((entry) => entry.event.id === 'p4');
   console.log(`    resumed:    ${replayed ? 'p4 replayed via resume ✅' : 'nothing replayed ❌'}`);
 
-  ws2.close();
+  client.close();
   realtime.close(); // terminates every session: close frame + socket destroy
   server.close();
   server.closeAllConnections(); // backstop for any lingering connection

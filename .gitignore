@@ -7,3 +7,4 @@ examples/web/uploads/
 .DS_Store
 
 *.tsbuildinfo
+test-results/
