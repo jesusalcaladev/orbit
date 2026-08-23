@@ -1,6 +1,6 @@
 {
   "name": "@orbit/react",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Hooks & cache for React and React Native over @orbit/client — query/mutation/subscription/stream hooks, TTL + stale-while-revalidate cache, protocol-driven invalidation, dehydrate/hydrate, optional persistence and a cross-platform devtools panel. Zero transport: every byte rides the vanilla client.",
   "type": "module",
   "main": "./dist/index.js",

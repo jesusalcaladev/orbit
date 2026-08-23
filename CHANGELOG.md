@@ -2,9 +2,21 @@
 
 All notable changes to `@orbit/core` are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.1.0] - 2026-08-23
 
 ### Added
+- **Production metrics (`@orbit/metrics`)** — a dependency-free collector
+  that instruments any Orbit handler: request counts by HTTP status, error
+  counts by standard protocol code (spec §6), cache hits/misses from the §8
+  `x-orbit-cache` header, rate-limited 429s, and latency stats (count, sum,
+  max, exact p50/p99 over a bounded window plus a bucketed histogram for
+  Prometheus-style export). `snapshot()` is plain JSON; `reset()` zeroes it.
+  Ships at **100% coverage** on all four metrics.
+- **Real-Redis integration suite (`@orbit/redis`)** — runs only when
+  `REDIS_URI` is set (skipped locally; the CI workflow now starts a
+  `redis:7` service): proves the Lua token-bucket against a real server —
+  two independent clients sharing one Redis cannot double-spend a token —
+  plus cache round-trips across instances and server-side TTL expiry.
 - **Client-side query cache (`@orbit/client` `QueryCache`)** — the client
   half of spec §8: entries keyed by query string, TTLs from the same spec
   grammar the server speaks (`ttl=300` via the core's `parseCacheSpec`),

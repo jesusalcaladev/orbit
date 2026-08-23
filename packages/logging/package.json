@@ -1,6 +1,6 @@
 {
   "name": "@orbit/logging",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "First-party observability for @orbit/core — a dependency-free request-timing plugin that logs one structured entry per operation (queries and errors).",
   "type": "module",
   "main": "./dist/index.js",

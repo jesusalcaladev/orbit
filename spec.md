@@ -3,7 +3,7 @@
 **Modular Data Layer for the Modern Fullstack**
 
 > **Snapshot status:** this document is the **canonical, frozen contract** of
-> the Orbit protocol. The current implementation is **v0.0.1** (see
+> the Orbit protocol. The current implementation is **v0.1.0** (see
 > `CHANGELOG.md`). Every section carries an explicit status badge — ✅
 > *implemented* or 🔜 *planned*. The 🔮 v2.0 vision is the long-term target;
 > nothing in this spec is lost between versions.

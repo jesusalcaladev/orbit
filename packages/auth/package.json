@@ -1,6 +1,6 @@
 {
   "name": "@orbit/auth",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "First-party authentication & authorization for @orbit/core — a dependency-free plugin that stamps caller identity into queries AND mutations, with read gates and filter scoping.",
   "type": "module",
   "main": "./dist/index.js",

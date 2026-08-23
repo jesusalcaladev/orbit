@@ -1,6 +1,6 @@
 {
   "name": "@orbit/cloudflare-workers",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Cloudflare Workers handler for @orbit/core — run the full Orbit protocol (JSON, MessagePack, SSE streaming, uploads, WebSocket realtime) on the edge.",
   "type": "module",
   "main": "./dist/index.js",

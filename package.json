@@ -1,6 +1,6 @@
 {
   "name": "orbit",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Modular data layer for the modern fullstack — monorepo root. The protocol core lives in packages/core (@orbit/core).",
   "private": true,
   "type": "module",
@@ -44,6 +44,7 @@
     "@orbit/express": "workspace:*",
     "@orbit/hono": "workspace:*",
     "@orbit/logging": "workspace:*",
+    "@orbit/metrics": "workspace:*",
     "@orbit/mongo": "workspace:*",
     "@orbit/rate-limit": "workspace:*",
     "@orbit/redis": "workspace:*",

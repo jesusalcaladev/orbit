@@ -1,6 +1,6 @@
 {
   "name": "@orbit/mongo",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "MongoDB DataAdapter for @orbit/core — verbatim filters→$match, $in batching and create/update/delete mutations over an injected mongodb client.",
   "type": "module",
   "main": "./dist/index.js",

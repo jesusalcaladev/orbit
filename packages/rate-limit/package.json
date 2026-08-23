@@ -1,6 +1,6 @@
 {
   "name": "@orbit/rate-limit",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "First-party rate limiting for @orbit/core — a dependency-free token-bucket plugin that gates queries AND mutations (per IP, per token, or any context key).",
   "type": "module",
   "main": "./dist/index.js",

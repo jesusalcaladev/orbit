@@ -32,6 +32,9 @@ packages/
              @orbit/memcached       ⬜ CacheStore over Memcached (optional)
   plugins/   @orbit/auth            ✅ shipped — authn/authz hooks (authenticate/authorize/scope)
              @orbit/logging         ✅ shipped — request-timing / observability
+             @orbit/metrics         ✅ shipped — production metrics: instruments any handler for
+                                    request counts by status, error codes (spec §6), cache hit/miss
+                                    (§8 header), rate-limit 429s, and latency p50/p99 + histogram
              @orbit/rate-limit      ✅ shipped — token-bucket OrbitPlugin (queries + mutations,
                                     pluggable atomic bucket store: in-memory default, Redis
                                     store shared across instances; limiter exposed on

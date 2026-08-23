@@ -1,6 +1,6 @@
 {
   "name": "@orbit/postgres",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "PostgreSQL DataAdapter for @orbit/core — parameterized filters→WHERE, IN-clause batching and create/update/delete mutations over an injected pg client.",
   "type": "module",
   "main": "./dist/index.js",

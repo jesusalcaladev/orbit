@@ -1,6 +1,6 @@
 {
   "name": "@orbit/rest",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "REST adapter for @orbit/core — serve any REST API behind the Orbit contract. Zero third-party runtime dependencies.",
   "type": "module",
   "main": "./dist/index.js",

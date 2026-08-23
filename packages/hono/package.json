@@ -1,6 +1,6 @@
 {
   "name": "@orbit/hono",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Hono middleware for @orbit/core — mount the full Orbit protocol (JSON, MessagePack, SSE streaming, uploads) on any Hono app.",
   "type": "module",
   "main": "./dist/index.js",

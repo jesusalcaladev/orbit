@@ -1,6 +1,6 @@
 {
   "name": "@orbit/client",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Vanilla, framework-agnostic Orbit client — the transport layer: fetch envelope, JSON/MessagePack negotiation, gzip, SSE streaming, WebSocket realtime and multipart uploads. Zero third-party runtime dependencies.",
   "type": "module",
   "main": "./dist/index.js",

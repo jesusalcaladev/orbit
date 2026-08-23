@@ -1,6 +1,6 @@
 {
   "name": "@orbit/core",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Modular data layer for the modern fullstack. A thin, zero-dependency contract layer that transports intent from client to server.",
   "type": "module",
   "main": "./dist/index.js",

@@ -21,6 +21,15 @@ jobs:
         # Node 18 is intentionally absent: the dev toolchain (Vitest 4) needs
         # ^20 || ^22 || >=24. The core runtime itself targets >= 20.
         node: [20, 22, 24]
+    services:
+      # The real-Redis integration suite (@orbit/redis) skips locally without
+      # REDIS_URI; here the service container makes it actually run.
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+    env:
+      REDIS_URI: redis://localhost:6379
     steps:
       - uses: actions/checkout@v4
 

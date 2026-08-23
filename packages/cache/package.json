@@ -1,6 +1,6 @@
 {
   "name": "@orbit/cache",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Client-defined server-side caching for @orbit/core — the official distribution home of the cache plugin and future CacheStore backends (Redis, KV, Memcached).",
   "type": "module",
   "main": "./dist/index.js",

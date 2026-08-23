@@ -1,6 +1,6 @@
 {
   "name": "@orbit/redis",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Redis-backed CacheStore for @orbit/core — production caching with TTL, SWR and prefix invalidation for multi-instance deploys.",
   "type": "module",
   "main": "./dist/index.js",
@@ -38,6 +38,7 @@
   "devDependencies": {
     "@orbit/rate-limit": "workspace:*",
     "@types/node": "^24.0.0",
+    "redis": "^6.2.1",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"
   }
