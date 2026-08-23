@@ -163,6 +163,7 @@ class Parser {
     const filters: Filters = {};
     const fields: string[] = [];
     const relations: Record<string, QueryNode> = {};
+    const selection = new Set<string>();
 
     this.skipWs();
     if (this.peek() === '(') this.parseArgs(filters);
@@ -175,10 +176,29 @@ class Parser {
         if (this.pos >= this.input.length) {
           this.fail(`Unterminated '{' block for '${entity}'`);
         }
+        const nameStart = this.pos;
         const name = this.readIdent();
         this.skipWs();
 
         const isRelation = this.peek() === '(' || this.peek() === '{';
+        // Duplicate detection (silent-overwrite prevention): the second
+        // occurrence used to silently replace the first subtree via setOwn,
+        // or double-project a field — both hide real client bugs.
+        if (selection.has(name)) {
+          throw new OrbitError(
+            ErrorCode.INVALID_QUERY,
+            `Duplicate ${isRelation ? 'relation' : 'field'} '${name}' in the selection of '${entity}'`,
+            {
+              details: {
+                kind: isRelation ? 'relation' : 'field',
+                name,
+                entity,
+                position: nameStart,
+              },
+            },
+          );
+        }
+        selection.add(name);
         if (isRelation) {
           const childDepth = depth + 1;
           if (childDepth > this.maxDepth) {
@@ -216,8 +236,16 @@ class Parser {
       if (this.pos >= this.input.length) {
         this.fail("Unterminated '(' argument list");
       }
+      const keyStart = this.pos;
       const key = this.readIdent();
       this.skipWs();
+      // Duplicate filter keys silently kept the last value before — an easy
+      // client bug (`user(id="1", id="2")` resolving to id=2). Reject loudly.
+      if (Object.hasOwn(filters, key)) {
+        throw new OrbitError(ErrorCode.INVALID_QUERY, `Duplicate filter key '${key}'`, {
+          details: { key, position: keyStart },
+        });
+      }
       if (this.peek() !== '=') {
         this.fail(`Expected '=' after '${key}'`);
       }

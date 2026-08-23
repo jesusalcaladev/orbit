@@ -1,4 +1,5 @@
 import type { OrbitEnvelope } from '@orbit/core';
+import type { QueryCache } from './cache.js';
 
 /** The wire format the client speaks — request body content-type AND `Accept`. */
 export type ClientFormat = 'json' | 'msgpack';
@@ -70,6 +71,13 @@ export interface OrbitClientOptions {
    * path set to `/realtime`.
    */
   realtimeUrl?: string;
+  /**
+   * A client-side query cache (spec §8). When set, queries carrying a `cache`
+   * spec are served from it while fresh, and every mutation's `invalidates`
+   * echo evicts entity-precisely — the client half of the protocol's caching
+   * story.
+   */
+  cache?: QueryCache;
 }
 
 export interface RequestOptions {

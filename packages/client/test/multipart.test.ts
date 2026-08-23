@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ErrorCode } from '@orbit/core';
 import { OrbitNetworkError, createClient } from '../src/index.js';
 import { buildFormData } from '../src/multipart.js';
-import { jsonRes, mockFetch } from './helpers.js';
+import { hangingFetch, jsonRes, mockFetch } from './helpers.js';
 
 describe('multipart — buildFormData', () => {
   it('puts the JSON envelope in the envelope field and one field per file', () => {
@@ -84,5 +84,45 @@ describe('multipart — client.upload', () => {
     await expect(
       client.upload('user.uploadAvatar', {}, { avatar: new File(['x'], 'me.png') }),
     ).rejects.toBeInstanceOf(OrbitNetworkError);
+  });
+
+  it('releases the timeout resources when the request itself fails', async () => {
+    const { fetchImpl } = mockFetch(hangingFetch);
+    const client = createClient({ baseUrl: '/orbit', fetch: fetchImpl });
+    await expect(
+      client.upload(
+        'user.uploadAvatar',
+        {},
+        { avatar: new File(['x'], 'me.png') },
+        { timeoutMs: 20 },
+      ),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
+  it('aborts after timeoutMs even when the upload BODY stalls', async () => {
+    const stalledFetch: typeof fetch = (_url, init) => {
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"data":'));
+          init?.signal?.addEventListener(
+            'abort',
+            () => controller.error(new DOMException('Aborted', 'AbortError')),
+            { once: true },
+          );
+        },
+      });
+      return Promise.resolve(
+        new Response(stream, { status: 200, headers: { 'content-type': 'application/json' } }),
+      );
+    };
+    const client = createClient({ baseUrl: '/orbit', fetch: stalledFetch });
+    await expect(
+      client.upload(
+        'user.uploadAvatar',
+        {},
+        { avatar: new File(['x'], 'me.png') },
+        { timeoutMs: 50 },
+      ),
+    ).rejects.toMatchObject({ name: 'AbortError' });
   });
 });

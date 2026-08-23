@@ -132,6 +132,11 @@ posts(status="published", limit="10") { title, author { name } }
   length** — capped at **1024 chars** (`maxValueLength`, configurable). The
   whole envelope is size-capped by `maxPayloadBytes`. Malformed syntax or an
   over-long key/value raises `ORBIT_INVALID_QUERY` (400).
+- **Duplicates are rejected, never silently merged**: a repeated filter key
+  (`user(id="1", id="2")`), a repeated leaf field (`user { name, name }`) or
+  a repeated relation (`user { posts { a }, posts { b } }`) raises
+  `ORBIT_INVALID_QUERY` with the offending name in `details` — the previous
+  last-write-wins behavior silently dropped data and hid client bugs.
 
 ---
 

@@ -76,16 +76,24 @@ export async function postEnvelope(deps: HttpDeps, request: PostRequest): Promis
       headers: request.headers,
       signal,
     });
+  } catch (error) {
+    cleanup();
+    throw error;
+  }
+  // The timeout must bound the WHOLE exchange — not just the headers. The
+  // cleanup used to run right after `sendRequest`, so a server that stalled
+  // the body hung past `timeoutMs`. Keep the timer armed until the payload
+  // is fully read and decoded.
+  try {
+    const bytes = await readBodyBytes(res, deps.decompress, signal);
+    const payload = decodeBody(bytes, res.headers, res.status);
+    if (res.ok) {
+      return parseSuccess(res, payload);
+    }
+    throw parseErrorBody(res, payload);
   } finally {
     cleanup();
   }
-
-  const bytes = await readBodyBytes(res, deps.decompress);
-  const payload = decodeBody(bytes, res.headers, res.status);
-  if (res.ok) {
-    return parseSuccess(res, payload);
-  }
-  throw parseErrorBody(res, payload);
 }
 
 export interface PostRequest {
@@ -134,11 +142,19 @@ function parseErrorBody(res: Response, payload: unknown): never {
   });
 }
 
-export async function readBodyBytes(res: Response, decompress: Decompress): Promise<Uint8Array> {
+export async function readBodyBytes(
+  res: Response,
+  decompress: Decompress,
+  signal?: AbortSignal,
+): Promise<Uint8Array> {
   let bytes: Uint8Array<ArrayBuffer>;
   try {
-    bytes = new Uint8Array(await res.arrayBuffer());
+    // Race the body read against the (timeout-combined) abort signal — some
+    // runtimes do not reject a pending `arrayBuffer()` when the fetch signal
+    // fires after the headers arrived.
+    bytes = new Uint8Array(await abortable(res.arrayBuffer(), signal));
   } catch (error) {
+    if (isAbortError(error)) throw error;
     throw new OrbitNetworkError('Failed to read response body', {
       status: res.status,
       cause: error,
@@ -159,13 +175,43 @@ export async function readBodyBytes(res: Response, decompress: Decompress): Prom
     return bytes;
   }
   try {
-    return await decompress(new Blob([bytes]).stream());
+    return await abortable(decompress(new Blob([bytes]).stream()), signal);
   } catch (error) {
+    if (isAbortError(error)) throw error;
     throw new OrbitNetworkError('Failed to decompress response', {
       status: res.status,
       cause: error,
     });
   }
+}
+
+/** Reject with the signal's abort reason (or a standard AbortError). */
+function abortReason(signal: AbortSignal): Error {
+  return signal.reason instanceof Error ? signal.reason : new DOMException('Aborted', 'AbortError');
+}
+
+/**
+ * Race a body promise against an abort signal: when the signal fires first,
+ * reject with the caller's abort reason even if the runtime keeps the
+ * underlying body read pending. Without a signal, the promise passes through.
+ */
+function abortable<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (signal === undefined) return promise;
+  if (signal.aborted) return Promise.reject(abortReason(signal));
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(abortReason(signal));
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(error);
+      },
+    );
+  });
 }
 
 /** Decode a response body by its content-type; an empty body decodes to nothing. */

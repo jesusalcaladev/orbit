@@ -36,18 +36,25 @@ export async function postFormData(deps: HttpDeps, request: UploadRequest): Prom
       headers: request.headers,
       signal,
     });
+  } catch (error) {
+    cleanup();
+    throw error;
+  }
+  // Same as the envelope path: the timeout must bound the body read too —
+  // uploads are the LARGEST payloads, so a stalled body is the likeliest hang.
+  try {
+    const bytes = await readBodyBytes(res, deps.decompress, signal);
+    const payload = decodeBody(bytes, res.headers, res.status);
+    if (res.ok) return parseSuccess(res, payload);
+    // Same wire error contract as any other request (spec §6).
+    const orbitError = orbitErrorFromWire(payload, res.status);
+    if (orbitError) throw orbitError;
+    throw new OrbitNetworkError(`Orbit request failed with HTTP ${res.status}`, {
+      status: res.status,
+    });
   } finally {
     cleanup();
   }
-  const bytes = await readBodyBytes(res, deps.decompress);
-  const payload = decodeBody(bytes, res.headers, res.status);
-  if (res.ok) return parseSuccess(res, payload);
-  // Same wire error contract as any other request (spec §6).
-  const orbitError = orbitErrorFromWire(payload, res.status);
-  if (orbitError) throw orbitError;
-  throw new OrbitNetworkError(`Orbit request failed with HTTP ${res.status}`, {
-    status: res.status,
-  });
 }
 
 /**

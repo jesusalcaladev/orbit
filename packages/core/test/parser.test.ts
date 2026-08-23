@@ -205,6 +205,60 @@ describe('parseOQS — errors', () => {
   });
 });
 
+describe('parseOQS — duplicates (silent-overwrite bug prevention)', () => {
+  it('rejects a duplicated filter key instead of silently keeping the last value', () => {
+    // `user(id="1", id="2")` used to resolve filters to { id: '2' } — a
+    // silent overwrite that hides client bugs. Now it is an explicit 400.
+    expect(() => parseOQS('user(id="1", id="2")')).toThrowError(
+      expect.objectContaining({ code: ErrorCode.INVALID_QUERY }),
+    );
+    try {
+      parseOQS('user(id="1", id="2")');
+      expect.unreachable('should have thrown');
+    } catch (error) {
+      const details = (error as { details: { key: string; position: number } }).details;
+      expect(details).toMatchObject({ key: 'id' });
+    }
+  });
+
+  it('rejects duplicated leaf fields', () => {
+    expect(() => parseOQS('user { name, email, name }')).toThrowError(
+      expect.objectContaining({ code: ErrorCode.INVALID_QUERY }),
+    );
+    try {
+      parseOQS('user { name, name }');
+      expect.unreachable('should have thrown');
+    } catch (error) {
+      const details = (error as { details: { kind: string; name: string } }).details;
+      expect(details).toMatchObject({ kind: 'field', name: 'name' });
+    }
+  });
+
+  it('rejects duplicated relations instead of silently dropping the first subtree', () => {
+    // The second `posts` used to overwrite the first via setOwn — a genuine
+    // silent data-loss bug (one of the two subtrees vanished from the result).
+    expect(() => parseOQS('user { posts { title }, posts { views } }')).toThrowError(
+      expect.objectContaining({ code: ErrorCode.INVALID_QUERY }),
+    );
+    try {
+      parseOQS('user { posts { title }, posts { views } }');
+      expect.unreachable('should have thrown');
+    } catch (error) {
+      const details = (error as { details: { kind: string; name: string } }).details;
+      expect(details).toMatchObject({ kind: 'relation', name: 'posts' });
+    }
+  });
+
+  it('still accepts distinct keys, fields and relations', () => {
+    const node = parseOQS(
+      'user(id="1", status="active") { name, email, posts(status="draft") { title, comments { text } } }',
+    );
+    expect(node.filters).toEqual({ id: '1', status: 'active' });
+    expect(node.fields).toEqual(['name', 'email']);
+    expect(node.relations.posts?.fields).toEqual(['title']);
+  });
+});
+
 describe('parseOQS — length caps (spec §4)', () => {
   it('rejects identifiers longer than the default max key length (128)', () => {
     const key = 'a'.repeat(129);

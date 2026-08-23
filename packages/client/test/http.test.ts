@@ -300,6 +300,69 @@ describe('transport failures', () => {
     ).rejects.toMatchObject({ name: 'AbortError' });
   });
 
+  it('aborts after timeoutMs even when the BODY stalls (headers arrived fine)', async () => {
+    // Regression: the timeout used to be released as soon as the headers
+    // arrived, so a server that trickles/stalls the body hung past timeoutMs.
+    const stalledFetch: typeof fetch = (_url, init) => {
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(textEncoder.encode('{"data":')); // partial body…
+          // …and never closes. Aborting must end the read.
+          init?.signal?.addEventListener(
+            'abort',
+            () => controller.error(new DOMException('Aborted', 'AbortError')),
+            { once: true },
+          );
+        },
+      });
+      return Promise.resolve(
+        new Response(stream, { status: 200, headers: { 'content-type': 'application/json' } }),
+      );
+    };
+    const client = new OrbitClient({ baseUrl: '/orbit', fetch: stalledFetch });
+    const started = Date.now();
+    await expect(client.query('user { id }', { timeoutMs: 50 })).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+    expect(Date.now() - started).toBeLessThan(2000); // bounded, not hung
+  });
+
+  it('completes normally when a generous timeoutMs is set and the body arrives', async () => {
+    const { fetchImpl } = mockFetch(() => jsonRes({ data: { ok: true } }));
+    const client = new OrbitClient({ baseUrl: '/orbit', fetch: fetchImpl });
+    const res = await client.query('user { id }', { timeoutMs: 5000 });
+    expect(res.data).toEqual({ ok: true });
+  });
+
+  it('propagates an abort raised during decompression', async () => {
+    const gzipped = await gzipBytes(textEncoder.encode('{"data":{}}'));
+    const slowDecompress = async () => {
+      await new Promise((r) => setTimeout(r, 200));
+      throw new DOMException('Aborted', 'AbortError');
+    };
+    const { fetchImpl } = mockFetch(
+      () => new Response(gzipped, { status: 200, headers: { 'content-encoding': 'gzip' } }),
+    );
+    const client = new OrbitClient({
+      baseUrl: '/orbit',
+      fetch: fetchImpl,
+      decompress: slowDecompress,
+    });
+    await expect(client.query('user { id }', { timeoutMs: 30 })).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+  });
+
+  it('rejects immediately when the signal fires before the body is read', async () => {
+    const { fetchImpl } = mockFetch(() => jsonRes({ data: { ok: true } }));
+    const client = new OrbitClient({ baseUrl: '/orbit', fetch: fetchImpl });
+    const controller = new AbortController();
+    controller.abort('too late'); // non-Error reason → standard AbortError shape
+    await expect(client.query('user { id }', { signal: controller.signal })).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+  });
+
   it('throws OrbitNetworkError when decompression fails', async () => {
     const gzipped = await gzipBytes(textEncoder.encode('{"data":{}}'));
     const { fetchImpl } = mockFetch(

@@ -5,6 +5,24 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
 ## [Unreleased]
 
 ### Added
+- **Client-side query cache (`@orbit/client` `QueryCache`)** — the client
+  half of spec §8: entries keyed by query string, TTLs from the same spec
+  grammar the server speaks (`ttl=300` via the core's `parseCacheSpec`),
+  entity-precise indexing of every entity in the query tree (root AND
+  relations), and eviction from the mutation's `invalidates` echo — entity
+  names or exact keys. `OrbitClient` accepts a `cache:` option; queries with
+  a cache spec are served fresh from it without a network round-trip and
+  marked `fromCache`, mutations always hit the network and evict through
+  their echo. Client coverage stays at **100%** on all four metrics.
+- **Duplicate rejection in OQS (spec §4)** — a repeated filter key
+  (`user(id="1", id="2")`), repeated field (`user { name, name }`) or
+  repeated relation (`user { posts { a }, posts { b } }`) now raises
+  `ORBIT_INVALID_QUERY` naming the offender; previously duplicates silently
+  kept the last value or dropped the first subtree.
+- **Timeout bounds the whole exchange in `@orbit/client`** — `timeoutMs`
+  used to be released as soon as the response HEADERS arrived, so a server
+  that stalled/trickled the body hung past the timeout (envelope, upload and
+  decompression paths; the SSE stream path already handled this).
 - **Full-stack example (`examples/node/stack/13-fullstack-mongo.ts`)** —
   one Orbit engine with the whole first-party ecosystem mounted and proven
   live: `@orbit/mongo` adapters (relations + `$in` batching, mutations),

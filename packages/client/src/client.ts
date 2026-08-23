@@ -4,6 +4,7 @@ import { defaultDecompress, postEnvelope } from './http.js';
 import type { HttpDeps } from './http.js';
 import { buildFormData, postFormData } from './multipart.js';
 import type { UploadFiles } from './multipart.js';
+import type { QueryCache } from './cache.js';
 import { RealtimeClient } from './realtime.js';
 import type { SubscriptionHandle, SubscribeOptions } from './realtime.js';
 import { streamEvents } from './stream.js';
@@ -47,6 +48,7 @@ export class OrbitClient {
   readonly #fetchImpl: typeof fetch;
   readonly #decompress: Decompress;
   readonly #WebSocket: typeof WebSocket;
+  readonly #cache: QueryCache | undefined;
   #realtime: RealtimeClient | undefined;
 
   constructor(options: OrbitClientOptions) {
@@ -57,6 +59,7 @@ export class OrbitClient {
     this.#fetchImpl = options.fetch ?? fetch;
     this.#decompress = options.decompress ?? defaultDecompress;
     this.#WebSocket = options.WebSocket ?? WebSocket;
+    this.#cache = options.cache;
     this.realtimeUrl = options.realtimeUrl;
   }
 
@@ -160,13 +163,44 @@ export class OrbitClient {
    */
   async execute(envelope: OrbitEnvelope, options: RequestOptions = {}): Promise<OrbitResponse> {
     const { cache, format, headers, signal, timeoutMs } = options;
-    return postEnvelope(this.#httpDeps(), {
-      envelope: this.#validated(envelope, cache),
+    const validated = this.#validated(envelope, cache);
+
+    // Client-side cache (spec §8): only queries WITH a cache spec participate.
+    // A hit answers without touching the network and is marked `fromCache` —
+    // the same contract the server's cache plugin speaks.
+    if (
+      this.#cache !== undefined &&
+      validated.query !== undefined &&
+      validated.cache !== undefined
+    ) {
+      const hit = this.#cache.get(validated.query);
+      if (hit !== undefined) {
+        const raw = new Response(null, { status: 200 });
+        return { data: hit.data, fromCache: true, status: 200, headers: raw.headers, raw };
+      }
+    }
+
+    const response = await postEnvelope(this.#httpDeps(), {
+      envelope: validated,
       format: format ?? this.#defaultFormat,
       headers,
       signal,
       timeoutMs,
     });
+
+    // Store successful cached queries; mutations always go to the network and
+    // evict through their `invalidates` echo (spec §5/§8).
+    if (this.#cache !== undefined) {
+      if (
+        validated.query !== undefined &&
+        validated.cache !== undefined &&
+        response.invalidates === undefined
+      ) {
+        this.#cache.set(validated.query, { data: response.data }, validated.cache);
+      }
+      if (response.invalidates !== undefined) this.#cache.invalidate(response.invalidates);
+    }
+    return response;
   }
 
   #validated(envelope: OrbitEnvelope, cache: string | undefined): OrbitEnvelope {
