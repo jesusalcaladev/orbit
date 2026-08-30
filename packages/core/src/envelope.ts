@@ -1,6 +1,6 @@
 import { ErrorCode, OrbitError } from './errors.js';
 import { decodeMsgpack } from './serialize/msgpack.js';
-import type { MutationArgs, OrbitEnvelope } from './types.js';
+import type { MutationArgs, MutationOp, OrbitEnvelope } from './types.js';
 import { byteLength, isRecord } from './utils.js';
 
 const decoder = new TextDecoder();
@@ -19,21 +19,65 @@ export function validateEnvelope(value: unknown): OrbitEnvelope {
     throw new OrbitError(ErrorCode.INVALID_QUERY, 'Envelope must be a JSON object');
   }
 
-  const { query, do: action, args, return: returnQuery, cache } = value;
+  const { query, do: action, args, return: returnQuery, cache, ops } = value;
 
-  if (typeof query !== 'string' && typeof action !== 'string') {
+  const hasQuery = typeof query === 'string';
+  const hasDo = typeof action === 'string';
+  const hasOps = Array.isArray(ops);
+
+  // Exactly one of query, do, or ops must be present.
+  const modeCount = (hasQuery ? 1 : 0) + (hasDo ? 1 : 0) + (hasOps ? 1 : 0);
+  if (modeCount === 0) {
     throw new OrbitError(
       ErrorCode.INVALID_QUERY,
-      "Envelope must contain a 'query' string or a 'do' action",
+      "Envelope must contain a 'query' string, a 'do' action, or an 'ops' array",
     );
   }
-  if (typeof query === 'string' && typeof action === 'string') {
-    throw new OrbitError(ErrorCode.INVALID_QUERY, "Envelope cannot contain both 'query' and 'do'");
+  if (modeCount > 1) {
+    throw new OrbitError(
+      ErrorCode.INVALID_QUERY,
+      "Envelope cannot combine 'query', 'do', and 'ops' — use exactly one",
+    );
   }
 
   const envelope: OrbitEnvelope = {};
-  if (typeof query === 'string') envelope.query = query;
-  if (typeof action === 'string') envelope.do = action;
+  if (hasQuery) envelope.query = query as string;
+  if (hasDo) envelope.do = action as string;
+
+  if (hasOps) {
+    const list = ops as unknown[];
+    if (list.length === 0) {
+      throw new OrbitError(ErrorCode.INVALID_QUERY, "'ops' must be a non-empty array");
+    }
+    const validated: MutationOp[] = [];
+    for (let i = 0; i < list.length; i += 1) {
+      const op = list[i];
+      if (!isRecord(op)) {
+        throw new OrbitError(ErrorCode.INVALID_QUERY, `ops[${i}] must be an object`);
+      }
+      if (typeof op.do !== 'string') {
+        throw new OrbitError(
+          ErrorCode.INVALID_QUERY,
+          `ops[${i}].do must be a string (entity.action)`,
+        );
+      }
+      const entry: MutationOp = { do: op.do };
+      if (op.args !== undefined) {
+        if (!isRecord(op.args)) {
+          throw new OrbitError(ErrorCode.INVALID_QUERY, `ops[${i}].args must be an object`);
+        }
+        entry.args = op.args as MutationArgs;
+      }
+      if (op.return !== undefined) {
+        if (typeof op.return !== 'string') {
+          throw new OrbitError(ErrorCode.INVALID_QUERY, `ops[${i}].return must be a string`);
+        }
+        entry.return = op.return;
+      }
+      validated.push(entry);
+    }
+    envelope.ops = validated;
+  }
 
   if (args !== undefined) {
     if (!isRecord(args)) {

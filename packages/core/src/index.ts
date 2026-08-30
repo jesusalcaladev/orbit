@@ -66,6 +66,7 @@ export type {
   AfterResolveInput,
   BeforeSerializeInput,
   ErrorInput,
+  AfterExecuteInput,
 } from './plugins/types.js';
 export { isShortCircuit, HOOK_ORDER } from './plugins/types.js';
 
@@ -81,6 +82,7 @@ export type {
   NodeOrigin,
   QueryNode,
   MutationArgs,
+  MutationOp,
   OrbitEnvelope,
   OrbitContext,
   ParentContext,

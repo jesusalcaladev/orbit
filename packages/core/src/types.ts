@@ -41,9 +41,21 @@ export interface MutationArgs {
 }
 
 /**
+ * A single mutation inside an `ops` batch (spec §3 additive).
+ */
+export interface MutationOp {
+  /** Mutation action in the form `entity.action`, e.g. `user.update`. */
+  do: string;
+  /** Arguments passed verbatim to the adapter's `mutate`. */
+  args?: MutationArgs;
+  /** Optional re-query graph returned after a successful mutation. */
+  return?: string;
+}
+
+/**
  * The request envelope the client posts to the Orbit endpoint.
  *
- * Exactly one of `query` or `do` must be present.
+ * Exactly one of `query`, `do`, or `ops` must be present.
  */
 export interface OrbitEnvelope {
   /** Raw OQS string, e.g. `user(id="123") { name, posts { title } }`. */
@@ -56,6 +68,15 @@ export interface OrbitEnvelope {
   return?: string;
   /** Optional opaque cache spec, e.g. `ttl=300` or `stale=60`. */
   cache?: string;
+  /**
+   * Batch mutations (additive, spec §3). An array of mutation operations
+   * executed sequentially — each runs through the full pipeline (onBeforeParse,
+   * adapter, cache invalidation, optional `return` re-query). If any op fails,
+   * execution stops and the error is returned. The response `data` is an array
+   * of per-op results; `invalidates` is the union of all invalidation keys.
+   * Mutually exclusive with `query` and `do`.
+   */
+  ops?: MutationOp[];
 }
 
 /** Parent entity information available while an adapter resolves a relation. */
@@ -121,6 +142,14 @@ export interface OrbitContext {
    * deadline. Adapters/plugins may listen to it to cancel their own work.
    */
   signal?: AbortSignal;
+  /**
+   * Request-scoped trace id used for log/error correlation across pipeline
+   * stages, plugins and adapters. The engine stamps it (generating a UUID)
+   * unless the caller supplies one (e.g. from an upstream `x-trace-id`).
+   *
+   * Additive (spec §11): purely informational, read-only from the pipeline.
+   */
+  trace?: string;
   /**
    * Response headers to merge into the handler's `Response` — set by plugins
    * or adapters during the pipeline (e.g. `set-cookie` for session login,

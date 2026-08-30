@@ -6,6 +6,12 @@ import { memoryAdapter } from '../src/adapters/memory.js';
 import type { DataAdapter } from '../src/adapters/types.js';
 import type { Filters, OrbitContext } from '../src/types.js';
 
+async function collect(events: AsyncGenerator<{ level: number | 'done'; data: unknown }>) {
+  const out: Array<{ level: number | 'done'; data: unknown }> = [];
+  for await (const event of events) out.push(event);
+  return out;
+}
+
 interface User {
   id: string;
   name: string;
@@ -521,6 +527,174 @@ describe('mutations', () => {
     await expect(orbit.execute({ do: 'user.update', args: {} })).rejects.toMatchObject({
       code: ErrorCode.PERMISSION_DENIED,
       message: 'Admins only',
+    });
+  });
+});
+
+describe('batch mutations (ops)', () => {
+  it('executes multiple mutations and returns an array of results', async () => {
+    const orbit = createOrbit({
+      adapters: memoryAdapter([
+        {
+          entity: 'user',
+          resolve: ({ id }) => users.find((u) => u.id === id),
+          mutate: (action, { filter, payload }) => {
+            const user = users.find((u) => u.id === filter?.id);
+            if (!user) throw new OrbitError(ErrorCode.FILTER_INVALID, 'Not found');
+            if (action === 'update' && payload) Object.assign(user, payload);
+            return { id: user.id, invalidates: [`cache:user:${user.id}`] };
+          },
+        },
+      ]),
+    });
+
+    const result = await orbit.execute({
+      ops: [
+        { do: 'user.update', args: { filter: { id: '1' }, payload: { name: 'Anita' } } },
+        { do: 'user.update', args: { filter: { id: '2' }, payload: { name: 'Brito' } } },
+      ],
+    });
+
+    expect(result.data).toEqual([
+      { success: true, id: '1' },
+      { success: true, id: '2' },
+    ]);
+    expect(users[0]!.name).toBe('Anita');
+    expect(users[1]!.name).toBe('Brito');
+    expect(result.invalidates).toEqual(['cache:user:1', 'cache:user:2']);
+    // restore
+    users[0]!.name = 'Ana';
+    users[1]!.name = 'Bruno';
+  });
+
+  it('supports return re-queries on individual ops', async () => {
+    const orbit = createOrbit({
+      adapters: memoryAdapter([
+        {
+          entity: 'user',
+          resolve: ({ id }) => users.find((u) => u.id === id),
+          mutate: (action, { filter, payload }) => {
+            const user = users.find((u) => u.id === filter?.id);
+            if (!user) throw new OrbitError(ErrorCode.FILTER_INVALID, 'Not found');
+            if (action === 'update' && payload) Object.assign(user, payload);
+            return { id: user.id };
+          },
+        },
+      ]),
+    });
+
+    const result = await orbit.execute({
+      ops: [
+        {
+          do: 'user.update',
+          args: { filter: { id: '1' }, payload: { name: 'X' } },
+          return: 'user(id="1") { name }',
+        },
+        { do: 'user.update', args: { filter: { id: '2' }, payload: { name: 'Y' } } },
+      ],
+    });
+
+    expect(result.data).toEqual([{ name: 'X' }, { success: true, id: '2' }]);
+    // restore
+    users[0]!.name = 'Ana';
+    users[1]!.name = 'Bruno';
+  });
+
+  it('stops on first failure (fail-fast)', async () => {
+    const mutate = vi.fn();
+    const orbit = createOrbit({
+      adapters: memoryAdapter([
+        {
+          entity: 'user',
+          resolve: () => null,
+          mutate: (action, { filter }) => {
+            mutate();
+            if (filter?.id === 'bad') throw new OrbitError(ErrorCode.FILTER_INVALID, 'bad');
+            return { id: filter?.id };
+          },
+        },
+      ]),
+    });
+
+    await expect(
+      orbit.execute({
+        ops: [
+          { do: 'user.update', args: { filter: { id: '1' } } },
+          { do: 'user.update', args: { filter: { id: 'bad' } } },
+          { do: 'user.update', args: { filter: { id: '3' } } },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: ErrorCode.FILTER_INVALID });
+
+    // Only the first two ops ran (the third was skipped).
+    expect(mutate).toHaveBeenCalledTimes(2);
+  });
+
+  it('deduplicates invalidation keys across ops', async () => {
+    const orbit = createOrbit({
+      adapters: memoryAdapter([
+        {
+          entity: 'user',
+          resolve: () => null,
+          mutate: () => ({ id: '1', invalidates: ['cache:user:1'] }),
+        },
+      ]),
+    });
+
+    const result = await orbit.execute({
+      ops: [
+        { do: 'user.update', args: {} },
+        { do: 'user.update', args: {} },
+      ],
+    });
+
+    expect(result.invalidates).toEqual(['cache:user:1']);
+  });
+
+  it('rejects ops on unregistered entities', async () => {
+    const orbit = makeOrbit();
+    await expect(orbit.execute({ ops: [{ do: 'ghost.create' }] })).rejects.toMatchObject({
+      code: ErrorCode.ENTITY_UNREGISTERED,
+    });
+  });
+
+  it('runs pipeline hooks (onBeforeParse) for each op', async () => {
+    const calls: string[] = [];
+    const orbit = createOrbit({
+      adapters: memoryAdapter([
+        {
+          entity: 'user',
+          resolve: () => null,
+          mutate: () => ({ id: '1' }),
+        },
+      ]),
+      plugins: [
+        {
+          name: 'spy',
+          hooks: {
+            onBeforeParse({ query }) {
+              calls.push(query);
+            },
+          },
+        },
+      ],
+    });
+
+    await orbit.execute({
+      ops: [
+        { do: 'user.update', args: {} },
+        { do: 'user.update', args: {} },
+      ],
+    });
+
+    // onBeforeParse runs once per op.
+    expect(calls).toEqual(['user.update', 'user.update']);
+  });
+
+  it('rejects streaming with ops', async () => {
+    const orbit = makeOrbit();
+    await expect(collect(orbit.stream({ ops: [{ do: 'user.update' }] }))).rejects.toMatchObject({
+      code: ErrorCode.INVALID_QUERY,
     });
   });
 });

@@ -61,7 +61,7 @@ transports are all just *adapters* and *plugins* you mount.
 ## 3. The request envelope — FROZEN ✅
 
 Every request is a single object posted to the Orbit endpoint. **Exactly one**
-of `query` or `do` must be present.
+of `query`, `do`, or `ops` must be present.
 
 ```jsonc
 {
@@ -69,17 +69,22 @@ of `query` or `do` must be present.
   "do": "user.update",                                // …a mutation action
   "args": { "filter": { "id": "1" }, "payload": { "name": "Ana" } },
   "return": "user(id=\"1\") { id, name, posts { id } }", // optional re-query
-  "cache": "ttl=300"                                    // optional cache spec
+  "cache": "ttl=300",                                   // optional cache spec
+  "ops": [                                              // …or batch mutations
+    { "do": "user.update", "args": { "filter": { "id": "1" }, "payload": { "name": "Ana" } } },
+    { "do": "post.create", "args": { "payload": { "title": "Hello" } }, "return": "post { id }" }
+  ]
 }
 ```
 
 | Field | Type | Rule |
 | --- | --- | --- |
-| `query` | `string` | OQS (below). Mutually exclusive with `do`. |
-| `do` | `string` | Mutation action, form `entity.action` (e.g. `user.update`). Mutually exclusive with `query`. |
-| `args` | `object` | Passed verbatim to the adapter's `mutate`. |
-| `return` | `string` | OQS re-query of the affected sub-graph, returned after a successful mutation. |
-| `cache` | `string` | Cache spec, e.g. `ttl=300`, `stale=60`. |
+| `query` | `string` | OQS (below). Mutually exclusive with `do` and `ops`. |
+| `do` | `string` | Mutation action, form `entity.action` (e.g. `user.update`). Mutually exclusive with `query` and `ops`. |
+| `ops` | `array` | Batch mutations: array of `{ do, args?, return? }` objects. Mutually exclusive with `query` and `do`. Executes sequentially; stops on first error. Response `data` is a per-op array; `invalidates` is the deduplicated union. |
+| `args` | `object` | Passed verbatim to the adapter's `mutate`. Used with `do` or within `ops` entries. |
+| `return` | `string` | OQS re-query of the affected sub-graph, returned after a successful mutation. Used with `do` or within `ops` entries. |
+| `cache` | `string` | Cache spec, e.g. `ttl=300`, `stale=60`. Used with `query`. |
 
 Limits: envelope size defaults to **10 MiB** (`maxPayloadBytes`, configurable);
 query depth defaults to **10 levels** (`maxQueryDepth`, configurable).
@@ -620,8 +625,9 @@ shape or renames a frozen export is a breaking change.
 
 ---
 
+
 ## 14. Non-goals
 
 - No ORM, no schema DSL, no query planner — resolvers are plain functions.
-- No bundled clients yet — the envelope is small enough to hand-roll (the client suite is a separate track).
+- No bundled clients yet — the envelope is small enough to hand-roll (the client suite is a separate track, now including `@orbit/client` and `@orbit/react` with 132 e2e tests that exercise HTTP, SSE, multipart and realtime).
 - No database coupling — adapters, always adapters.

@@ -15,7 +15,7 @@ import {
 } from './parser.js';
 import { PluginRegistry } from './plugins/registry.js';
 import { isShortCircuit } from './plugins/types.js';
-import type { OrbitPlugin } from './plugins/types.js';
+import type { OrbitPlugin, AfterExecuteInput } from './plugins/types.js';
 import {
   MSGPACK_CONTENT_TYPE,
   SSE_CONTENT_TYPE,
@@ -28,6 +28,7 @@ import { createCachePlugin } from './plugins/cache.js';
 import type {
   BatchRequest,
   Filters,
+  MutationOp,
   MutationResult,
   NodeOrigin,
   OrbitContext,
@@ -38,7 +39,7 @@ import type {
   QueryNode,
   SerializedPayload,
 } from './types.js';
-import { isRecord, setOwn } from './utils.js';
+import { isRecord, setOwn, traceId } from './utils.js';
 export const JSON_CONTENT_TYPE = 'application/json; charset=utf-8';
 /** A fetch-compatible handler function for Orbit queries. Takes a Request and returns a Promise<Response>. */
 export type OrbitHandler = (request: Request) => Promise<Response>;
@@ -230,6 +231,7 @@ export class Orbit {
     const fullCtx: OrbitContext = {
       ...ctx,
       providers: this.#options.providers,
+      trace: ctx.trace ?? traceId(),
       envelope: valid,
       orbit: this,
     };
@@ -259,20 +261,26 @@ export class Orbit {
 
     try {
       const run =
-        valid.do !== undefined
-          ? this.#executeMutation(valid, fullCtx)
-          : this.#consumeQuery(valid, fullCtx);
+        valid.ops !== undefined
+          ? this.#executeBatchMutations(valid.ops, fullCtx)
+          : valid.do !== undefined
+            ? this.#executeMutation(valid, fullCtx)
+            : this.#consumeQuery(valid, fullCtx);
       const result = await raceWithAbort(run, controller.signal);
+      // Observability "finally": fire on success too, so metrics cover the
+      // mutations and cache hits that skip the serialize hook (spec §11).
+      await this.#fireAfterExecute({ result, envelope: valid, ctx: fullCtx });
       return result;
     } catch (error) {
-      if (controller.signal.aborted) {
-        throw new OrbitError(
-          ErrorCode.INTERNAL,
-          external?.aborted ? 'Request aborted by the caller' : 'Request timed out',
-          { details: { timeoutMs } },
-        );
-      }
-      throw await this.#normalizeError(error, fullCtx);
+      const orbitError = controller.signal.aborted
+        ? new OrbitError(
+            ErrorCode.INTERNAL,
+            external?.aborted ? 'Request aborted by the caller' : 'Request timed out',
+            { details: { timeoutMs } },
+          )
+        : await this.#normalizeError(error, fullCtx);
+      await this.#fireAfterExecute({ error: orbitError, envelope: valid, ctx: fullCtx });
+      throw orbitError;
     } finally {
       if (timer !== undefined) clearTimeout(timer);
       external?.removeEventListener('abort', onExternalAbort);
@@ -283,6 +291,25 @@ export class Orbit {
       // finally also picks up headers set by `onError` hooks. `execute()`
       // callers that never build a Response simply ignore them.
       if (fullCtx.responseHeaders !== undefined) ctx.responseHeaders = fullCtx.responseHeaders;
+    }
+  }
+
+  /**
+   * Run `onAfterExecute` hooks (observability/metrics) once per `execute()` —
+   * on both the success (`result`) and error (`error`) paths, after `onError`
+   * translation. The pipeline's "finally": it covers mutations and cache-hit
+   * short circuits that the serialize hook (spec §11) never sees. Hook errors
+   * are swallowed so a broken metrics sink never changes a request's outcome.
+   */
+  async #fireAfterExecute(input: AfterExecuteInput): Promise<void> {
+    for (const plugin of this.#options.plugins.list) {
+      const hook = plugin.hooks.onAfterExecute;
+      if (typeof hook !== 'function') continue;
+      try {
+        await hook(input);
+      } catch {
+        // Observability hooks must never break request resolution.
+      }
     }
   }
 
@@ -301,10 +328,10 @@ export class Orbit {
       envelope: valid,
       orbit: this,
     };
-    if (valid.do !== undefined) {
+    if (valid.do !== undefined || valid.ops !== undefined) {
       throw new OrbitError(
         ErrorCode.INVALID_QUERY,
-        "Streaming supports queries only (no 'do' actions)",
+        "Streaming supports queries only (no 'do' or 'ops' actions)",
       );
     }
     try {
@@ -582,6 +609,41 @@ export class Orbit {
       ...(outcome.payload !== undefined ? { body: outcome.payload } : { data: outcome.data }),
       fromCache: false,
       contentType: outcome.contentType,
+    };
+  }
+
+  /**
+   * Execute a batch of mutations (`ops: [{ do, args?, return? }, …]`).
+   * Each op runs through the full mutation pipeline (onBeforeParse, adapter,
+   * cache invalidation, optional `return` re-query). Execution is sequential:
+   * if any op fails, the error is returned immediately and subsequent ops
+   * are skipped. The response `data` is an array of per-op results; the
+   * top-level `invalidates` is the union of all ops' invalidation keys.
+   */
+  async #executeBatchMutations(ops: MutationOp[], ctx: OrbitContext): Promise<OrbitResult> {
+    const results: unknown[] = [];
+    const allInvalidates: string[] = [];
+
+    for (const op of ops) {
+      const opEnvelope: OrbitEnvelope = {
+        do: op.do,
+        ...(op.args !== undefined ? { args: op.args } : {}),
+        ...(op.return !== undefined ? { return: op.return } : {}),
+      };
+      const opResult = await this.#executeMutation(opEnvelope, ctx);
+      results.push(opResult.data ?? null);
+      if (opResult.invalidates) {
+        for (const key of opResult.invalidates) {
+          if (!allInvalidates.includes(key)) allInvalidates.push(key);
+        }
+      }
+    }
+
+    return {
+      status: 200,
+      data: results,
+      ...(allInvalidates.length > 0 ? { invalidates: allInvalidates } : {}),
+      contentType: JSON_CONTENT_TYPE,
     };
   }
 

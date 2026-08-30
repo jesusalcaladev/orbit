@@ -37,6 +37,8 @@ const FROZEN_TYPE_EXPORTS = [
   'AfterResolveInput',
   'BeforeSerializeInput',
   'ErrorInput',
+  // Additive (spec §11) — the onAfterExecute lifecycle hook input.
+  'AfterExecuteInput',
   'MemoryAdapterDefinition',
   'DataAdapter',
   'AdapterRegistryLike',
@@ -44,6 +46,7 @@ const FROZEN_TYPE_EXPORTS = [
   'NodeOrigin',
   'QueryNode',
   'MutationArgs',
+  'MutationOp',
   'OrbitEnvelope',
   'OrbitContext',
   'ParentContext',

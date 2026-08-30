@@ -56,7 +56,7 @@ changes).
 
 ### §3 Request envelope — FROZEN
 
-- Exactly one of `query`/`do`; both or neither → `ORBIT_INVALID_QUERY` (400) ✅
+- Exactly one of `query`/`do`/`ops`; any combination of two or none → `ORBIT_INVALID_QUERY` (400) ✅
   (`validateEnvelope`).
 - `args` must be an object; `return`/`cache` must be strings ✅.
 - Unknown fields are dropped, not rejected ✅ (matches the "additive only" rule).

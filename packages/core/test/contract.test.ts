@@ -51,6 +51,8 @@ const FROZEN_HOOK_ORDER = [
   'onAfterResolve',
   'onBeforeSerialize',
   'onError',
+  // Additive pipeline hook (spec §11 allows additive hooks without a major bump).
+  'onAfterExecute',
 ] as const;
 
 describe('contract: error codes & wire shape', () => {
@@ -79,15 +81,47 @@ describe('contract: error codes & wire shape', () => {
 });
 
 describe('contract: envelope rules (spec §3)', () => {
-  it('requires exactly one of query/do', () => {
+  it('requires exactly one of query/do/ops', () => {
     expect(() => validateEnvelope({})).toThrowError(
       expect.objectContaining({ code: ErrorCode.INVALID_QUERY }),
     );
     expect(() => validateEnvelope({ query: 'a', do: 'b' })).toThrowError(
       expect.objectContaining({ code: ErrorCode.INVALID_QUERY }),
     );
+    expect(() => validateEnvelope({ query: 'a', ops: [{ do: 'x.y' }] })).toThrowError(
+      expect.objectContaining({ code: ErrorCode.INVALID_QUERY }),
+    );
+    expect(() => validateEnvelope({ do: 'a.b', ops: [{ do: 'x.y' }] })).toThrowError(
+      expect.objectContaining({ code: ErrorCode.INVALID_QUERY }),
+    );
     expect(validateEnvelope({ query: 'a' })).toEqual({ query: 'a' });
     expect(validateEnvelope({ do: 'a.b' })).toEqual({ do: 'a.b' });
+    expect(validateEnvelope({ ops: [{ do: 'a.b' }] })).toEqual({
+      ops: [{ do: 'a.b' }],
+    });
+  });
+
+  it('validates ops array structure', () => {
+    expect(() => validateEnvelope({ ops: [] })).toThrowError(
+      expect.objectContaining({ code: ErrorCode.INVALID_QUERY }),
+    );
+    expect(() => validateEnvelope({ ops: ['bad'] })).toThrowError(
+      expect.objectContaining({ code: ErrorCode.INVALID_QUERY }),
+    );
+    expect(() => validateEnvelope({ ops: [{ do: 123 }] })).toThrowError(
+      expect.objectContaining({ code: ErrorCode.INVALID_QUERY }),
+    );
+    expect(() => validateEnvelope({ ops: [{ do: 'a.b', args: 'bad' }] })).toThrowError(
+      expect.objectContaining({ code: ErrorCode.INVALID_QUERY }),
+    );
+    expect(() => validateEnvelope({ ops: [{ do: 'a.b', return: 42 }] })).toThrowError(
+      expect.objectContaining({ code: ErrorCode.INVALID_QUERY }),
+    );
+    expect(
+      validateEnvelope({ ops: [{ do: 'a.b', args: { id: '1' }, return: 'a { id }' }] }),
+    ).toEqual({
+      ops: [{ do: 'a.b', args: { id: '1' }, return: 'a { id }' }],
+    });
   });
 
   it('types args/return/cache strictly and drops unknown fields', () => {

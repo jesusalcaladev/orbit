@@ -31,7 +31,7 @@
 | `onError` | ✅ | `src/plugins/types.ts`, engine `#normalizeError` |
 | Plugin registry + duplicate-name rejection | ✅ | `src/plugins/registry.ts` |
 | Strict pipeline order (introspectable) | ✅ | `src/plugins/types.ts` `HOOK_ORDER` |
-| **Service injection into ctx** (`provides` → `ctx.providers`) 🧪 | ✅ | `src/plugins/types.ts`, engine `collectProviders` — boot-time services injected before any hook runs; duplicate/reserved names rejected at `createOrbit`; reaches queries, mutations, `stream()`, `return` re-queries and realtime gates. 18 tests in `test/providers.test.ts`. |
+| **Service injection into ctx** (`provides` → `ctx.providers`) ✅ | | `src/plugins/types.ts`, engine `collectProviders` — boot-time services injected before any hook runs; duplicate/reserved names rejected at `createOrbit`; reaches queries, mutations, `stream()`, `return` re-queries and realtime gates. 18 tests in `test/providers.test.ts`. |
 
 **⬜ First-party plugin packages** (the "brains", shipped as `@orbit/<target>`):  - [x] **`@orbit/auth`** — shipped: `authenticate`/`authorize`/`scope` + `bearerAuth`/`apiKeyAuth` presets and `requireCaller`/`requireRole` helpers (identity stamped in `onBeforeParse` reaches mutations too). 15 tests.
 - [x] **`@orbit/cache`** — shipped as a distribution package that re-exports the plugin from the frozen core (one-way dependency, no `core → cache` cycle). The code-level split is a deliberate breaking change reserved for a future major — see §9.
@@ -51,6 +51,7 @@
 | Mutations `do: "entity.action"` | ✅ | `src/types.ts`, engine `#executeMutation` |
 | `filter` / `payload` / `return` sub-graph | ✅ | mutation envelope |
 | `invalidates` keys on mutation result | ✅ | `MutationResult` |
+| **`onAfterExecute` observability hook** (spec §11 additive) | ✅ | `src/plugins/types.ts`, `src/engine.ts` |
 
 ---
 
@@ -241,11 +242,11 @@ artifact on every push.
 | Monorepo (pnpm workspaces) | ✅ (`packages/core`; more packages slot in) |
 | Plugin system (all 7 hooks + registry) | ✅ |
 | OQS + mutations | ✅ |
-| Envelope / serialization / SSE / gzip / **file uploads** | ✅ |
+| Envelope / serialization / SSE / gzip / **file uploads** / **batch mutations (`ops`)** | ✅ |
 | Errors | ✅ |
 | Caching core (TTL/SWR/invalidate) | ✅ (in core; `@orbit/cache` distribution package shipped) |
 | Cache HTTP headers (`x-orbit-cache`, age-aware `cache-control`) | ✅ (spec §7/§8 — hit/miss + CDN/SWR hints; errors always `no-store`) |
-| Plugin service injection (`provides` → `ctx.providers`) | ✅ (🧪 spec §11 additive — 8 tests) |
+| Plugin service injection (`provides` → `ctx.providers`) | ✅ (✅ spec §11 additive — 8 tests) |
 | In-memory adapter | ✅ (keep in `@orbit/core`) |
 | REST/fetch adapter | ✅ (`@orbit/rest` — queries→GET, mutations→POST/PATCH/DELETE) |
 | Benchmarks | ✅ (B1–B9 goals met) |
@@ -275,7 +276,7 @@ artifact on every push.
 | 1 | **Auth context into WebSocket subscriptions & socket envelopes** (SPEC §10 🔜) | ✅ | `authorize` may now return an `OrbitContext` that seeds the session: it rides into every `{ query }`/`{ do }` envelope executed over the socket (so `ctx.state.caller` reaches `mutate`) and into the subscription gates (`authorizedSubscribe` runs the full pipeline with it — a denied subscribe is rejected with the plugin's error and the client's correlation `id`). Node + Cloudflare Workers transports. 3 new tests in `realtime-request.test.ts`. |
 | 2 | **Fuzz the parser, msgpack codec & envelope** | ✅ | Deterministic suite in `test/fuzz.test.ts` (fixed seeds, CI-stable): 2000 OQS strings, 2000 msgpack byte payloads, 1500 envelopes, 1000 cache specs, 1000 Accept headers, 500 engine envelopes + 300 wire-msgpack envelopes — invariants: only protocol errors, no hang, no stack overflow. **Fuzz-caught & fixed:** unguarded DataView reads in the msgpack codec (truncated floats → `RangeError`) and a nesting-bomb path (100k fixarrays → stack overflow) — both now fast-fail with the codec's own error. |
 | 3 | **Per-request timeout / cancellation** | ✅ | `requestTimeoutMs` on `createOrbit` (opt-in, unref'd) + caller `AbortSignal` on `OrbitContext.signal`. A hung adapter now rejects with a sanitized timeout error instead of hanging the handler; adapters/plugins see the aborted signal to cancel their own work. 7 new tests in `engine.test.ts`. |
-| 4 | **Rate limiting plugin (`@orbit/rate-limit`)** | ✅ | First-party zero-dep token-bucket plugin, one line to mount. Gates in `onBeforeParse` (covers queries AND mutations — see §11 additive rule); buckets per IP (`x-forwarded-for`/`x-real-ip`) or any `keyOf`; 429 via `ORBIT_PERMISSION_DENIED` + status override with `details.retryAfterMs`; injectable clock. **Pluggable ATOMIC bucket store** (`RateLimitBucketStore.consume` — refill+check+decrement in one step): in-memory default, `@orbit/redis` `createRedisRateLimitStore` (Lua `EVAL`) for limits shared across instances; the limiter rides `ctx.providers.rateLimiter` (🧪 provides channel) so adapters consume the same shared buckets; every response carries the standard `RateLimit-*` headers (draft-ietf-httpapi-ratelimit) with `Retry-After` on the 429. 21 tests. |
+| 4 | **Rate limiting plugin (`@orbit/rate-limit`)** | ✅ | First-party zero-dep token-bucket plugin, one line to mount. Gates in `onBeforeParse` (covers queries AND mutations — see §11 additive rule); buckets per IP (`x-forwarded-for`/`x-real-ip`) or any `keyOf`; 429 via `ORBIT_PERMISSION_DENIED` + status override with `details.retryAfterMs`; injectable clock. **Pluggable ATOMIC bucket store** (`RateLimitBucketStore.consume` — refill+check+decrement in one step): in-memory default, `@orbit/redis` `createRedisRateLimitStore` (Lua `EVAL`) for limits shared across instances; the limiter rides `ctx.providers.rateLimiter` (✅ provides channel) so adapters consume the same shared buckets; every response carries the standard `RateLimit-*` headers (draft-ietf-httpapi-ratelimit) with `Retry-After` on the 429. 21 tests. |
 | 5 | **Multipart field-count cap** | ✅ | `maxMultipartFields` (default 64) rejects a thousands-of-fields DoS with `ORBIT_INVALID_QUERY` + `details.maxFields`. 2 new tests in `upload.test.ts`. |
 | 6 | **Error-message sanitization** | ✅ | `ORBIT_INTERNAL` no longer echoes plain `Error` messages (tokens/credentials stay server-side); plain mutation rejections are sanitized `ORBIT_MUTATION_FAILED`. **`details` audit done:** every internal path emits only structural payloads (entities, byte counts, field names) — never raw messages. |
 | 7 | **Cache-store hardening** | ✅ | Corrupted entries (non-finite `createdAt`) fail-safe to a miss instead of being served as perpetually fresh; `invalidatePrefix` skips non-string keys from a buggy store; a store that throws on `set` fails the request closed (sanitized). Capacity-eviction and poisoning tests in `cache.test.ts`. Production stores (`@orbit/redis`/`@orbit/kv-cache`) remain P1 #1. |
@@ -288,7 +289,7 @@ artifact on every push.
 | 2 | **`@orbit/auth`** | ✅ | Shipped: `createAuthPlugin({ authenticate, authorize?, scope? })` + `bearerAuth`/`apiKeyAuth` presets and `requireCaller`/`requireRole` helpers. Identity stamped in `onBeforeParse` reaches queries AND mutations; `authorize` also gates the mutation `return` re-query. 15 tests. |
 | 3 | **`@orbit/postgres` + `@orbit/mongo`** (0.1.x) | ✅ | Postgres: parameterized `WHERE`, `IN`-clause batching, `create`/`update`/`delete` (`RETURNING`), `parentKey` scoping, validated `limit`, quoted identifiers — no SQL injection (30 tests). Mongo: `filters` → match documents (`eq`/`ne`/`gt`/`gte`/`lt`/`lte`/`regex`), `$in` batching, `create`/`update`/`delete`, `parentKey` scoping, validated `limit`, `toId`/`fromId` id conversion (ObjectId), and a no-operator-injection guarantee — field names charset-validated, payload values walked recursively (40 tests + a compile-time real-driver contract assertion). |
 | 4 | **`@orbit/client`** (after 1.0 freeze) | ⬜ | First-party SDK: typed envelope helpers, WS client with reconnect/resume (the demos' `shared.js` `orbitSocket` is the prototype), client-side cache honoring `invalidates`. Today every consumer re-implements the socket. |
-| 5 | **Batch mutations (`ops`)** | ⬜ decision | One mutation per envelope today. An additive optional `ops: []` field would fit the SPEC §3 "additive only" rule — decide before 1.0 whether to ship. |
+| 5 | **Batch mutations (`ops`)** | ✅ | Shipped: `ops: [{ do, args?, return? }, …]` field on the envelope — additive, spec §3 compatible. Mutations execute sequentially (fail-fast on first error), response `data` is a per-op array, `invalidates` is the deduplicated union. Each op runs through the full pipeline (onBeforeParse, adapter, cache invalidation, optional `return` re-query). 7 new tests in `engine.test.ts` + contract validation tests. |
 | 6 | **GET query endpoint** | ⬜ decision | Envelope via query-string/headers for CDN-cacheable reads; currently the handler expects a body (POST). Optional, spec-additive. |
 | 7 | **Pagination convention** | ✅ | Documented in `docs/adapters.md` — reserved `limit`/`cursor` filter keys, page shape, and validate-the-limit guidance. No syntax change (filters are verbatim by design). |
 | 8 | **`@orbit/logging`** | ✅ | Shipped: `createLoggingPlugin({ logger?, now?, maxLabelLength? })` — times queries from `onBeforeParse`→`onBeforeSerialize` and logs every error (queries + mutations). Cache hits / successful mutations are documented non-timed paths. 9 tests. |
