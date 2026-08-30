@@ -548,3 +548,133 @@ describe('handler', () => {
     expect(ctx.responseHeaders).toEqual({ 'x-debug-echo': 'yes' });
   });
 });
+
+function get(url: string, headers?: Record<string, string>): Request {
+  return new Request(url, { method: 'GET', headers });
+}
+
+describe('GET query endpoint', () => {
+  it('serves a query from the URL query parameter', async () => {
+    const orbit = makeOrbit();
+    const query = encodeURIComponent('user(id="1") { name }');
+    const response = await orbit.handler(get(`http://localhost/orbit?query=${query}`));
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('application/json');
+    expect(await response.json()).toEqual({ data: { name: 'Ana' } });
+  });
+
+  it('serves a query from the X-Orbit-Query header', async () => {
+    const orbit = makeOrbit();
+    const response = await orbit.handler(
+      get('http://localhost/orbit', { 'x-orbit-query': 'user(id="1") { name }' }),
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ data: { name: 'Ana' } });
+  });
+
+  it('URL query parameter takes precedence over header', async () => {
+    const orbit = makeOrbit();
+    const query = encodeURIComponent('user(id="1") { name }');
+    const response = await orbit.handler(
+      get(`http://localhost/orbit?query=${query}`, {
+        'x-orbit-query': 'user(id="2") { name }',
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ data: { name: 'Ana' } });
+  });
+
+  it('reads cache spec from the cache query parameter', async () => {
+    const orbit = makeOrbit();
+    const query = encodeURIComponent('user(id="1") { name }');
+    const response = await orbit.handler(
+      get(`http://localhost/orbit?query=${query}&cache=ttl=300`),
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.data).toEqual({ name: 'Ana' });
+  });
+
+  it('reads cache spec from the X-Orbit-Cache header', async () => {
+    const orbit = makeOrbit();
+    const query = encodeURIComponent('user(id="1") { name }');
+    const response = await orbit.handler(
+      get(`http://localhost/orbit?query=${query}`, {
+        'x-orbit-cache': 'ttl=300',
+      }),
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.data).toEqual({ name: 'Ana' });
+  });
+
+  it('rejects GET without a query parameter or header', async () => {
+    const orbit = makeOrbit();
+    const response = await orbit.handler(get('http://localhost/orbit'));
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error.code).toBe('ORBIT_INVALID_QUERY');
+  });
+
+  it('supports SSE streaming via Accept header', async () => {
+    const orbit = makeOrbit();
+    const query = encodeURIComponent('user(id="1") { name }');
+    const response = await orbit.handler(
+      get(`http://localhost/orbit?query=${query}`, {
+        accept: 'text/event-stream',
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('text/event-stream');
+    const text = await response.text();
+    expect(text).toContain('data: ');
+    expect(text).toContain('"name":"Ana"');
+  });
+
+  it('negotiates MessagePack format', async () => {
+    const orbit = makeOrbit();
+    const query = encodeURIComponent('user(id="1") { name }');
+    const response = await orbit.handler(
+      get(`http://localhost/orbit?query=${query}`, {
+        accept: 'application/x-msgpack',
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('application/x-msgpack');
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    const decoded = decodeMsgpack(bytes) as { data: { name: string } };
+    expect(decoded.data).toEqual({ name: 'Ana' });
+  });
+
+  it('rejects a query that exceeds maxQueryDepth', async () => {
+    const orbit = makeOrbit({ maxQueryDepth: 2 });
+    const deepQuery = encodeURIComponent('a { b { c { d { e } } } }');
+    const response = await orbit.handler(get(`http://localhost/orbit?query=${deepQuery}`));
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error.code).toBe('ORBIT_MAX_DEPTH_EXCEEDED');
+  });
+
+  it('rejects a malformed OQS query', async () => {
+    const orbit = makeOrbit();
+    const response = await orbit.handler(get('http://localhost/orbit?query=%21%21%21not-a-query'));
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error.code).toBe('ORBIT_INVALID_QUERY');
+  });
+
+  it('surfaces adapter errors as non-200', async () => {
+    const orbit = createOrbit({
+      adapters: memoryAdapter([
+        {
+          entity: 'ghost',
+          resolve: () => {
+            throw new Error('boom');
+          },
+        },
+      ]),
+    });
+    const response = await orbit.handler(get('http://localhost/orbit?query=ghost { id }'));
+    expect(response.status).toBe(500);
+  });
+});

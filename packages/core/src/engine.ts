@@ -375,6 +375,35 @@ export class Orbit {
     const gzip =
       typeof CompressionStream !== 'undefined' && wantsGzip(request.headers.get('accept-encoding'));
     try {
+      // GET endpoint (spec §3 additive): queries via query-string/headers,
+      // making them CDN-cacheable. Only { query } envelopes are allowed —
+      // mutations (do/ops) must use POST. The query can come from the `query`
+      // URL parameter or the `X-Orbit-Query` header; cache spec from the
+      // `cache` URL parameter or the `X-Orbit-Cache` header.
+      if (request.method === 'GET') {
+        const url = new URL(request.url);
+        const query = url.searchParams.get('query') ?? request.headers.get('x-orbit-query');
+        if (!query) {
+          throw new OrbitError(
+            ErrorCode.INVALID_QUERY,
+            "GET requests require a 'query' parameter or 'X-Orbit-Query' header",
+          );
+        }
+        const cache =
+          url.searchParams.get('cache') ?? request.headers.get('x-orbit-cache') ?? undefined;
+        const envelope: OrbitEnvelope = { query, ...(cache !== undefined ? { cache } : {}) };
+        if (format === 'sse') {
+          parseOQS(query, {
+            maxDepth: this.#options.maxQueryDepth,
+            maxKeyLength: this.#options.maxKeyLength,
+            maxValueLength: this.#options.maxValueLength,
+          });
+          return this.#sseResponse(this.stream(envelope, base), gzip, base);
+        }
+        const result = await this.execute(envelope, base);
+        return await this.#toResponse(result, format, gzip, base);
+      }
+
       // Cheap pre-check before buffering: reject oversized bodies early.
       const declared = Number(request.headers.get('content-length') ?? 0);
       if (Number.isFinite(declared) && declared > this.#options.maxPayloadBytes) {

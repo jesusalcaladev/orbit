@@ -92,6 +92,28 @@ query depth defaults to **10 levels** (`maxQueryDepth`, configurable).
 **Frozen in v0.0.1.** Any future extension must be additive — new optional
 fields only.
 
+### GET query endpoint (additive)
+
+Queries can also be sent via **GET** for CDN-cacheable reads. The query is
+provided in the `query` URL parameter or the `X-Orbit-Query` header; the
+optional cache spec in the `cache` URL parameter or the `X-Orbit-Cache` header.
+
+```
+GET /orbit?query=user(id=%221%22)%20%7B%20name%20%7D&cache=ttl=300
+Accept: application/json
+```
+
+| Parameter / Header | Source |
+| --- | --- |
+| `query` | URL query parameter (primary) or `X-Orbit-Query` header |
+| `cache` | URL query parameter (`cache`) or `X-Orbit-Cache` header |
+
+- Only `{ query }` envelopes are allowed via GET — mutations (`do`/`ops`) must
+  use POST.
+- Content negotiation works identically to POST (`Accept`, `Accept-Encoding`).
+- SSE streaming is supported via `Accept: text/event-stream`.
+- Missing `query` → `ORBIT_INVALID_QUERY` (400).
+
 ### Envelope validation
 
 | Condition | Error |

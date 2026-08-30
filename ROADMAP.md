@@ -242,7 +242,7 @@ artifact on every push.
 | Monorepo (pnpm workspaces) | ✅ (`packages/core`; more packages slot in) |
 | Plugin system (all 7 hooks + registry) | ✅ |
 | OQS + mutations | ✅ |
-| Envelope / serialization / SSE / gzip / **file uploads** / **batch mutations (`ops`)** | ✅ |
+| Envelope / serialization / SSE / gzip / **file uploads** / **batch mutations (`ops`)** / **GET query endpoint** | ✅ |
 | Errors | ✅ |
 | Caching core (TTL/SWR/invalidate) | ✅ (in core; `@orbit/cache` distribution package shipped) |
 | Cache HTTP headers (`x-orbit-cache`, age-aware `cache-control`) | ✅ (spec §7/§8 — hit/miss + CDN/SWR hints; errors always `no-store`) |
@@ -290,7 +290,7 @@ artifact on every push.
 | 3 | **`@orbit/postgres` + `@orbit/mongo`** (0.1.x) | ✅ | Postgres: parameterized `WHERE`, `IN`-clause batching, `create`/`update`/`delete` (`RETURNING`), `parentKey` scoping, validated `limit`, quoted identifiers — no SQL injection (30 tests). Mongo: `filters` → match documents (`eq`/`ne`/`gt`/`gte`/`lt`/`lte`/`regex`), `$in` batching, `create`/`update`/`delete`, `parentKey` scoping, validated `limit`, `toId`/`fromId` id conversion (ObjectId), and a no-operator-injection guarantee — field names charset-validated, payload values walked recursively (40 tests + a compile-time real-driver contract assertion). |
 | 4 | **`@orbit/client`** (after 1.0 freeze) | ⬜ | First-party SDK: typed envelope helpers, WS client with reconnect/resume (the demos' `shared.js` `orbitSocket` is the prototype), client-side cache honoring `invalidates`. Today every consumer re-implements the socket. |
 | 5 | **Batch mutations (`ops`)** | ✅ | Shipped: `ops: [{ do, args?, return? }, …]` field on the envelope — additive, spec §3 compatible. Mutations execute sequentially (fail-fast on first error), response `data` is a per-op array, `invalidates` is the deduplicated union. Each op runs through the full pipeline (onBeforeParse, adapter, cache invalidation, optional `return` re-query). 7 new tests in `engine.test.ts` + contract validation tests. |
-| 6 | **GET query endpoint** | ⬜ decision | Envelope via query-string/headers for CDN-cacheable reads; currently the handler expects a body (POST). Optional, spec-additive. |
+| 6 | **GET query endpoint** | ✅ | Shipped: `GET /orbit?query=...&cache=...` (or `X-Orbit-Query`/`X-Orbit-Cache` headers) for CDN-cacheable reads. Only `{ query }` envelopes allowed via GET — mutations (`do`/`ops`) must use POST. Content negotiation, SSE streaming, and gzip work identically to POST. 11 new tests in `server.test.ts`. |
 | 7 | **Pagination convention** | ✅ | Documented in `docs/adapters.md` — reserved `limit`/`cursor` filter keys, page shape, and validate-the-limit guidance. No syntax change (filters are verbatim by design). |
 | 8 | **`@orbit/logging`** | ✅ | Shipped: `createLoggingPlugin({ logger?, now?, maxLabelLength? })` — times queries from `onBeforeParse`→`onBeforeSerialize` and logs every error (queries + mutations). Cache hits / successful mutations are documented non-timed paths. 9 tests. |
 | 9 | **`@orbit/fastify` wrapper** *(optional)* | ⬜ | Express/Hono/CF ship; Fastify is the remaining major host. |

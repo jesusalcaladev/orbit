@@ -15,6 +15,11 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
 - **`OrbitClient.batchMutate(ops, options?)`** (`@orbit/client`) — sugar
   for `execute({ ops })`. Sends the `ops` envelope, validates client-side,
   and returns the same `OrbitResponse` contract. 3 new tests.
+- **GET query endpoint** — `GET /orbit?query=...&cache=...` (or
+  `X-Orbit-Query`/`X-Orbit-Cache` headers) for CDN-cacheable reads. Only
+  `{ query }` envelopes allowed via GET — mutations (`do`/`ops`) must use
+  POST. Content negotiation, SSE streaming, and gzip work identically to
+  POST. 11 new tests in `server.test.ts`.
 - **Devtools panel power-up (`@orbit/react`)** — the queries tab now has a
   **search filter** (by key or query text), three **sort orders** (`recent` /
   `status` / `key`) and an **expandable per-row inspector** showing the full
