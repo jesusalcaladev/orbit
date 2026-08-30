@@ -1,5 +1,12 @@
 import type { OrbitError } from '../errors.js';
-import type { Filters, OrbitContext, QueryNode, SerializedPayload } from '../types.js';
+import type {
+  Filters,
+  OrbitContext,
+  OrbitEnvelope,
+  OrbitResult,
+  QueryNode,
+  SerializedPayload,
+} from '../types.js';
 
 /** A plugin's `onBeforeResolve` can short-circuit resolution and serve data directly. */
 export interface ShortCircuit {
@@ -59,6 +66,27 @@ export interface ErrorInput {
 }
 
 /**
+ * Input to the `onAfterExecute` hook — the pipeline's single "finally": it
+ * fires once per `execute()` on BOTH the success path (`result`) and the error
+ * path (`error`, already normalized by `onError`), after the `return` re-query
+ * (if any) has run. Ideal for request timing/metrics that the serialize hook
+ * (spec §11) alone can't see — successful mutations and cache-hit short
+ * circuits in particular run no `onBeforeSerialize`.
+ *
+ * Hook return is ignored; errors thrown inside the hook are swallowed by the
+ * engine so a broken observability sink never changes a request's outcome.
+ */
+export interface AfterExecuteInput {
+  /** Success result (defined on the success path). */
+  result?: OrbitResult;
+  /** Normalized error (defined on the error path, after `onError` translation). */
+  error?: OrbitError;
+  /** The validated envelope that was executed. */
+  envelope: OrbitEnvelope;
+  ctx: OrbitContext;
+}
+
+/**
  * The hook surface of the Orbit protocol — the "nervous system" of the engine.
  *
  * The core invokes hooks in a strict sequence:
@@ -93,6 +121,15 @@ export interface OrbitHooks {
   ): unknown | SerializedPayload | void | Promise<unknown | SerializedPayload | void>;
   /** Translate/normalize errors. Return an `OrbitError` to replace it. */
   onError(input: ErrorInput): OrbitError | void | Promise<OrbitError | void>;
+  /**
+   * Runs once per `execute()`, on success (`result`) and on error (`error`,
+   * post-normalization) — the pipeline's "finally". Return is ignored; a thrown
+   * error is swallowed so observability never breaks a request.
+   *
+   * Additive (spec §11): a new, optional hook — plugins that don't define it are
+   * unaffected, and `onError` remains the only error-translation hook.
+   */
+  onAfterExecute(input: AfterExecuteInput): void | Promise<void>;
 }
 
 /**
@@ -146,4 +183,5 @@ export const HOOK_ORDER: (keyof OrbitHooks)[] = [
   'onAfterResolve',
   'onBeforeSerialize',
   'onError',
+  'onAfterExecute',
 ];

@@ -33,6 +33,7 @@
         "useTemplate": "off"
       },
       "suspicious": {
+        "noExplicitAny": "error",
         "noAssignInExpressions": "off",
         "noConfusingVoidType": "off"
       }

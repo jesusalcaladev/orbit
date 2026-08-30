@@ -138,6 +138,53 @@ describe('DevtoolsStore', () => {
     store.close();
   });
 
+  it('reports avg query latency, entities and error codes per row', async () => {
+    const { transport } = fakeTransport();
+    transport.query.mockResolvedValue(okResponse({ n: 1 }));
+    const client = reactClientOf(transport);
+    await client.ensureQuery(['u'], 'user { n }');
+    const store = new DevtoolsStore(client);
+    const row = store.getSnapshot().queries[0]!;
+    expect(row.entities).toEqual(['user']);
+    expect(row.expiresAt).toBeGreaterThan(0);
+    expect(row.staleAt).toBeGreaterThan(row.expiresAt);
+    expect(store.getSnapshot().stats.avgQueryMs).toBeTypeOf('number');
+    store.close();
+
+    // An error-only row exposes the protocol error code.
+    const failing = fakeTransport();
+    failing.transport.query.mockRejectedValue(new OrbitError(ErrorCode.PERMISSION_DENIED, 'nope'));
+    const failingClient = reactClientOf(failing.transport);
+    await failingClient.ensureQuery(['e'], 'err { x }');
+    const failingStore = new DevtoolsStore(failingClient);
+    const errorRow = failingStore.getSnapshot().queries[0]!;
+    expect(errorRow.errorCode).toBe(ErrorCode.PERMISSION_DENIED);
+    failingStore.close();
+  });
+
+  it('leaves the error code undefined for non-protocol errors', async () => {
+    const failing = fakeTransport();
+    failing.transport.query.mockRejectedValue(new Error('plain boom'));
+    const failingClient = reactClientOf(failing.transport);
+    await failingClient.ensureQuery(['e'], 'err { x }');
+    const failingStore = new DevtoolsStore(failingClient);
+    const row = failingStore.getSnapshot().queries[0]!;
+    expect(row.status).toBe('error');
+    expect(row.errorMessage).toBe('plain boom');
+    expect(row.errorCode).toBeUndefined();
+    failingStore.close();
+  });
+
+  it('clearEvents empties the feed snapshot', () => {
+    const client = reactClientOf(fakeTransport().transport);
+    client.logEvent({ type: 'query', query: 'q' });
+    const store = new DevtoolsStore(client);
+    store.clearEvents();
+    expect(client.getEvents()).toHaveLength(0);
+    expect(store.getSnapshot().events).toHaveLength(0);
+    store.close();
+  });
+
   it('exposes refetch/invalidate/clear actions', async () => {
     const { transport } = fakeTransport();
     transport.query.mockResolvedValue(okResponse({ n: 1 }));
@@ -369,6 +416,15 @@ describe('OrbitDevtools (web primitives)', () => {
           {title}
         </button>
       ),
+      TextInput: ({ value, onChangeText, placeholder, testID }) => (
+        <input
+          data-testid={testID}
+          data-rn-input
+          value={value}
+          placeholder={placeholder}
+          onChange={(event) => onChangeText(event.target.value)}
+        />
+      ),
       ScrollView: ({ style, children, testID }) => (
         <div data-testid={testID} data-rn-scroll style={style as never}>
           {children}
@@ -394,6 +450,231 @@ describe('OrbitDevtools (web primitives)', () => {
     expect(webPrimitives.View).toBeDefined();
     expect(webPrimitives.Text).toBeDefined();
     expect(webPrimitives.Button).toBeDefined();
+    expect(webPrimitives.TextInput).toBeDefined();
     expect(webPrimitives.ScrollView).toBeDefined();
+  });
+
+  it('filters queries by key or query text and shows the no-match state', async () => {
+    const { transport } = fakeTransport();
+    transport.query.mockResolvedValue(okResponse({ n: 1 }));
+    const client = reactClientOf(transport);
+    await client.ensureQuery(['posts'], 'posts { id }', { ttl: 60_000 });
+    await client.ensureQuery(['users'], 'users { id }', { ttl: 60_000 });
+
+    renderPanel(client);
+    expect(screen.getByText('["posts"]')).toBeDefined();
+    expect(screen.getByText('["users"]')).toBeDefined();
+
+    const input = screen.getByTestId('orbit-devtools-search');
+    fireEvent.change(input, { target: { value: 'post' } });
+    expect(screen.getByText('["posts"]')).toBeDefined();
+    expect(screen.queryByText('["users"]')).toBeNull();
+
+    fireEvent.change(input, { target: { value: 'zzz' } });
+    expect(screen.getByText(/No queries match the filter/)).toBeDefined();
+
+    // Clearing the filter restores every row.
+    fireEvent.change(input, { target: { value: '' } });
+    expect(screen.getByText('["users"]')).toBeDefined();
+  });
+
+  it('expands a row into the full-data inspector and collapses it again', async () => {
+    const { transport } = fakeTransport();
+    transport.query.mockResolvedValue(
+      okResponse({ id: 'p1', title: 'Hello', tags: ['a', 'b'] }, { fromCache: true }),
+    );
+    const client = reactClientOf(transport);
+    await client.ensureQuery(['posts'], 'posts { id }', { ttl: 60_000 });
+
+    renderPanel(client);
+    const row = screen.getByTestId(`query-${client.cacheKeyOf(['posts'], 'posts { id }')}`);
+    // Clicking the row body (not a button) toggles the inspector too.
+    fireEvent.click(row);
+    expect(screen.getByText('data')).toBeDefined();
+    expect(screen.getByText(/"title": "Hello"/)).toBeDefined();
+    expect(screen.getByText(/entities: posts/)).toBeDefined();
+    expect(screen.getByText(/fresh until/)).toBeDefined();
+    expect(screen.getAllByText(/server-cached/).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByText('▾'));
+    expect(screen.queryByText('data')).toBeNull();
+  });
+
+  it('expands a plain-error row without a code suffix', async () => {
+    const { transport } = fakeTransport();
+    transport.query.mockRejectedValue(new Error('plain boom'));
+    const client = reactClientOf(transport);
+    await client.ensureQuery(['e'], 'err { x }');
+
+    renderPanel(client);
+    fireEvent.click(screen.getAllByText('▸')[0]!);
+    expect(screen.getAllByText('plain boom').length).toBeGreaterThan(0);
+    expect(screen.queryByText(/\[ORBIT/)).toBeNull();
+    expect(screen.getByText(/fetched/)).toBeDefined();
+  });
+
+  it('expands an error row into its message and code', async () => {
+    const { transport } = fakeTransport();
+    transport.query.mockRejectedValue(new OrbitError(ErrorCode.INTERNAL, 'kaboom'));
+    const client = reactClientOf(transport);
+    await client.ensureQuery(['e'], 'err { x }');
+
+    renderPanel(client);
+    fireEvent.click(screen.getAllByText('▸')[0]!);
+    expect(screen.getByText(/kaboom \[ORBIT_INTERNAL\]/)).toBeDefined();
+  });
+
+  it('expands a loading row into the in-flight placeholder', async () => {
+    const { transport } = fakeTransport();
+    let releaseFetch: (() => void) | undefined;
+    transport.query.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          releaseFetch = () => resolve(okResponse({ n: 1 }));
+        }),
+    );
+    const client = reactClientOf(transport);
+    void client.ensureQuery(['u'], 'user { n }');
+    await vi.waitFor(() => expect(releaseFetch).toBeDefined());
+
+    renderPanel(client);
+    fireEvent.click(screen.getAllByText('▸')[0]!);
+    expect(screen.getByText(/no data yet/)).toBeDefined();
+    expect(screen.getByText(/fetching ·/)).toBeDefined();
+    act(() => releaseFetch!());
+  });
+
+  it('sorts by key and by status (errors first)', async () => {
+    const { transport } = fakeTransport();
+    transport.query
+      .mockRejectedValueOnce(new OrbitError(ErrorCode.INTERNAL, 'boom'))
+      .mockResolvedValue(okResponse({ n: 1 }));
+    const client = reactClientOf(transport);
+    await client.ensureQuery(['bad'], 'bad { x }');
+    await client.ensureQuery(['zzz'], 'z { id }', { ttl: 60_000 });
+    await client.ensureQuery(['aaa'], 'a { id }', { ttl: 60_000 });
+    // The three fetches can settle within the same millisecond — give each
+    // row a distinct fetchedAt so the 'recent' order is deterministic.
+    const now = Date.now();
+    client.cache.stateOf(client.cacheKeyOf(['bad'], 'bad { x }')).error!.at = now - 3_000;
+    client.cache.stateOf(client.cacheKeyOf(['zzz'], 'z { id }')).entry!.createdAt = now - 2_000;
+    client.cache.stateOf(client.cacheKeyOf(['aaa'], 'a { id }')).entry!.createdAt = now - 1_000;
+
+    renderPanel(client);
+    const byTestId = () => screen.getAllByTestId(/^query-/);
+
+    // Default 'recent': aaa (fetched last) first.
+    expect(byTestId()[0]!.textContent).toContain('["aaa"]');
+
+    fireEvent.click(screen.getByText('key'));
+    expect(byTestId()[0]!.textContent).toContain('["aaa"]');
+    expect(byTestId()[2]!.textContent).toContain('["zzz"]');
+
+    fireEvent.click(screen.getByText('status'));
+    expect(byTestId()[0]!.textContent).toContain('bad'); // error rows float first
+    expect(byTestId()[1]!.textContent).toContain('["zzz"]'); // fresh ties keep insertion order
+    expect(byTestId()[2]!.textContent).toContain('["aaa"]');
+
+    fireEvent.click(screen.getByText('recent'));
+    expect(byTestId()[0]!.textContent).toContain('["aaa"]');
+  });
+
+  it('filters the activity feed by type and shows the no-match state', async () => {
+    const { transport } = fakeTransport();
+    transport.query.mockResolvedValue(okResponse({ n: 1 }));
+    const client = reactClientOf(transport);
+    await client.ensureQuery(['u'], 'user { n }');
+    client.logEvent({ type: 'stream', key: ['t'], query: 't { x }', at: Date.now() });
+
+    renderPanel(client);
+    fireEvent.click(screen.getByText(/Activity/));
+    expect(screen.getAllByText('query').length).toBeGreaterThan(0);
+
+    // A type with no events → the no-match empty state.
+    fireEvent.click(screen.getByText('mutation'));
+    expect(screen.getByText(/No events of this type/)).toBeDefined();
+
+    // A type present in the feed → only its rows.
+    fireEvent.click(screen.getByText('stream'));
+    expect(screen.getAllByText('["t"]').length).toBeGreaterThan(0);
+    expect(screen.queryByText('["u"]')).toBeNull();
+
+    fireEvent.click(screen.getByText('all'));
+    expect(screen.getAllByText('["u"]').length).toBeGreaterThan(0);
+  });
+
+  it('clears the activity feed from the chips row', async () => {
+    const { transport } = fakeTransport();
+    transport.query.mockResolvedValue(okResponse({ n: 1 }));
+    const client = reactClientOf(transport);
+    await client.ensureQuery(['u'], 'user { n }');
+
+    renderPanel(client);
+    fireEvent.click(screen.getByText(/Activity/));
+    fireEvent.click(screen.getByText('✕ clear feed'));
+    expect(screen.getByText(/Nothing yet/)).toBeDefined();
+    expect(client.getEvents()).toHaveLength(0);
+  });
+
+  it('renders non-serializable data via String() in the inspector', () => {
+    const client = reactClientOf(fakeTransport().transport);
+    const circular: Record<string, unknown> = { name: 'x' };
+    circular.self = circular;
+    const cacheKey = client.cacheKeyOf(['c'], 'c { x }');
+    client.cache.describe(cacheKey, ['c'], 'c { x }');
+    client.cache.set(cacheKey, {
+      key: ['c'],
+      query: 'c { x }',
+      data: circular,
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 1_000,
+      staleAt: Date.now() + 2_000,
+      fromCache: false,
+      entities: [],
+    });
+    renderPanel(client);
+    fireEvent.click(screen.getAllByText('▸')[0]!);
+    expect(screen.getAllByText(String(circular)).length).toBeGreaterThan(0);
+  });
+
+  it('truncates oversized inspector payloads', () => {
+    const client = reactClientOf(fakeTransport().transport);
+    const cacheKey = client.cacheKeyOf(['big'], 'big { x }');
+    client.cache.describe(cacheKey, ['big'], 'big { x }');
+    client.cache.set(cacheKey, {
+      key: ['big'],
+      query: 'big { x }',
+      data: { blob: 'x'.repeat(20_001) },
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 1_000,
+      staleAt: Date.now() + 2_000,
+      fromCache: false,
+      entities: [],
+    });
+    renderPanel(client);
+    fireEvent.click(screen.getAllByText('▸')[0]!);
+    expect(screen.getByText(/\(truncated\)/)).toBeDefined();
+  });
+
+  it('shows average query latency in the header', async () => {
+    const { transport } = fakeTransport();
+    transport.query.mockResolvedValue(okResponse({ n: 1 }));
+    const client = reactClientOf(transport);
+    await client.ensureQuery(['u'], 'user { n }');
+
+    renderPanel(client);
+    expect(screen.getByText(/avg query/)).toBeDefined();
+  });
+
+  it('renders latency for timed activity events', async () => {
+    const { transport } = fakeTransport();
+    transport.query.mockResolvedValue(okResponse({ n: 1 }));
+    const client = reactClientOf(transport);
+    await client.ensureQuery(['u'], 'user { n }');
+    client.logEvent({ type: 'mutation', action: 'x.y', ok: true, ms: 250, at: Date.now() });
+
+    renderPanel(client);
+    fireEvent.click(screen.getByText(/Activity/));
+    expect(screen.getByText(/250ms/)).toBeDefined();
   });
 });

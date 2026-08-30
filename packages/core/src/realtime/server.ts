@@ -273,7 +273,6 @@ interface SessionOptions {
 
 class Session {
   readonly #socket: Duplex;
-  readonly #hub: SubscriptionHub;
   readonly #options: SessionOptions;
   readonly #authCtx: OrbitContext;
   readonly #decoder: FrameDecoder;
@@ -296,7 +295,6 @@ class Session {
     cancelRelease: (clientId: string) => void,
   ) {
     this.#socket = socket;
-    this.#hub = hub;
     this.#options = options;
     this.#authCtx = authCtx;
     this.#decoder = new FrameDecoder(options.maxMessageBytes);

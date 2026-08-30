@@ -36,7 +36,7 @@ export function App() {
 | Hook | What it does |
 | --- | --- |
 | `useOrbitQuery(key, query, options)` | Read with the cache: fresh → instant, stale → instant + background refresh, missing → fetch. |
-| `useOrbitMutation(spec, options)` | `{ do, args?, return? }`; `invalidates` entities evict the cache automatically. |
+| `useOrbitMutation(spec, options)` | `{ do, args?, return? }`; `invalidates` entities evict the cache automatically; `signal`/`timeoutMs` cancel a hanging mutation. |
 | `useOrbitSubscription(key, query, options)` | Live events over the shared WebSocket (reconnect + `resume` handled by the transport). |
 | `useOrbitStream(key, query, options)` | SSE levels as they arrive (`frames` grows, `isDone` at the end). |
 | `useOrbitClient()` | The imperative cache API from any component. |
@@ -61,7 +61,18 @@ import { OrbitDevtools } from '@orbit/react/devtools';
 </OrbitProvider>
 ```
 
-On React Native, pass the `react-native` components as `primitives` — see
+The panel shows a header with live stats (entries, hit ratio, average query
+latency), and the queries tab ships a **search filter**, three **sort orders**
+(`recent` / `status` / `key`) and an **expandable per-row inspector** with the
+full pretty-printed cached data plus entry metadata (TTL/fresh-until/stale-
+until, server-cached vs network, entity scope). The **activity tab** filters by
+event type and can clear the feed; every query row can refetch or evict, and
+the footer refetches or clears everything. `client.realtimeStatus` and
+`client.activeSubscriptions` expose the socket state for app-level connection
+indicators.
+
+On React Native, pass the `react-native` components (`View`, `Text`,
+`Pressable`, `TextInput`, `ScrollView`) as `primitives` — see
 `src/devtools/ui.tsx` for the wiring. Persist with AsyncStorage:
 
 ```ts

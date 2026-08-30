@@ -2,39 +2,37 @@
 
 All notable changes to `@orbit/core` are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [0.1.0] - 2026-08-23
+## [Unreleased]
 
 ### Added
-- **Production metrics (`@orbit/metrics`)** — a dependency-free collector
-  that instruments any Orbit handler: request counts by HTTP status, error
-  counts by standard protocol code (spec §6), cache hits/misses from the §8
-  `x-orbit-cache` header, rate-limited 429s, and latency stats (count, sum,
-  max, exact p50/p99 over a bounded window plus a bucketed histogram for
-  Prometheus-style export). `snapshot()` is plain JSON; `reset()` zeroes it.
-  Ships at **100% coverage** on all four metrics.
-- **Real-Redis integration suite (`@orbit/redis`)** — runs only when
-  `REDIS_URI` is set (skipped locally; the CI workflow now starts a
-  `redis:7` service): proves the Lua token-bucket against a real server —
-  two independent clients sharing one Redis cannot double-spend a token —
-  plus cache round-trips across instances and server-side TTL expiry.
-- **Client-side query cache (`@orbit/client` `QueryCache`)** — the client
-  half of spec §8: entries keyed by query string, TTLs from the same spec
-  grammar the server speaks (`ttl=300` via the core's `parseCacheSpec`),
-  entity-precise indexing of every entity in the query tree (root AND
-  relations), and eviction from the mutation's `invalidates` echo — entity
-  names or exact keys. `OrbitClient` accepts a `cache:` option; queries with
-  a cache spec are served fresh from it without a network round-trip and
-  marked `fromCache`, mutations always hit the network and evict through
-  their echo. Client coverage stays at **100%** on all four metrics.
-- **Duplicate rejection in OQS (spec §4)** — a repeated filter key
-  (`user(id="1", id="2")`), repeated field (`user { name, name }`) or
-  repeated relation (`user { posts { a }, posts { b } }`) now raises
-  `ORBIT_INVALID_QUERY` naming the offender; previously duplicates silently
-  kept the last value or dropped the first subtree.
-- **Timeout bounds the whole exchange in `@orbit/client`** — `timeoutMs`
-  used to be released as soon as the response HEADERS arrived, so a server
-  that stalled/trickled the body hung past the timeout (envelope, upload and
-  decompression paths; the SSE stream path already handled this).
+- **Batch mutations (`ops`)** — `@orbit/core` now accepts an `ops` array on
+  the envelope: `[{ do, args?, return? }, …]`. Mutations execute
+  sequentially (fail-fast on first error); response `data` is a per-op
+  result array; `invalidates` is the deduplicated union. Each op runs
+  through the full pipeline (onBeforeParse, adapter, cache invalidation,
+  optional `return` re-query). Streaming rejects `ops`. 7 new tests in
+  `engine.test.ts` + contract validation tests.
+- **`OrbitClient.batchMutate(ops, options?)`** (`@orbit/client`) — sugar
+  for `execute({ ops })`. Sends the `ops` envelope, validates client-side,
+  and returns the same `OrbitResponse` contract. 3 new tests.
+- **Devtools panel power-up (`@orbit/react`)** — the queries tab now has a
+  **search filter** (by key or query text), three **sort orders** (`recent` /
+  `status` / `key`) and an **expandable per-row inspector** showing the full
+  pretty-printed cached data (length-capped) plus entry metadata (TTL,
+  fresh-until / stale-until, server-cached vs network, entity scope, error
+  code). The header reports **average query latency** alongside entries and
+  hit ratio, and the activity tab gained type-filter chips and a **clear
+  feed** action (`client.clearEvents()`). The panel primitives contract grew
+  a `TextInput` so search works on React Native too; a click on a row body or
+  the `▸`/`▾` button toggles the inspector without triggering the row's
+  actions. 34 devtools tests (up from 23), 100% coverage retained.
+- **`OrbitClient.realtimeStatus` + `OrbitClient.activeSubscriptions`**
+  (`@orbit/client`) — the shared socket's state and the number of attached
+  subscriptions, for app-level connection indicators without holding
+  per-subscription handles.
+- **`useOrbitMutation` cancellation** (`@orbit/react`) — `signal` and
+  `timeoutMs` options now ride through to the transport, so a hanging
+  mutation can be aborted or timed out like a query.
 - **Full-stack example (`examples/node/stack/13-fullstack-mongo.ts`)** —
   one Orbit engine with the whole first-party ecosystem mounted and proven
   live: `@orbit/mongo` adapters (relations + `$in` batching, mutations),

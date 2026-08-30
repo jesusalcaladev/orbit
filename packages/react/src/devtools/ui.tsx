@@ -2,13 +2,13 @@
  * `<OrbitDevtools />` — a floating devtools panel for the react client.
  *
  * The panel is platform-agnostic: it renders ONLY through the injected
- * `primitives` (View/Text/Button/ScrollView + styles) and never touches the
- * DOM or React Native APIs directly. The default primitives are plain DOM
- * elements (works in any web app out of the box); on React Native pass the
- * `react-native` components and the same panel renders natively:
+ * `primitives` (View/Text/Button/TextInput/ScrollView + styles) and never
+ * touches the DOM or React Native APIs directly. The default primitives are
+ * plain DOM elements (works in any web app out of the box); on React Native
+ * pass the `react-native` components and the same panel renders natively:
  *
  * ```tsx
- * import { View, Text, Pressable, ScrollView } from 'react-native';
+ * import { View, Text, Pressable, TextInput, ScrollView } from 'react-native';
  * import { OrbitDevtools, type DevtoolsPrimitives } from '@orbit/react/devtools';
  *
  * const rnPrimitives: DevtoolsPrimitives = {
@@ -19,6 +19,7 @@
  *       <Text style={btnText}>{title}</Text>
  *     </Pressable>
  *   ),
+ *   TextInput,
  *   ScrollView,
  * };
  * ```
@@ -26,6 +27,11 @@
  * Styles use the flexbox + absolute-positioning subset shared by DOM and RN,
  * and every interactive leaf receives `onPress` (the web primitives translate
  * it to `onClick`).
+ *
+ * The queries tab supports a search filter, three sort orders (recent /
+ * status / key) and an expandable per-row inspector showing the full cached
+ * data and entry metadata; the activity tab filters by event type and can
+ * clear the feed.
  */
 import {
   useEffect,
@@ -55,6 +61,13 @@ export interface DevtoolsPrimitives {
     onPress: () => void;
     style?: DevtoolsStyle;
     disabled?: boolean;
+  }>;
+  TextInput: ComponentType<{
+    value: string;
+    onChangeText: (text: string) => void;
+    placeholder?: string;
+    style?: DevtoolsStyle;
+    testID?: string;
   }>;
   ScrollView: ComponentType<{ style?: DevtoolsStyle; children?: ReactNode; testID?: string }>;
 }
@@ -120,9 +133,43 @@ function WebButton({
   disabled?: boolean;
 }) {
   return (
-    <button type="button" disabled={disabled} onClick={onPress} style={style as CSSProperties}>
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={(event) => {
+        // Rows and other containers may attach their own onPress — a button
+        // click must never toggle the parent's handler too.
+        event.stopPropagation();
+        onPress();
+      }}
+      style={style as CSSProperties}
+    >
       {title}
     </button>
+  );
+}
+
+function WebTextInput({
+  value,
+  onChangeText,
+  placeholder,
+  style,
+  testID,
+}: {
+  value: string;
+  onChangeText: (text: string) => void;
+  placeholder?: string;
+  style?: DevtoolsStyle;
+  testID?: string;
+}) {
+  return (
+    <input
+      data-testid={testID}
+      value={value}
+      placeholder={placeholder}
+      onChange={(event) => onChangeText(event.target.value)}
+      style={style as CSSProperties}
+    />
   );
 }
 
@@ -147,6 +194,7 @@ export const webPrimitives: DevtoolsPrimitives = {
   View: WebView,
   Text: WebText,
   Button: WebButton,
+  TextInput: WebTextInput,
   ScrollView: WebScrollView,
 };
 
@@ -260,6 +308,38 @@ const s = {
     borderColor: C.accent,
     color: C.accent,
   } as DevtoolsStyle,
+  toolbar: {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: C.border,
+  } as DevtoolsStyle,
+  search: {
+    flex: 1,
+    backgroundColor: '#1d1d1d',
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 8,
+    color: C.text,
+    fontSize: 12,
+    paddingVertical: 5,
+    paddingHorizontal: 8,
+    outlineWidth: 0,
+  } as DevtoolsStyle,
+  sortBtn: {
+    backgroundColor: '#1d1d1d',
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 6,
+    color: C.faint,
+    fontSize: 10,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+  } as DevtoolsStyle,
   body: { maxHeight: 360, padding: 10 },
   row: {
     display: 'flex',
@@ -310,6 +390,20 @@ const s = {
     paddingVertical: 2,
     paddingHorizontal: 8,
   } as DevtoolsStyle,
+  inspector: {
+    backgroundColor: '#101010',
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 8,
+    padding: 8,
+    gap: 6,
+  } as DevtoolsStyle,
+  inspectorLabel: {
+    color: C.accent,
+    fontSize: 10,
+    fontWeight: 'bold' as const,
+    textTransform: 'uppercase' as const,
+  } as DevtoolsStyle,
   empty: { color: C.faint, fontSize: 12, padding: 16, textAlign: 'center' as const },
   eventRow: {
     display: 'flex',
@@ -327,6 +421,26 @@ const s = {
   } as DevtoolsStyle,
   eventDetail: { color: C.dim, fontSize: 11, flex: 1 },
   eventTime: { color: C.faint, fontSize: 10 },
+  chips: {
+    display: 'flex',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: C.border,
+  } as DevtoolsStyle,
+  chipBtn: {
+    backgroundColor: '#1d1d1d',
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 999,
+    color: C.faint,
+    fontSize: 10,
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+  } as DevtoolsStyle,
   footer: {
     display: 'flex',
     flexDirection: 'row',
@@ -400,6 +514,41 @@ function eventColor(type: ActivityEvent['type']): string {
   }
 }
 
+/** Every activity event type — the chip row in the activity tab. */
+const ACTIVITY_TYPES: ActivityEvent['type'][] = [
+  'query',
+  'mutation',
+  'subscription',
+  'stream',
+  'invalidate',
+  'setData',
+  'clear',
+  'hydrate',
+];
+
+const PRETTY_CAP = 20_000;
+
+/** Pretty-print the full cached data for the inspector, with a length cap. */
+function pretty(data: unknown): string {
+  try {
+    const text = JSON.stringify(data, null, 2);
+    return text.length > PRETTY_CAP
+      ? `${text.slice(0, PRETTY_CAP)}\n… (truncated)`
+      : text;
+  } catch {
+    return String(data);
+  }
+}
+
+const STATUS_RANK: Record<'fresh' | 'stale' | 'loading' | 'error', number> = {
+  error: 0,
+  loading: 1,
+  stale: 2,
+  fresh: 3,
+};
+
+type QuerySort = 'recent' | 'status' | 'key';
+
 // ---------------------------------------------------------------------------
 // The panel
 // ---------------------------------------------------------------------------
@@ -423,10 +572,37 @@ export function OrbitDevtools({
   );
   const [open, setOpen] = useState(initialOpen);
   const [tab, setTab] = useState<'queries' | 'subscriptions' | 'activity'>('queries');
+  const [filter, setFilter] = useState('');
+  const [sort, setSort] = useState<QuerySort>('recent');
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+  const [activityFilter, setActivityFilter] = useState<string>('all');
 
-  const { View, Text, Button, ScrollView } = primitives;
+  const { View, Text, Button, TextInput, ScrollView } = primitives;
   const toggleAlign: DevtoolsStyle =
     position === 'bottom-left' ? { left: 24 } : { right: 24 };
+
+  // Queries tab: search filter + sort, applied before render. Computed before
+  // the early return so the hook order stays stable across open/close.
+  const queryRows = useMemo(() => {
+    let rows = snapshot.queries;
+    if (filter !== '') {
+      const needle = filter.toLowerCase();
+      rows = rows.filter((row) =>
+        `${formatKey(row.key)} ${row.query}`.toLowerCase().includes(needle),
+      );
+    }
+    return [...rows].sort((a, b) => {
+      if (sort === 'recent') return b.fetchedAt - a.fetchedAt;
+      if (sort === 'key') return formatKey(a.key).localeCompare(formatKey(b.key));
+      return STATUS_RANK[a.status] - STATUS_RANK[b.status];
+    });
+  }, [snapshot.queries, filter, sort]);
+
+  // Activity tab: a stable chip row (all types) + clear-feed action.
+  const activityRows =
+    activityFilter === 'all'
+      ? snapshot.events
+      : snapshot.events.filter((event) => event.type === activityFilter);
 
   if (!open) {
     return (
@@ -438,7 +614,20 @@ export function OrbitDevtools({
 
   const stats = snapshot.stats;
   const hitRatio =
-    stats.hits + stats.misses === 0 ? '—' : `${Math.round((stats.hits / (stats.hits + stats.misses)) * 100)}%`;
+    stats.hits + stats.misses === 0
+      ? '—'
+      : `${Math.round((stats.hits / (stats.hits + stats.misses)) * 100)}%`;
+  const avg =
+    stats.avgQueryMs === undefined ? '—' : `${stats.avgQueryMs}ms avg query`;
+
+  const toggleRow = (cacheKey: string): void => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(cacheKey)) next.delete(cacheKey);
+      else next.add(cacheKey);
+      return next;
+    });
+  };
 
   return (
     <View testID="orbit-devtools" style={s.overlay}>
@@ -447,7 +636,7 @@ export function OrbitDevtools({
         <View style={s.header}>
           <Text style={s.headerTitle}>🔮 Orbit devtools</Text>
           <Text style={s.headerStats}>
-            {stats.entries} entries · {hitRatio} hit · {stats.events} events
+            {stats.entries} entries · {hitRatio} hit · {avg}
           </Text>
           <Button title="close" onPress={() => setOpen(false)} style={s.closeBtn} />
         </View>
@@ -470,35 +659,113 @@ export function OrbitDevtools({
           />
         </View>
 
+        {tab === 'queries' && (
+          <View style={s.toolbar}>
+            <TextInput
+              testID="orbit-devtools-search"
+              value={filter}
+              onChangeText={setFilter}
+              placeholder="filter queries…"
+              style={s.search}
+            />
+            <Button
+              title="recent"
+              onPress={() => setSort('recent')}
+              style={sort === 'recent' ? { ...s.sortBtn, ...s.tabActive } : s.sortBtn}
+            />
+            <Button
+              title="status"
+              onPress={() => setSort('status')}
+              style={sort === 'status' ? { ...s.sortBtn, ...s.tabActive } : s.sortBtn}
+            />
+            <Button
+              title="key"
+              onPress={() => setSort('key')}
+              style={sort === 'key' ? { ...s.sortBtn, ...s.tabActive } : s.sortBtn}
+            />
+          </View>
+        )}
+
         <ScrollView testID="orbit-devtools-body" style={s.body}>
           {tab === 'queries' && (
             <>
-              {snapshot.queries.length === 0 && (
-                <Text style={s.empty}>No cached queries yet — run a query and watch it land here.</Text>
+              {queryRows.length === 0 && (
+                <Text style={s.empty}>
+                  {filter === ''
+                    ? 'No cached queries yet — run a query and watch it land here.'
+                    : 'No queries match the filter.'}
+                </Text>
               )}
-              {snapshot.queries.map((row) => (
-                <View key={row.cacheKey} testID={`query-${row.cacheKey}`} style={s.row}>
-                  <View style={s.rowTop}>
-                    <Text style={s.keyText}>{formatKey(row.key)}</Text>
-                    <Text style={chipStyle(row.status)}>{row.status}</Text>
-                  </View>
-                  <Text style={s.queryText} numberOfLines={1}>
-                    {row.query}
-                  </Text>
-                  <Text style={s.dataText} numberOfLines={2}>
-                    {row.hasData ? row.dataPreview : row.errorMessage}
-                  </Text>
-                  <View style={s.rowMeta}>
-                    <Text style={s.metaText}>
-                      {row.hasData
-                        ? `${fmtMs(row.ttlLeftMs)} ttl · ${row.fromCache ? 'server-cached' : 'network'} · ${timeOf(row.fetchedAt)}`
-                        : `failed · ${timeOf(row.fetchedAt)}`}
+              {queryRows.map((row) => {
+                const isExpanded = expanded.has(row.cacheKey);
+                return (
+                  <View
+                    key={row.cacheKey}
+                    testID={`query-${row.cacheKey}`}
+                    style={s.row}
+                    onPress={() => toggleRow(row.cacheKey)}
+                  >
+                    <View style={s.rowTop}>
+                      <Text style={s.keyText}>{formatKey(row.key)}</Text>
+                      <Text style={chipStyle(row.status)}>{row.status}</Text>
+                    </View>
+                    <Text style={s.queryText} numberOfLines={1}>
+                      {row.query}
                     </Text>
-                    <Button title="⟳" onPress={() => store.refetch(row.key, row.query)} style={s.miniBtn} />
-                    <Button title="✕" onPress={() => store.invalidate(row.key)} style={s.miniBtn} />
+                    <Text style={s.dataText} numberOfLines={2}>
+                      {row.hasData ? row.dataPreview : row.errorMessage ?? 'fetching…'}
+                    </Text>
+                    <View style={s.rowMeta}>
+                      <Text style={s.metaText}>
+                        {row.hasData
+                          ? `${fmtMs(row.ttlLeftMs)} ttl · ${row.fromCache ? 'server-cached' : 'network'} · ${timeOf(row.fetchedAt)}`
+                          : row.status === 'error'
+                            ? `failed · ${timeOf(row.fetchedAt)}`
+                            : `fetching · ${timeOf(row.fetchedAt)}`}
+                      </Text>
+                      <Button
+                        title={isExpanded ? '▾' : '▸'}
+                        onPress={() => toggleRow(row.cacheKey)}
+                        style={s.miniBtn}
+                      />
+                      <Button title="⟳" onPress={() => store.refetch(row.key, row.query)} style={s.miniBtn} />
+                      <Button title="✕" onPress={() => store.invalidate(row.key)} style={s.miniBtn} />
+                    </View>
+                    {isExpanded && (
+                      <View style={s.inspector}>
+                        {row.hasData && (
+                          <>
+                            <Text style={s.inspectorLabel}>data</Text>
+                            <Text style={s.dataText}>{pretty(row.data)}</Text>
+                          </>
+                        )}
+                        {row.status === 'error' && (
+                          <>
+                            <Text style={s.inspectorLabel}>error</Text>
+                            <Text style={s.dataText}>
+                              {row.errorMessage}
+                              {row.errorCode !== undefined ? ` [${row.errorCode}]` : ''}
+                            </Text>
+                          </>
+                        )}
+                        {!row.hasData && row.status !== 'error' && (
+                          <Text style={s.metaText}>no data yet — fetch in flight…</Text>
+                        )}
+                        <Text style={s.inspectorLabel}>meta</Text>
+                        <Text style={s.metaText}>
+                          fetched {timeOf(row.fetchedAt)}
+                          {row.hasData
+                            ? ` · fresh until ${timeOf(row.expiresAt)} · stale until ${timeOf(row.staleAt)} · ${row.fromCache ? 'server-cached' : 'network'}`
+                            : ''}
+                          {row.entities.length > 0
+                            ? ` · entities: ${row.entities.join(', ')}`
+                            : ''}
+                        </Text>
+                      </View>
+                    )}
                   </View>
-                </View>
-              ))}
+                );
+              })}
             </>
           )}
 
@@ -527,13 +794,42 @@ export function OrbitDevtools({
               {snapshot.events.length === 0 && (
                 <Text style={s.empty}>Nothing yet — queries, mutations, subscriptions and invalidations land here.</Text>
               )}
-              {snapshot.events.map((event) => (
+              {snapshot.events.length > 0 && (
+                <View style={s.chips}>
+                  <Button
+                    title="all"
+                    onPress={() => setActivityFilter('all')}
+                    style={activityFilter === 'all' ? { ...s.chipBtn, ...s.tabActive } : s.chipBtn}
+                  />
+                  {ACTIVITY_TYPES.map((type) => (
+                    <Button
+                      key={type}
+                      title={type}
+                      onPress={() => setActivityFilter(type)}
+                      style={activityFilter === type ? { ...s.chipBtn, ...s.tabActive } : s.chipBtn}
+                    />
+                  ))}
+                  <Button
+                    title="✕ clear feed"
+                    onPress={() => store.clearEvents()}
+                    style={{ ...s.chipBtn, ...s.dangerBtn }}
+                  />
+                </View>
+              )}
+              {activityRows.length === 0 && snapshot.events.length > 0 && (
+                <Text style={s.empty}>No events of this type.</Text>
+              )}
+              {activityRows.map((event) => (
                 <View key={event.id} style={s.eventRow}>
                   <Text style={{ ...s.eventType, color: eventColor(event.type) }}>
                     {event.type}
                   </Text>
                   <Text style={s.eventDetail} numberOfLines={1}>
-                    {event.detail ?? (event.key !== undefined ? formatKey(event.key) : undefined) ?? event.action ?? ''}
+                    {event.detail ??
+                      (event.key !== undefined ? formatKey(event.key) : undefined) ??
+                      event.action ??
+                      ''}
+                    {event.ms !== undefined ? ` · ${fmtMs(event.ms)}` : ''}
                   </Text>
                   <Text style={s.eventTime}>{timeOf(event.at)}</Text>
                 </View>
@@ -543,9 +839,13 @@ export function OrbitDevtools({
         </ScrollView>
 
         <View style={s.footer}>
-          <Button title="⟳ refetch all" onPress={() => {
-            for (const row of snapshot.queries) store.refetch(row.key, row.query);
-          }} style={s.footerBtn} />
+          <Button
+            title="⟳ refetch all"
+            onPress={() => {
+              for (const row of snapshot.queries) store.refetch(row.key, row.query);
+            }}
+            style={s.footerBtn}
+          />
           <Button title="✕ clear cache" onPress={() => store.clear()} style={{ ...s.footerBtn, ...s.dangerBtn }} />
         </View>
       </View>

@@ -34,6 +34,12 @@ await client.mutate('user.update', {
   payload: { name: 'Ana' },
 }, { return: 'user(id="1") { name, posts { title } }' });
 
+// Batch mutations — multiple ops in one request.
+const { data: results } = await client.batchMutate([
+  { do: 'user.update', args: { filter: { id: '1' }, payload: { name: 'Ana' } } },
+  { do: 'post.create', args: { payload: { title: 'Hello' } }, return: 'post { id }' },
+]);
+
 // Stream a graph level by level over SSE (spec §7).
 for await (const frame of client.stream('user(id="1") { posts { title } }')) {
   console.log(frame.level, frame.data); // level 0, 1, … 'done'
@@ -50,9 +56,10 @@ sub.onStatus((status) => console.log('socket:', status)); // connecting → live
 
 | Method | What it does |
 | --- | --- |
-| `execute(envelope, options?)` | POST any envelope `{ query }` / `{ do }` and parse the reply. The core primitive; everything else is sugar. |
+| `execute(envelope, options?)` | POST any envelope `{ query }` / `{ do }` / `{ ops }` and parse the reply. The core primitive; everything else is sugar. |
 | `query(query, options?)` | `execute({ query })`. |
 | `mutate(action, args, options?)` | `execute({ do, args, return? })` — the `return` option re-queries the graph after the mutation (spec §5). |
+| `batchMutate(ops, options?)` | `execute({ ops })` — batch mutations in one request. Each op is `{ do, args?, return? }`. Executes sequentially (fail-fast); response `data` is a per-op array; `invalidates` is the deduplicated union (spec §3). |
 | `stream(query, options?)` | SSE: async iterable of `{ level, data }` frames (spec §7). Aborting cancels the body read. |
 | `upload(action, args, files, options?)` | `multipart/form-data` mutation; each file lands in `ctx.files` (spec §7). |
 | `subscribe(query, handler, options?)` | Realtime subscription; returns a handle with `id`, `seq` (resume cursor), `close()`, `onStatus`, `onError`, `onAck`. |

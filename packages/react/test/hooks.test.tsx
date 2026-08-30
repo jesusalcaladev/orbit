@@ -278,6 +278,22 @@ describe('useOrbitMutation', () => {
     expect(result.current.isIdle).toBe(true);
     expect(result.current.data).toBeUndefined();
   });
+
+  it('forwards signal and timeoutMs to the transport', async () => {
+    const { transport } = fakeTransport();
+    transport.mutate.mockResolvedValue(okResponse({ id: '1' }));
+    const client = reactClientOf(transport);
+    const signal = new AbortController().signal;
+    const { result } = renderHook(
+      () => useOrbitMutation({ do: 'x.y' }, { signal, timeoutMs: 123 }),
+      { wrapper: wrap(client) },
+    );
+    act(() => {
+      void result.current.mutateAsync();
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(transport.mutate).toHaveBeenCalledWith('x.y', {}, { signal, timeoutMs: 123 });
+  });
 });
 
 describe('useOrbitSubscription', () => {

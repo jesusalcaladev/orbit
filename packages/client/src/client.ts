@@ -1,5 +1,11 @@
 import { ErrorCode, OrbitError, validateEnvelope } from '@orbit/core';
-import type { MutationArgs, OrbitEnvelope, OrbitStreamEvent, SubscriptionEvent } from '@orbit/core';
+import type {
+  MutationArgs,
+  MutationOp,
+  OrbitEnvelope,
+  OrbitStreamEvent,
+  SubscriptionEvent,
+} from '@orbit/core';
 import { defaultDecompress, postEnvelope } from './http.js';
 import type { HttpDeps } from './http.js';
 import { buildFormData, postFormData } from './multipart.js';
@@ -13,6 +19,7 @@ import type {
   ClientFormat,
   OrbitClientOptions,
   OrbitResponse,
+  RealtimeStatus,
   RequestOptions,
   SocketClient,
 } from './types.js';
@@ -80,6 +87,24 @@ export class OrbitClient {
   }
 
   /**
+   * Execute multiple mutations in a single request (spec §3, `ops` field).
+   * Each op runs through the full server pipeline sequentially; execution
+   * stops on the first error. The response `data` is a per-op result array;
+   * `invalidates` is the deduplicated union of all ops' cache keys.
+   *
+   * ```ts
+   * const { data } = await client.batchMutate([
+   *   { do: 'user.update', args: { filter: { id: '1' }, payload: { name: 'Ana' } } },
+   *   { do: 'post.create', args: { payload: { title: 'Hello' } }, return: 'post { id }' },
+   * ]);
+   * // data === [{ success: true, id: '1' }, { id: 'p1' }]
+   * ```
+   */
+  batchMutate(ops: MutationOp[], options: RequestOptions = {}): Promise<OrbitResponse> {
+    return this.execute({ ops }, options);
+  }
+
+  /**
    * Stream a query's graph level by level over SSE (spec §7). The async
    * iterable yields `{ level, data }` frames as they arrive and ends after
    * the `{ level: 'done' }` frame. Aborting the signal cancels the body read.
@@ -142,6 +167,20 @@ export class OrbitClient {
   /** Envelope request/response over the shared realtime socket (spec §10). */
   socket(): SocketClient {
     return this.#realtimeClient().socket;
+  }
+
+  /**
+   * The current realtime socket state — `'closed'` until the first
+   * `subscribe()`/`socket()` call. Useful for app-level connection
+   * indicators without holding per-subscription handles.
+   */
+  get realtimeStatus(): RealtimeStatus {
+    return this.#realtime?.status ?? 'closed';
+  }
+
+  /** How many subscriptions are attached to the shared realtime socket. */
+  get activeSubscriptions(): number {
+    return this.#realtime?.subscriptionCount ?? 0;
   }
 
   /** Close every realtime subscription and socket; frees resources. */

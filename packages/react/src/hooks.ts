@@ -120,6 +120,8 @@ export function useOrbitMutation<TData = unknown, TVars extends MutationArgs = M
       try {
         const res = await client.mutate(spec.do, merged, {
           ...(spec.return !== undefined ? { return: spec.return } : {}),
+          ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
+          ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
         });
         const data = res.data as TData;
         setState({ data, error: undefined, status: 'success' });

@@ -106,6 +106,17 @@ export interface MutationSpec {
 
 export type MutationStatus = 'idle' | 'pending' | 'success' | 'error';
 
+/** An optimistic cache write staged before a mutation resolves (F1). */
+export interface OptimisticWrite {
+  /** The cache key to write into (all cached entries with this key). */
+  key: QueryKey;
+  /** The optimistic data shown while the mutation is pending. */
+  data: unknown;
+  /** Optional TTL/SWR overrides for the staged write. */
+  ttl?: number;
+  stale?: number;
+}
+
 export interface MutationState<TData = unknown> {
   data: TData | undefined;
   error: OrbitError | Error | undefined;
@@ -115,8 +126,22 @@ export interface MutationState<TData = unknown> {
 export interface UseMutationOptions<TData = unknown, TVars extends MutationArgs = MutationArgs> {
   onSuccess?: (data: TData, variables: TVars) => void;
   onError?: (error: OrbitError | Error) => void;
+  /**
+   * Stage optimistic data before the mutation resolves. `variables` is the
+   * merged args (`spec.args` + the call's `variables`). Return one write, an
+   * array of writes, or `undefined` for no optimistic update. Every write is
+   * applied via `setQueryData` immediately; on a mutation error the staged
+   * writes are reverted to their pre-mutation snapshot automatically (F1).
+   * On success the writes remain (the server's `invalidates` / `invalidate`
+   * then make them authoritative via refetch).
+   */
+  onMutate?: (variables: TVars) => OptimisticWrite | OptimisticWrite[] | void;
   /** Invalidate a key after success — or return one from the data. */
   invalidate?: QueryKey | ((data: TData | undefined) => QueryKey | undefined | void);
+  /** Cancel the mutation (also cancels a pending timeout). */
+  signal?: AbortSignal;
+  /** Abort the mutation after this many milliseconds. */
+  timeoutMs?: number;
 }
 
 export interface MutationResult<TData = unknown, TVars extends MutationArgs = MutationArgs>

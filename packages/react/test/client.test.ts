@@ -580,6 +580,20 @@ describe('OrbitReactClient', () => {
     expect(stats.misses).toBe(1);
     expect(stats.events).toBe(200);
   });
+
+  it('clearEvents clears the feed and notifies cache listeners', () => {
+    const { transport } = fakeTransport();
+    const react = reactClientOf(transport);
+    react.logEvent({ type: 'query', query: 'q' });
+    const listener = vi.fn();
+    react.subscribeCache(listener);
+    react.clearEvents();
+    expect(react.getEvents()).toHaveLength(0);
+    expect(listener).toHaveBeenCalledTimes(1);
+    // An already-empty feed is a no-op: no extra notification.
+    react.clearEvents();
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('createReactClient', () => {

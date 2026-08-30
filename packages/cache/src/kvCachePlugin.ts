@@ -188,7 +188,7 @@ export function createKvCachePlugin(options: KvCachePluginOptions): OrbitPlugin 
         state['orbit:kv:spec'] = spec;
       },
 
-      async onBeforeResolve({ parsed, ctx }: { parsed: any; ctx: OrbitContext }) {
+      async onBeforeResolve({ parsed, ctx }: { parsed: QueryNode; ctx: OrbitContext }) {
         if (ctx.state?.['orbit:kv:skip']) return;
         const spec = (ctx.state?.['orbit:kv:spec'] ?? {}) as CacheSpec;
         if (spec.ttl === undefined && spec.stale === undefined) return;
@@ -228,7 +228,7 @@ export function createKvCachePlugin(options: KvCachePluginOptions): OrbitPlugin 
         node,
         ctx,
       }: {
-        data: any;
+        data: unknown;
         node: QueryNode;
         ctx: OrbitContext;
       }) {
@@ -255,6 +255,7 @@ export function createKvCachePlugin(options: KvCachePluginOptions): OrbitPlugin 
         {
           ...ctx,
           envelope: undefined,
+          /* biome-ignore lint/complexity/useLiteralKeys: keys contain ':' so dot notation is impossible. */
           state: { ...ctx.state, ['orbit:kv:spec']: undefined, ['orbit:kv:skip']: true },
         },
       );
@@ -267,12 +268,6 @@ export function createKvCachePlugin(options: KvCachePluginOptions): OrbitPlugin 
       revalidating.delete(key);
     }
   }
-
-  (plugin as any)._revalidating = revalidating;
-  (plugin as any)._entityIndex = entityIndex;
-  (plugin as any)._cacheKeyFor = cacheKeyFor;
-  (plugin as any)._revalidate = revalidate;
-  (plugin as any)._readSpec = readSpec;
 
   return plugin;
 }

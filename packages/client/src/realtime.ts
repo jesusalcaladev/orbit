@@ -91,6 +91,11 @@ export class RealtimeClient {
     return this.#status;
   }
 
+  /** How many subscriptions are currently attached to the shared socket. */
+  get subscriptionCount(): number {
+    return this.#subs.size;
+  }
+
   /** Envelope request/response over the shared socket (spec §10). */
   get socket(): SocketClient {
     return {

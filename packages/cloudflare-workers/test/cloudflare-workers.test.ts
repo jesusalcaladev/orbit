@@ -544,7 +544,7 @@ describe('handleWebSocket — the Workers upgrade', () => {
   });
 
   it('seeds the session context from an object-returning authorize gate', async () => {
-    const { orbit } = createWorld();
+    createWorld();
     const server = new FakeWs();
     const stubbed = vi.fn(function WebSocketPair(this: { 0: unknown; 1: FakeWs }) {
       this[0] = {};

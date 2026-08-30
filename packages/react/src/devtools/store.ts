@@ -4,6 +4,7 @@
  * `useSyncExternalStore`, so the SAME store drives the web panel and a React
  * Native panel.
  */
+import type { OrbitError } from '@orbit/client';
 import type { OrbitReactClient } from '../client.js';
 import type { ActivityEvent, QueryKey } from '../types.js';
 
@@ -12,13 +13,22 @@ export interface DevtoolsQueryRow {
   key: QueryKey;
   query: string;
   status: 'fresh' | 'stale' | 'loading' | 'error';
+  /** The full cached data — for the expandable inspector. */
+  data: unknown;
   dataPreview: string;
   hasData: boolean;
   errorMessage: string | undefined;
+  errorCode: string | undefined;
   fromCache: boolean;
   ttlLeftMs: number;
   staleLeftMs: number;
   fetchedAt: number;
+  /** When the current entry expires (0 for error-only rows). */
+  expiresAt: number;
+  /** When the current entry stops being stale-refreshable (0 for error-only rows). */
+  staleAt: number;
+  /** Entity names the query touches — the protocol eviction scope. */
+  entities: string[];
 }
 
 export interface DevtoolsSubscriptionRow {
@@ -33,6 +43,8 @@ export interface DevtoolsStats {
   hits: number;
   misses: number;
   events: number;
+  /** Average latency of successful queries, from the activity feed. */
+  avgQueryMs: number | undefined;
 }
 
 export interface DevtoolsSnapshot {
@@ -94,6 +106,11 @@ export class DevtoolsStore {
     this.#client.clear();
   }
 
+  /** Clear the activity feed (the cache is untouched). */
+  clearEvents(): void {
+    this.#client.clearEvents();
+  }
+
   /** Release the store's listeners (called on panel unmount). */
   close(): void {
     this.#listeners.clear();
@@ -113,13 +130,18 @@ export class DevtoolsStore {
           key,
           query,
           status: 'error',
+          data: undefined,
           dataPreview: '',
           hasData: false,
           errorMessage: state.error.error.message,
+          errorCode: errorCodeOf(state.error.error),
           fromCache: false,
           ttlLeftMs: 0,
           staleLeftMs: 0,
           fetchedAt: state.error.at,
+          expiresAt: 0,
+          staleAt: 0,
+          entities: [],
         });
         continue;
       }
@@ -131,13 +153,18 @@ export class DevtoolsStore {
             key,
             query,
             status: 'loading',
+            data: undefined,
             dataPreview: '',
             hasData: false,
             errorMessage: undefined,
+            errorCode: undefined,
             fromCache: false,
             ttlLeftMs: 0,
             staleLeftMs: 0,
             fetchedAt: Date.now(),
+            expiresAt: 0,
+            staleAt: 0,
+            entities: [],
           });
         }
         continue;
@@ -148,20 +175,49 @@ export class DevtoolsStore {
         query,
         status:
           state.activity === 'fetching' ? 'loading' : now < entry.expiresAt ? 'fresh' : 'stale',
+        data: entry.data,
         dataPreview: preview(entry.data),
         hasData: true,
         errorMessage: undefined,
+        errorCode: undefined,
         fromCache: entry.fromCache,
         ttlLeftMs: Math.max(0, entry.expiresAt - now),
         staleLeftMs: Math.max(0, entry.staleAt - now),
         fetchedAt: entry.createdAt,
+        expiresAt: entry.expiresAt,
+        staleAt: entry.staleAt,
+        entities: entry.entities,
       });
     }
+    const events = [...this.#client.getEvents()].reverse();
     return {
       queries,
       subscriptions: [...this.#client.getSubscriptions()],
-      events: [...this.#client.getEvents()].reverse(),
-      stats: this.#client.getStats(),
+      events,
+      stats: {
+        ...this.#client.getStats(),
+        avgQueryMs: averageQueryMs(events),
+      },
     };
   }
+}
+
+/** The `OrbitError.code` when the row's error is a protocol error. */
+function errorCodeOf(error: OrbitError | Error): string | undefined {
+  return typeof (error as OrbitError).code === 'string'
+    ? ((error as OrbitError).code as string)
+    : undefined;
+}
+
+/** Average latency of successful queries in the feed, or `undefined` when none. */
+function averageQueryMs(events: readonly ActivityEvent[]): number | undefined {
+  let total = 0;
+  let count = 0;
+  for (const event of events) {
+    if (event.type !== 'query' || event.ok !== true || event.ms === undefined) continue;
+    total += event.ms;
+    count += 1;
+  }
+  if (count === 0) return undefined;
+  return Math.round(total / count);
 }

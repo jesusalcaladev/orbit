@@ -92,6 +92,8 @@ export class OrbitReactClient {
     { key: QueryKey; query: string; seq: number; status: string }
   >();
   readonly #inflight = new Map<string, Promise<QueryState>>();
+  /** How many mounted hooks are observing each cache key (drives F2 refetch-on-invalidate). */
+  readonly #active = new Map<string, number>();
   #eventId = 0;
   #hits = 0;
   #misses = 0;
@@ -261,6 +263,7 @@ export class OrbitReactClient {
    */
   invalidate(target: QueryKey | ((entry: CacheEntry) => boolean)): void {
     let removed = 0;
+    const refetch: { key: QueryKey; query: string }[] = [];
     // allStates() so entry-less (error-only / describe-only) slots are skipped
     // explicitly — invalidating never touches keys with no cached data.
     for (const { cacheKey, state } of this.cache.allStates()) {
@@ -269,6 +272,11 @@ export class OrbitReactClient {
       const match = typeof target === 'function' ? target(entry) : keyEqual(entry.key, target);
       if (match) {
         this.cache.remove(cacheKey);
+        // F2: a query that is currently mounted and was just invalidated must
+        // refetch — otherwise the UI would show pending/empty until a manual
+        // `refetch()`. Collect it now; the refetch happens after the loop so the
+        // in-flight dedupe (`#inflight`) can coalesce concurrent invalidations.
+        if (this.isActive(cacheKey)) refetch.push({ key: entry.key, query: entry.query });
         removed += 1;
       }
     }
@@ -279,6 +287,7 @@ export class OrbitReactClient {
         key: typeof target === 'function' ? undefined : target,
         detail: `${removed} entr${removed === 1 ? 'y' : 'ies'}`,
       });
+      for (const { key, query } of refetch) void this.ensureQuery(key, query, { refresh: true });
     }
   }
 
@@ -317,6 +326,46 @@ export class OrbitReactClient {
       if (entry !== undefined && keyEqual(entry.key, key)) return entry.data as T;
     }
     return undefined;
+  }
+
+  /** Record a mounted observer for a cache key (hooks call this on mount). */
+  markActive(cacheKey: string): void {
+    this.#active.set(cacheKey, (this.#active.get(cacheKey) ?? 0) + 1);
+  }
+
+  /** Release an observer for a cache key (hooks call this on unmount). */
+  unmarkActive(cacheKey: string): void {
+    const next = (this.#active.get(cacheKey) ?? 0) - 1;
+    if (next <= 0) this.#active.delete(cacheKey);
+    else this.#active.set(cacheKey, next);
+  }
+
+  /** Is at least one mounted hook observing this cache key? */
+  isActive(cacheKey: string): boolean {
+    return (this.#active.get(cacheKey) ?? 0) > 0;
+  }
+
+  /**
+   * Stage an optimistic cache write for a key: snapshot the existing entries,
+   * write `data` via `setQueryData`, and return a `rollback()` that restores the
+   * snapshot exactly (used by `useOrbitMutation` optimistic updates, spec F1).
+   * On rollback, entries that existed before are restored with their original
+   * TTL/SWR timestamps; a key that had no entry is removed.
+   */
+  optimisticWrite<T = unknown>(key: QueryKey, data: T, options: QueryOptions = {}): () => void {
+    const snapshot: { cacheKey: string; entry?: CacheEntry }[] = [];
+    for (const { cacheKey, state } of this.cache.allStates()) {
+      if (state.entry !== undefined && keyEqual(state.entry.key, key)) {
+        snapshot.push({ cacheKey, entry: state.entry });
+      }
+    }
+    this.setQueryData(key, data, options);
+    return () => {
+      for (const { cacheKey, entry } of snapshot) {
+        if (entry !== undefined) this.cache.set(cacheKey, entry);
+        else this.cache.remove(cacheKey);
+      }
+    };
   }
 
   /** A serializable snapshot of the cache (SSR: server → client). */
@@ -394,6 +443,13 @@ export class OrbitReactClient {
   /** The activity feed (newest last). */
   getEvents(): readonly ActivityEvent[] {
     return this.#events;
+  }
+
+  /** Clear the activity feed (devtools). Keeps the cache untouched. */
+  clearEvents(): void {
+    if (this.#events.length === 0) return;
+    this.#events.length = 0;
+    this.cache.touch();
   }
 
   /** Cache statistics for the devtools header. */

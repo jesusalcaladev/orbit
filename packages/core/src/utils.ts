@@ -68,3 +68,17 @@ export function fnv1a64(input: string): string {
   }
   return `${(a >>> 0).toString(36)}${(b >>> 0).toString(36)}`;
 }
+
+/**
+ * Generate a short, collision-resistant request trace id for log/error
+ * correlation across the pipeline. Uses Web Crypto when available (all modern
+ * browsers + Node >= 19); falls back to a time-random hybrid on runtimes without
+ * `globalThis.crypto.randomUUID`, staying dependency-free.
+ */
+export function traceId(): string {
+  const crypto = globalThis.crypto;
+  if (crypto !== undefined && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `${(Date.now() >>> 0).toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}

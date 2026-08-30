@@ -11,8 +11,8 @@ Zero third-party runtime dependencies — the only import is `@orbit/core`
 
 ## What it does
 
-- `execute` / `query` / `mutate` — POST the envelope (`{ query }` / `{ do }`),
-  with `return` re-querying the graph after a mutation
+- `execute` / `query` / `mutate` / `batchMutate` — POST the envelope (`{ query }` / `{ do }` / `{ ops: […] }`),
+  with `return` re-querying the graph after a mutation and batch mutations for multiple ops in one request
 - `stream` — SSE, the graph level by level (`{ level, data }` frames)
 - `subscribe` / `socket().request` — realtime WebSocket, multiplexed on one
   socket, with reconnect + `resume` from the last `seq` and transparent
@@ -55,6 +55,12 @@ const { data: updated, invalidates } = await client.mutate(
   { return: 'user(id="1") { name }' },
 );
 
+// Batch mutations — multiple ops in one request
+const { data: results } = await client.batchMutate([
+  { do: 'user.update', args: { filter: { id: '1' }, payload: { name: 'Ana' } } },
+  { do: 'post.create', args: { payload: { title: 'Hello' } }, return: 'post { id }' },
+]);
+
 // Stream the graph level by level over SSE
 for await (const frame of client.stream('user(id="1") { posts { title } }')) {
   console.log(frame.level, frame.data); // level 0, 1, … 'done'
@@ -81,10 +87,13 @@ try {
 | `execute(envelope, options?)` | POST any envelope and parse the reply — the core primitive |
 | `query(query, options?)` | sugar for `execute({ query })` |
 | `mutate(action, args, options?)` | sugar for `execute({ do, args, return? })` |
+| `batchMutate(ops, options?)` | sugar for `execute({ ops })` — batch mutations in one request |
 | `stream(query, options?)` | SSE async iterable of graph levels (spec §7) |
 | `upload(action, args, files, options?)` | multipart mutation (spec §7) |
 | `subscribe(query, handler, options?)` | realtime subscription handle (`id`, `seq`, `close`, `onStatus`, `onError`, `onAck`) |
 | `socket().request(envelope, options?)` | envelope request/response over the same socket (spec §10) |
+| `client.realtimeStatus` | the shared socket's state (`connecting`/`live`/`reconnecting`/`closed`) — for app-level connection indicators |
+| `client.activeSubscriptions` | how many subscriptions are attached to the shared socket right now |
 | `close()` | close every subscription and the socket |
 
 Full reference — options, wire format, errors, environment compatibility —

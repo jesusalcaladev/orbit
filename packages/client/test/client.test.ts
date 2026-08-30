@@ -65,6 +65,68 @@ describe('OrbitClient API', () => {
     });
   });
 
+  it('batchMutate sends an ops envelope', async () => {
+    const { fetchImpl, capture } = mockFetch(() =>
+      jsonRes({
+        data: [
+          { success: true, id: '1' },
+          { success: true, id: '2' },
+        ],
+        invalidates: ['cache:user:1', 'cache:user:2'],
+      }),
+    );
+    const client = new OrbitClient({ baseUrl: '/orbit', fetch: fetchImpl });
+    const result = await client.batchMutate([
+      { do: 'user.update', args: { filter: { id: '1' }, payload: { name: 'Ana' } } },
+      { do: 'user.update', args: { filter: { id: '2' }, payload: { name: 'Brito' } } },
+    ]);
+    expect(JSON.parse(capture[0]!.init.body as string)).toEqual({
+      ops: [
+        { do: 'user.update', args: { filter: { id: '1' }, payload: { name: 'Ana' } } },
+        { do: 'user.update', args: { filter: { id: '2' }, payload: { name: 'Brito' } } },
+      ],
+    });
+    expect(result.data).toEqual([
+      { success: true, id: '1' },
+      { success: true, id: '2' },
+    ]);
+    expect(result.invalidates).toEqual(['cache:user:1', 'cache:user:2']);
+  });
+
+  it('batchMutate supports return re-queries on individual ops', async () => {
+    const { fetchImpl, capture } = mockFetch(() =>
+      jsonRes({ data: [{ name: 'Ana' }, { success: true, id: '2' }] }),
+    );
+    const client = new OrbitClient({ baseUrl: '/orbit', fetch: fetchImpl });
+    await client.batchMutate([
+      {
+        do: 'user.update',
+        args: { filter: { id: '1' }, payload: { name: 'Ana' } },
+        return: 'user(id="1") { name }',
+      },
+      { do: 'user.update', args: { filter: { id: '2' }, payload: { name: 'Brito' } } },
+    ]);
+    const body = JSON.parse(capture[0]!.init.body as string);
+    expect(body.ops[0]!.return).toBe('user(id="1") { name }');
+    expect(body.ops[1]!.return).toBeUndefined();
+  });
+
+  it('batchMutate fails fast on invalid ops', async () => {
+    const { fetchImpl, capture } = mockFetch(() => jsonRes({ data: null }));
+    const client = new OrbitClient({ baseUrl: '/orbit', fetch: fetchImpl });
+
+    await expect(client.batchMutate([])).rejects.toMatchObject({
+      code: ErrorCode.INVALID_QUERY,
+    });
+    await expect(client.batchMutate([{ do: 123 } as never])).rejects.toMatchObject({
+      code: ErrorCode.INVALID_QUERY,
+    });
+    await expect(client.batchMutate([{ do: 'a.b', args: 'bad' } as never])).rejects.toMatchObject({
+      code: ErrorCode.INVALID_QUERY,
+    });
+    expect(capture).toHaveLength(0);
+  });
+
   it('fails fast on an invalid envelope before hitting the network', async () => {
     const { fetchImpl, capture } = mockFetch(() => jsonRes({ data: null }));
     const client = new OrbitClient({ baseUrl: '/orbit', fetch: fetchImpl });
@@ -175,5 +237,21 @@ describe('realtime URL derivation', () => {
     );
     // HTTP-only use is unaffected — the URL is resolved lazily.
     expect(() => createClient({ baseUrl: '/orbit' })).not.toThrow();
+  });
+
+  it('reports a closed socket and zero subscriptions before any realtime use', () => {
+    const client = createClient({ baseUrl: '/orbit' });
+    expect(client.realtimeStatus).toBe('closed');
+    expect(client.activeSubscriptions).toBe(0);
+  });
+
+  it('tracks the socket state and the attached subscription count', () => {
+    const client = createClient({ baseUrl: 'http://localhost:4321/orbit', WebSocket: fake() });
+    expect(client.realtimeStatus).toBe('closed');
+    const sub = client.subscribe('chat { id }', () => {});
+    expect(client.realtimeStatus).toBe('connecting');
+    expect(client.activeSubscriptions).toBe(1);
+    sub.close();
+    expect(client.activeSubscriptions).toBe(0);
   });
 });
