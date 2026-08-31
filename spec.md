@@ -119,8 +119,8 @@ Accept: application/json
 | Condition | Error |
 | --- | --- |
 | Not a JSON object | `ORBIT_INVALID_QUERY` (400) |
-| Neither `query` nor `do` | `ORBIT_INVALID_QUERY` (400) |
-| Both `query` and `do` | `ORBIT_INVALID_QUERY` (400) |
+| Neither `query`, `do`, nor `ops` | `ORBIT_INVALID_QUERY` (400) |
+| More than one of `query`, `do`, `ops` | `ORBIT_INVALID_QUERY` (400) |
 | `args` not an object | `ORBIT_INVALID_QUERY` (400) |
 | `return` / `cache` not strings | `ORBIT_INVALID_QUERY` (400) |
 | Body larger than `maxPayloadBytes` | `ORBIT_PAYLOAD_TOO_LARGE` (413) |
@@ -320,12 +320,14 @@ data: {"level":"done","data":{…complete graph…}}
 ## 8. Caching ✅
 
 The client opts in per request with the `cache` field (or the `x-orbit-cache`
-header) — a comma- or space-separated spec:
+header) — a comma- or space-separated spec, or a JSON object:
 
 | Spec | Meaning |
 | --- | --- |
 | `ttl=300` | Fresh for 300 s. |
 | `stale=60` | Serve stale up to 60 s while revalidating in the background (stale-while-revalidate). |
+| `ttl=300,stale=60` | Fresh for 300 s, then serve stale + background revalidation for 60 s. |
+| `{"ttl":300,"stale":60}` | JSON object form — equivalent to the comma-separated spec above. |
 
 Cache hits are marked `fromCache: true`. **Server-side eviction is automatic
 and precise at the entity level**: the cache plugin indexes every stored entry
@@ -651,5 +653,5 @@ shape or renames a frozen export is a breaking change.
 ## 14. Non-goals
 
 - No ORM, no schema DSL, no query planner — resolvers are plain functions.
-- No bundled clients yet — the envelope is small enough to hand-roll (the client suite is a separate track, now including `@orbit/client` and `@orbit/react` with 132 e2e tests that exercise HTTP, SSE, multipart and realtime).
+- No bundled clients yet — the envelope is small enough to hand-roll (the client suite is a separate track: `@orbit/client` provides the typed SDK with cache, realtime, and reconnect/resume; `@orbit/react` provides cache-aware hooks and a devtools panel — together they have over 270 e2e tests covering HTTP, SSE, multipart and realtime).
 - No database coupling — adapters, always adapters.
