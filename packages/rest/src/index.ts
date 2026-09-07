@@ -7,11 +7,11 @@
  *
  * ```ts
  * import { createOrbit } from '@orbit/core';
- * import { restAdapter } from '@orbit/rest';
+ * import { createRestAdapter } from '@orbit/rest';
  *
  * const orbit = createOrbit({
  *   adapters: [
- *     restAdapter({ entity: 'user', baseUrl: 'https://api.example.com/v1' }),
+ *     createRestAdapter({ entity: 'user', baseUrl: 'https://api.example.com/v1' }),
  *   ],
  * });
  *
@@ -116,7 +116,7 @@ function upstreamError(
  *
  * @see RestAdapterOptions for the full configuration surface.
  */
-export function restAdapter(options: RestAdapterOptions): DataAdapter {
+export function createRestAdapter(options: RestAdapterOptions): DataAdapter {
   const entity = options.entity;
   const doFetch = options.fetchFn ?? fetch;
 
@@ -201,3 +201,12 @@ export function restAdapter(options: RestAdapterOptions): DataAdapter {
     },
   };
 }
+
+/**
+ * Alias for {@link createRestAdapter} kept for backwards compatibility.
+ *
+ * @deprecated Use {@link createRestAdapter} — the `create*` prefix matches
+ * the other first-party adapters (`createMongoAdapter`, `createPostgresAdapter`,
+ * `createKvCacheStore`).
+ */
+export const restAdapter = createRestAdapter;

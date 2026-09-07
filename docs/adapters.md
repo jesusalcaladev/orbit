@@ -133,7 +133,7 @@ Behavior notes:
 
 See [`docs/ecosystem.md`](./ecosystem.md) for the package's roadmap context.
 
-### `postgresAdapter` — PostgreSQL behind the contract (`@orbit/postgres`)
+### `createPostgresAdapter` — PostgreSQL behind the contract (`@orbit/postgres`)
 
 The flagship SQL adapter: verbatim string filters become **parameterized**
 `WHERE` clauses over a `pg` client you inject, siblings batch into one

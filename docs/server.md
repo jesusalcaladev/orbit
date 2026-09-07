@@ -32,10 +32,10 @@ A complete version ships in [examples/node/standalone-server.ts](../examples/nod
 ```ts
 import { Hono } from 'hono';
 import { createOrbit, createCachePlugin } from '@orbit/core';
-import { postgresAdapter } from 'your-adapters'; // any DataAdapter[] or AdapterRegistry
+import { createPostgresAdapter } from '@orbit/postgres'; // any DataAdapter[] or AdapterRegistry
 
 const orbit = createOrbit({
-  adapters: [postgresAdapter('users')],
+  adapters: [createPostgresAdapter({ entity: 'users', client })],
   plugins: [createCachePlugin()],
 });
 

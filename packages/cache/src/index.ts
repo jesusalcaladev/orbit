@@ -16,14 +16,15 @@
  *
  * ```ts
  * import { createKvCachePlugin } from '@orbit/cache';
- * import { createRedisStore } from '@orbit/redis';
+ * import { createRedisCacheStore } from '@orbit/redis';
  *
- * const kvCache = createKvCachePlugin({ store: createRedisStore() });
+ * const kvCache = createKvCachePlugin({ store: createRedisCacheStore({ client }) });
  * ```
  *
  * The `CacheStore` contract this package (and the core) implements:
  * `get`, `set`, `delete`, `clear` — plus the optional `keys()` that powers
- * prefix invalidation. Keys are opaque `orbit:<hash>` strings (`fnv1a64`).
+ * prefix invalidation — and is **sync-or-async**, so Redis and Cloudflare KV
+ * stores plug in unchanged. Keys are opaque `orbit:<hash>` strings (`fnv1a64`).
  */
 export { createCachePlugin, createMemoryCacheStore, parseCacheSpec } from '@orbit/core';
 export type {

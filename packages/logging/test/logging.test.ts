@@ -1,4 +1,4 @@
-import { ErrorCode, createOrbit, memoryAdapter, OrbitError } from '@orbit/core';
+import { createCachePlugin, ErrorCode, createOrbit, memoryAdapter, OrbitError } from '@orbit/core';
 import { describe, expect, it, vi } from 'vitest';
 import { createLoggingPlugin } from '../src/index.js';
 import type { LogEntry } from '../src/index.js';
@@ -81,18 +81,61 @@ describe('createLoggingPlugin', () => {
     });
   });
 
-  it('does not time a successful mutation (no serialize hook — documented)', async () => {
+  it('logs a successful mutation (onAfterExecute closes the no-serialize gap)', async () => {
     const entries: LogEntry[] = [];
+    const clock = fakeClock();
     const orbit = createOrbit({
       adapters: memoryAdapter([
-        { entity: 'todo', resolve: () => null, mutate: () => ({ id: '1' }) },
+        {
+          entity: 'todo',
+          resolve: () => null,
+          mutate: () => {
+            clock.advance(7);
+            return { id: '1' };
+          },
+        },
       ]),
-      plugins: [createLoggingPlugin({ logger: (e) => entries.push(e) })],
+      plugins: [createLoggingPlugin({ logger: (e) => entries.push(e), now: clock.now })],
     });
 
     await orbit.execute({ do: 'todo.create' });
 
-    expect(entries).toHaveLength(0);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ operation: 'mutation', status: 200, label: 'todo.create' });
+    expect(entries[0]!.durationMs).toBeCloseTo(7, 5);
+    expect(entries[0]!.error).toBeUndefined();
+  });
+
+  it('logs a cache-hit query served by a short-circuiting plugin (onAfterExecute gap)', async () => {
+    const entries: LogEntry[] = [];
+    const orbit = createOrbit({
+      adapters: memoryAdapter([{ entity: 'user', resolve: () => ({ id: '1', name: 'Ana' }) }]),
+      // Logging BEFORE the cache plugin (spec §11: the cache must be mounted
+      // after any onBeforeSerialize observer).
+      plugins: [createLoggingPlugin({ logger: (e) => entries.push(e) }), createCachePlugin()],
+    });
+
+    const envelope = { query: 'user { name }', cache: 'ttl=300' };
+    await orbit.execute(envelope); // miss
+    await orbit.execute(envelope); // hit (short-circuits before serialize)
+
+    // Exactly two entries: one per request, including the cache hit with
+    // fromCache flagged — the previously-unlogged success path.
+    expect(entries).toHaveLength(2);
+    expect(entries[0]!.fromCache).toBeUndefined();
+    expect(entries[1]).toMatchObject({ operation: 'query', status: 200, fromCache: true });
+  });
+
+  it('does not double-log a resolved query (serialize + afterExecute)', async () => {
+    const entries: LogEntry[] = [];
+    const orbit = createOrbit({
+      adapters: memoryAdapter([{ entity: 'user', resolve: () => ({ name: 'Ana' }) }]),
+      plugins: [createLoggingPlugin({ logger: (e) => entries.push(e) })],
+    });
+
+    await orbit.execute({ query: 'user { name }' });
+
+    expect(entries).toHaveLength(1);
   });
 
   it('truncates long labels to maxLabelLength', async () => {
@@ -167,6 +210,14 @@ describe('createLoggingPlugin', () => {
     // onError with no stamped start → no entry.
     await plugin.hooks.onError?.({
       error: new OrbitError(ErrorCode.INTERNAL, 'boom', { status: 500 }),
+      ctx: {} as import('@orbit/core').OrbitContext,
+    });
+    expect(entries).toHaveLength(0);
+
+    // onAfterExecute with no stamped start → no entry (defensive).
+    await plugin.hooks.onAfterExecute?.({
+      result: { status: 200, data: null, contentType: 'application/json; charset=utf-8' },
+      envelope: {},
       ctx: {} as import('@orbit/core').OrbitContext,
     });
     expect(entries).toHaveLength(0);

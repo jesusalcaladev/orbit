@@ -1,7 +1,18 @@
 import { ErrorCode, createOrbit } from '@orbit/core';
+import type { Pool, PoolClient } from 'pg';
 import { describe, expect, it } from 'vitest';
 import { createPostgresAdapter } from '../src/index.js';
 import type { PostgresClient, PostgresQueryResult, PostgresRow } from '../src/index.js';
+
+// ---------------------------------------------------------------------------
+// Type-level compatibility with the real `pg` driver (compile-time only).
+// The structural contract must accept Pool / PoolClient as-is — no casts in
+// user code.
+// ---------------------------------------------------------------------------
+const poolAsClient: PostgresClient = null as unknown as Pool;
+const poolClientAsContract: PostgresClient = null as unknown as PoolClient;
+void poolAsClient;
+void poolClientAsContract;
 
 interface QueryCall {
   text: string;

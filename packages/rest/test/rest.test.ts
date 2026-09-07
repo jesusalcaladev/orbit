@@ -1,6 +1,6 @@
 import { ErrorCode, createOrbit } from '@orbit/core';
 import { describe, expect, it } from 'vitest';
-import { restAdapter } from '../src/index.js';
+import { createRestAdapter, restAdapter } from '../src/index.js';
 
 interface FetchCall {
   url: string;
@@ -26,6 +26,15 @@ function mockFetch(routes: Map<string, unknown>, calls: FetchCall[]): typeof fet
     });
   };
 }
+
+describe('createRestAdapter naming surface', () => {
+  it('createRestAdapter is the canonical factory and restAdapter is its alias', () => {
+    expect(restAdapter).toBe(createRestAdapter); // alias is the same function
+    const options = { entity: 'user', baseUrl: 'https://api.example.com/v1' };
+    expect(createRestAdapter(options).entity).toBe('user');
+    expect(restAdapter(options).entity).toBe('user');
+  });
+});
 
 describe('restAdapter.resolve', () => {
   it('hits GET /path/:id when an id filter is present', async () => {

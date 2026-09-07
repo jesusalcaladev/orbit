@@ -15,14 +15,18 @@ pnpm add @orbit/rest
 
 ```ts
 import { createOrbit } from '@orbit/core';
-import { restAdapter } from '@orbit/rest';
+import { createRestAdapter } from '@orbit/rest';
 
 const orbit = createOrbit({
   adapters: [
-    restAdapter({ entity: 'user', baseUrl: 'https://api.example.com/v1' }),
+    createRestAdapter({ entity: 'user', baseUrl: 'https://api.example.com/v1' }),
   ],
 });
 ```
+
+> Naming note: `createRestAdapter` matches the other first-party factories
+> (`createMongoAdapter`, `createPostgresAdapter`). The historical
+> `restAdapter` name is kept as an alias.
 
 Mapping:
 
@@ -36,7 +40,7 @@ Mapping:
 
 ## Options
 
-### `restAdapter({ entity, baseUrl, path?, headers?, fetchFn?, parentKey?, unwrap?, mutations? })`
+### `createRestAdapter({ entity, baseUrl, path?, headers?, fetchFn?, parentKey?, unwrap?, mutations? })`
 
 | Option | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
@@ -55,7 +59,7 @@ Nested relations resolve through the parent context. For a `posts` entity
 nested under `user`:
 
 ```ts
-restAdapter({
+createRestAdapter({
   entity: 'posts',
   baseUrl: 'https://api.example.com/v1',
   parentKey: 'authorId', // GET /v1/posts?authorId=<parent.id>
@@ -65,7 +69,7 @@ restAdapter({
 ### Custom mutations
 
 ```ts
-restAdapter({
+createRestAdapter({
   entity: 'user',
   baseUrl: 'https://api.example.com/v1',
   mutations: {

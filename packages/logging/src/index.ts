@@ -5,7 +5,10 @@
  * and emits one structured log entry per operation. Queries are timed from
  * `onBeforeParse` to `onBeforeSerialize`; failures (queries **and**
  * mutations) are logged from `onError` with their `OrbitError` code, status
- * and message.
+ * and message. The `onAfterExecute` hook (spec §11) closes the two success
+ * paths that run no serialize hook: a cache **hit** short-circuits in
+ * `onBeforeResolve`, and a successful **mutation** runs no serialize hook —
+ * both are now timed and logged via `onAfterExecute`.
  *
  * ```ts
  * import { createOrbit } from '@orbit/core';
@@ -20,11 +23,6 @@
  * Register the logging plugin **before** the cache plugin (spec §11: the
  * cache must be mounted after any `onBeforeSerialize` plugin, and logging
  * observes `onBeforeSerialize` to time resolved queries).
- *
- * Honest coverage note: a cache **hit** short-circuits in `onBeforeResolve`
- * and never reaches `onBeforeSerialize`, and a successful **mutation** runs
- * no serialize hook (spec §5) — so those two paths are not timed by this
- * plugin. Every error path is, and so is every query that actually resolves.
  */
 import type { OrbitContext, OrbitPlugin } from '@orbit/core';
 
@@ -32,12 +30,14 @@ import type { OrbitContext, OrbitPlugin } from '@orbit/core';
 export interface LogEntry {
   /** Whether the request was a `query` or a `do` mutation. */
   operation: 'query' | 'mutation';
-  /** Wall time in ms from `onBeforeParse` to serialize/error. */
+  /** Wall time in ms from `onBeforeParse` to serialize/error/execute. */
   durationMs: number;
   /** HTTP status (200 on success, the error status otherwise). */
   status: number;
   /** Present on failures — the standard error code and message. */
   error?: { code: string; message: string };
+  /** Present when the entry is a cache hit (short-circuit served from cache). */
+  fromCache?: boolean;
   /** The query/`do` label, truncated to `maxLabelLength`. */
   label: string;
   ctx: OrbitContext;
@@ -131,6 +131,30 @@ export function createLoggingPlugin(options: LoggingPluginOptions = {}): OrbitPl
           durationMs: now() - timing.start,
           status: error.status,
           error: { code: error.code, message: error.message },
+          label: timing.meta.label,
+          ctx,
+        });
+      },
+
+      onAfterExecute({ result, error, ctx }) {
+        // The pipeline's "finally" (spec §11): fires on every execute() path.
+        // Queries always clear their timing in onBeforeSerialize, and errors
+        // clear it in onError — reaching this hook with timing still stamped
+        // means the request ran NO serialize hook AND no error handler ran:
+        // a successful mutation, or a query served by a short-circuiting
+        // plugin (cache hit). Those were the two unlogged success paths.
+        const timing = readMeta(ctx);
+        if (!timing) return;
+        clear(ctx);
+        logger({
+          operation: timing.meta.operation,
+          durationMs: now() - timing.start,
+          status: error !== undefined ? error.status : (result?.status ?? 200),
+          ...(error !== undefined
+            ? { error: { code: error.code, message: error.message } }
+            : result?.fromCache
+              ? { fromCache: true }
+              : {}),
           label: timing.meta.label,
           ctx,
         });
