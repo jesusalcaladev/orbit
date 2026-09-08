@@ -186,7 +186,7 @@ curl -s localhost:3000/orbit \
 { "data": { "name": "Ana", "posts": [{ "title": "Why Orbit?" }] } }
 ```
 
-See [examples/node/standalone-server.ts](./examples/node/standalone-server.ts) for a complete zero-dependency server (`npm run example`), the [twelve runnable examples](./docs/examples.md) for one facet each, [docs/benchmarks.md](./docs/benchmarks.md) for the B1–B11 numbers against measured graphql-js (including the real-HTTP wire path, the client/react-layer overhead stories and the cache-vs-DataLoader comparison), [docs/use-cases.md](./docs/use-cases.md) for where Orbit fits, [docs/security.md](./docs/security.md) for the threat model, [docs/ecosystem.md](./docs/ecosystem.md) for the first-party `@orbit/*` package plan, [docs/protocol-audit.md](./docs/protocol-audit.md) for the spec-vs-code verification, and [docs/spec-vision.md](./docs/spec-vision.md) for the north star behind the spec.
+See [examples/node/standalone-server.ts](./examples/node/standalone-server.ts) for a complete zero-dependency server (`npm run example`), the [thirteen runnable examples](./docs/examples.md) for one facet each, [docs/benchmarks.md](./docs/benchmarks.md) for the B1–B11 numbers against measured graphql-js (including the real-HTTP wire path, the client/react-layer overhead stories and the cache-vs-DataLoader comparison), [docs/use-cases.md](./docs/use-cases.md) for where Orbit fits, [docs/security.md](./docs/security.md) for the threat model, [docs/ecosystem.md](./docs/ecosystem.md) for the first-party `@orbit/*` package plan, [docs/protocol-audit.md](./docs/protocol-audit.md) for the spec-vs-code verification, and [docs/spec-vision.md](./docs/spec-vision.md) for the north star behind the spec.
 
 ## Query syntax at a glance
 
@@ -258,7 +258,7 @@ Every failure is an `OrbitError` with a standard code and a correct HTTP status:
 | [Serialization](./docs/serialization.md) | JSON, MessagePack, SSE streaming, gzip — `Accept`/`Accept-Encoding` negotiation |
 | [Benchmarks](./docs/benchmarks.md) | B1–B11 vs measured graphql-js — latency, round-trips, throughput, payload, streaming, realtime, real-HTTP wire path, client + react-layer overhead, cache-vs-DataLoader |
 | [Security](./docs/security.md) | Threat model: payload/depth limits, prototype-pollution hardening, realtime protocol defenses |
-| [Examples](./docs/examples.md) | The twelve runnable examples, tour and reading order |
+| [Examples](./docs/examples.md) | The thirteen runnable examples, tour and reading order |
 | [Architecture](./docs/architecture.md) | How the engine executes a query, serialization, extension points |
 | [Server integration](./docs/server.md) | Express, Hono, Cloudflare Workers (fetch handler + native realtime), Bun, Deno, node:http |
 | [Errors](./docs/errors.md) | Error reference and the `onError` hook |
@@ -276,12 +276,12 @@ in as `packages/*`.
 
 ```bash
 pnpm install         # dev dependencies only (typescript, vitest)
-pnpm test            # 635 tests, Vitest (400 core + 18 express + 13 hono + 24 rest + 4 cache + 35 cloudflare-workers + 21 rate-limit + 15 auth + 9 logging + 17 redis + 9 kv-cache + 30 postgres + 40 mongo)
+pnpm test            # 1029 tests, Vitest (486 core + 144 client + 134 react + 42 mongo + 40 cloudflare-workers + 33 postgres + 26 rest + 22 rate-limit + 18 express + 17 redis + 15 auth + 13 hono + 11 logging + 10 metrics + 9 cache + 9 kv-cache; +3 redis integration skipped without a live server)
 pnpm run test:coverage # every package with its own v8 thresholds (≥90% stmts/funcs/lines, ≥85% branch — most at/over 90% branch)
 pnpm run typecheck   # strict TypeScript (builds all packages, then checks examples/bench)
 pnpm run build       # ESM + .d.ts → dist/ in every package
 pnpm run example     # zero-dep demo server on localhost:3000 (examples/node/standalone-server.ts)
-pnpm run examples    # all twelve headless examples, back to back (examples/node/)
+pnpm run examples    # all thirteen headless examples, back to back (examples/node/)
 pnpm run web         # interactive demos on localhost:4321 — chat, uploads, posts, auth + the Orbit-vs-GraphQL A/B lab (examples/web/, see docs/examples.md)
 pnpm run bench       # B1–B11 benchmarks + chart (docs/benchmarks.md)
 pnpm run size        # core package weight vs graphql-js (docs/benchmarks.md)

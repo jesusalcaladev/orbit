@@ -115,6 +115,10 @@ describe('createMetrics — wrapHandler', () => {
     const snap = metrics.snapshot();
     expect(snap.duration.count).toBe(2); // only the recent window
     expect(snap.duration.p99).toBe(30);
+    // `sum` must be the sum of the WINDOW (20+30), not a lifetime total —
+    // otherwise consumers computing `sum / count` get an inflated average
+    // once the ring starts evicting.
+    expect(snap.duration.sum).toBe(50);
     expect(snap.requests).toBe(3); // counters stay exact
   });
 

@@ -58,6 +58,7 @@ export type {
   BeforeResolveInput,
   BeforeExecuteInput,
   BeforeExecuteAdjustment,
+  AfterExecuteInput,
   AfterResolveInput,
   BeforeSerializeInput,
   ErrorInput,

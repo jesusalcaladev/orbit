@@ -1,4 +1,5 @@
 import { ErrorCode, createOrbit } from '@orbit/core';
+import type { Filters } from '@orbit/core';
 import type { Collection, Db } from 'mongodb';
 import { describe, expect, it } from 'vitest';
 import { createMongoAdapter } from '../src/index.js';
@@ -397,6 +398,28 @@ describe('createMongoAdapter.batch', () => {
     ]);
   });
 
+  it('never cross-assigns docs between numerically-equal but differently-typed ids', async () => {
+    const db = new FakeMongoDb().seed('user', [
+      { _id: 1, name: 'numeric' },
+      { _id: '1', name: 'string' },
+    ]);
+    const adapter = createMongoAdapter({ entity: 'user', client: db });
+
+    const results = await adapter.batch!(
+      [{ filters: { id: '1' } }, { filters: { id: 1 } as unknown as Filters }],
+      {},
+    );
+
+    // `String(1) === String('1')` used to collide, so BOTH requests received
+    // both documents. Typed bucketing must keep them apart — mirroring
+    // `resolve`, whose `{ _id: { $in: ['1'] } }` never matches `_id: 1`
+    // (BSON equality does not coerce across types).
+    expect(results).toEqual([
+      { _id: '1', id: '1', name: 'string' },
+      { _id: 1, id: 1, name: 'numeric' },
+    ]);
+  });
+
   it('batches relation scoping through parentKey', async () => {
     const db = new FakeMongoDb().seed('post', [
       { _id: 'p1', author_id: 1 },
@@ -562,6 +585,21 @@ describe('createMongoAdapter.mutate', () => {
     expect(db.calls[0]?.op).toBe('deleteOne');
     expect(db.calls[0]?.filter).toEqual({ _id: '42' });
     expect(db.collections.get('user')).toHaveLength(0);
+  });
+
+  it('fails MUTATION_FAILED when update/delete match no document', async () => {
+    const db = new FakeMongoDb().seed('user', [{ _id: '42' }]);
+    const adapter = createMongoAdapter({ entity: 'user', client: db });
+
+    // A ghost update/delete previously "succeeded" ({ success, id }) even
+    // though no document matched — matchedCount/deletedCount were ignored.
+    await expect(
+      adapter.mutate!('update', { filter: { id: 'nope' }, payload: { name: 'Ada' } }, {}),
+    ).rejects.toMatchObject({ code: ErrorCode.MUTATION_FAILED });
+    await expect(adapter.mutate!('delete', { filter: { id: 'nope' } }, {})).rejects.toMatchObject({
+      code: ErrorCode.MUTATION_FAILED,
+    });
+    expect(db.collections.get('user')).toHaveLength(1);
   });
 
   it('supports custom action aliases', async () => {

@@ -67,12 +67,13 @@ interface LogEntry {
 - **Errors** (queries and mutations) are timed to `onError` with the standard
   code/status/message.
 - **Cache hits** short-circuit in `onBeforeResolve` and never reach
-  `onBeforeSerialize` (spec §11) — they are intentionally not timed.
-- **Successful mutations** run no serialize hook (spec §5) — they are
-  intentionally not timed. Use framework middleware or the adapter itself for
-  write-path metrics.
+  `onBeforeSerialize` (spec §11) — they are timed via `onAfterExecute` instead,
+  so the success path is never silently untimed.
+- **Successful mutations** run no serialize hook (spec §5) — they are timed
+  via `onAfterExecute` too. Any short-circuiting plugin (cache hits, mocks,
+  auth gates) produces a log entry through the same hook.
 
 ## Contract
 
 Implements the frozen `OrbitPlugin` interface (spec §11); no core changes, no
-new error codes. 5 tests in `packages/logging/test/`.
+new error codes. 11 tests in `packages/logging/test/`.

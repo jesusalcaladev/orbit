@@ -56,7 +56,7 @@ export function useOrbitQuery<T = unknown>(
   }, [client, cacheKey]);
 
   const enabled = options.enabled !== false;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: key/query ride through the cacheKey string dep — content equality, not identity.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: key/query ride through the cacheKey string dep — content equality, not identity; `version` is the cache-change signal that re-runs the fetch (F2) when an invalidation evicts this key.
   useEffect(() => {
     if (!enabled) return;
     void client.ensureQuery<T>(key, query, optionsRef.current);
@@ -65,7 +65,18 @@ export function useOrbitQuery<T = unknown>(
     // changes is harmless and never refetches a fresh entry. `key`/`query` are
     // read from the closure — the cacheKey dep keeps this effect in sync with
     // their CONTENT, so a caller re-creating `['posts']` each render does not
-    // refetch.
+    // refetch. The `version` dep makes an evicted entry refetch: invalidation
+    // bumps the version and the effect re-runs as a plain miss (F2), so a
+    // mounted query never hangs on `pending`.
+  }, [client, cacheKey, enabled, version]);
+
+  // Ref-count this hook as an active observer. `invalidate()` reads the count
+  // to immediately refetch mounted queries (F2); the count (not a boolean)
+  // lets several consumers of one key coexist and unmount independently.
+  useEffect(() => {
+    if (!enabled) return;
+    client.markActive(cacheKey);
+    return () => client.unmarkActive(cacheKey);
   }, [client, cacheKey, enabled]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: key/query content is encoded in cacheKey; version is the cache-change signal.

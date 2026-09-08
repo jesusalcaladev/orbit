@@ -87,12 +87,17 @@ class Ring {
     this.#capacity = capacity;
   }
 
-  push(value: number): void {
-    if (this.#values.length < this.#capacity) this.#values.push(value);
-    else {
-      this.#values[this.#head] = value;
-      this.#head = (this.#head + 1) % this.#capacity;
+  /// Push a value; returns the evicted value when the ring was full
+  /// (undefined on the first `capacity` pushes).
+  push(value: number): number | undefined {
+    if (this.#values.length < this.#capacity) {
+      this.#values.push(value);
+      return undefined;
     }
+    const evicted = this.#values[this.#head];
+    this.#values[this.#head] = value;
+    this.#head = (this.#head + 1) % this.#capacity;
+    return evicted;
   }
 
   sorted(): number[] {
@@ -147,8 +152,12 @@ export function createMetrics(options: MetricsOptions = {}): Metrics {
     requests += 1;
     byStatus[String(status)] = (byStatus[String(status)] ?? 0) + 1;
     if (durationMs > max) max = durationMs;
+    // Rolling mean, not lifetime: `count`/percentiles come from the recent
+    // window, so `sum` must track the same window or `sum / count` inflates
+    // once the ring evicts. The evicted duration is subtracted here.
     sum += durationMs;
-    durations.push(durationMs);
+    const evicted = durations.push(durationMs);
+    if (evicted !== undefined) sum -= evicted;
     for (const edge of bucketEdges) {
       if (durationMs <= edge) {
         const key = String(edge);

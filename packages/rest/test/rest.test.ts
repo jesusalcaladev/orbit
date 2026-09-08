@@ -305,6 +305,31 @@ describe('restAdapter.mutate', () => {
     ).resolves.toMatchObject({ id: '42' });
   });
 
+  it('rejects non-id filters on mutations instead of dropping them silently', async () => {
+    const calls: FetchCall[] = [];
+    const adapter = restAdapter({
+      entity: 'user',
+      baseUrl: 'https://api.example.com',
+      fetchFn: mockFetch(new Map(), calls),
+    });
+    // `@{ filter: { email } }` previously built the URL against the collection
+    // root and dropped the email — an unscoped update/delete. Fail loudly.
+    await expect(
+      adapter.mutate!('user.update', { filter: { email: 'a@b.c' }, payload: { name: 'Ada' } }, {}),
+    ).rejects.toMatchObject({ code: ErrorCode.MUTATION_FAILED });
+    expect(calls).toHaveLength(0);
+    // `filter.id` alone is still the documented scope and must keep working.
+    const calls2: FetchCall[] = [];
+    const ok = restAdapter({
+      entity: 'user',
+      baseUrl: 'https://api.example.com',
+      fetchFn: mockFetch(new Map([['https://api.example.com/user/42', { ok: true }]]), calls2),
+    });
+    await expect(
+      ok.mutate!('user.update', { filter: { id: '42' }, payload: { name: 'Ada' } }, {}),
+    ).resolves.toMatchObject({ id: '42' });
+  });
+
   it('throws MUTATION_FAILED on upstream failure (status preserved)', async () => {
     const fetchFn = async () => new Response('teapot', { status: 418 });
     const adapter = restAdapter({ entity: 'user', baseUrl: 'https://api.example.com', fetchFn });
@@ -321,8 +346,8 @@ describe('restAdapter.mutate', () => {
       baseUrl: 'https://api.example.com',
       fetchFn: mockFetch(new Map([['https://api.example.com/user', { id: '1' }]]), calls),
     });
-    // The engine always passes `entity.action`; the adapter tolerates a bare
-    // verb too, splitting only when a dot is present.
+    // The engine passes a bare verb (entity.action is split by the caller);
+    // the adapter tolerates both and splits only when a dot is present.
     const result = await adapter.mutate!('create', { payload: { name: 'Ada' } }, {});
     expect(result).toMatchObject({ id: '1' });
     expect(calls[0]?.method).toBe('POST');

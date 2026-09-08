@@ -101,4 +101,4 @@ clobbered by a second credential check.
 
 Implements the frozen `OrbitPlugin` interface (spec §11); no core changes, no
 new error codes — `ORBIT_PERMISSION_DENIED` (403) is the denial contract.
-12 tests in `packages/auth/test/`.
+15 tests in `packages/auth/test/`.

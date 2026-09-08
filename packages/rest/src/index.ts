@@ -169,7 +169,23 @@ export function createRestAdapter(options: RestAdapterOptions): DataAdapter {
 
       const path = spec.path ?? options.path ?? entity;
       const method = spec.method.toUpperCase();
-      const id = args.filter?.id;
+      const filter = args.filter ?? {};
+      const extraKeys = Object.keys(filter).filter((key) => key !== 'id');
+      const id = filter.id;
+
+      // REST maps a mutation to ONE row via `filter.id`. A filter with any
+      // other key (e.g. `@{ filter: { email } }`) was previously dropped
+      // SILENTLY — the URL got built against the collection root and the
+      // update/delete ran unscoped. Fail loudly instead (same policy as the
+      // payload-on-GET/DELETE guard below).
+      if (extraKeys.length > 0) {
+        throw new OrbitError(
+          ErrorCode.MUTATION_FAILED,
+          `REST mutation '${action}' can only scope on filter.id (got ${extraKeys.join(', ')})`,
+          { details: { action, keys: extraKeys } },
+        );
+      }
+
       const base = joinUrl(options.baseUrl, path);
       const url = id !== undefined ? `${base}/${encodeURIComponent(String(id))}` : base;
 

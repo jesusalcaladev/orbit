@@ -293,7 +293,7 @@ describe('createPostgresAdapter.mutate', () => {
   });
 
   it('update → parameterized SET with the id in WHERE', async () => {
-    const client = new FakeClient().onQuery(() => []);
+    const client = new FakeClient().onQuery(() => [{ id: '42' }]);
     const adapter = createPostgresAdapter({ entity: 'user', client });
 
     await expect(
@@ -304,7 +304,7 @@ describe('createPostgresAdapter.mutate', () => {
   });
 
   it('update ignores a payload id (the id comes from filter.id)', async () => {
-    const client = new FakeClient().onQuery(() => []);
+    const client = new FakeClient().onQuery(() => [{ id: '42' }]);
     const adapter = createPostgresAdapter({ entity: 'user', client });
 
     await adapter.mutate!(
@@ -328,8 +328,23 @@ describe('createPostgresAdapter.mutate', () => {
     expect(client.calls[0]?.values).toEqual(['42']);
   });
 
-  it('supports custom action aliases', async () => {
+  it('fails MUTATION_FAILED when update/delete match no document', async () => {
     const client = new FakeClient().onQuery(() => []);
+    const adapter = createPostgresAdapter({ entity: 'user', client });
+
+    // A ghost update/delete previously "succeeded" even when no row matched:
+    // the UPDATE RETURNING result was ignored and DELETE fell back to echoing
+    // the filter id. RETURNING * / RETURNING id now gate the result.
+    await expect(
+      adapter.mutate!('update', { filter: { id: 'nope' }, payload: { name: 'Ada' } }, {}),
+    ).rejects.toMatchObject({ code: ErrorCode.MUTATION_FAILED });
+    await expect(adapter.mutate!('delete', { filter: { id: 'nope' } }, {})).rejects.toMatchObject({
+      code: ErrorCode.MUTATION_FAILED,
+    });
+  });
+
+  it('supports custom action aliases', async () => {
+    const client = new FakeClient().onQuery(() => [{ id: '42' }]);
     const adapter = createPostgresAdapter({
       entity: 'user',
       client,
@@ -380,6 +395,47 @@ describe('createPostgresAdapter configuration', () => {
     expect(() =>
       createPostgresAdapter({ entity: 'user', client, columns: { name: 'full name' } }),
     ).toThrow(/invalid column identifier/);
+  });
+});
+
+describe('createPostgresAdapter.batch', () => {
+  it('pairs typed column values with the filters they matched (no silent miss)', async () => {
+    const client = new FakeClient().onQuery(() => [
+      // numeric(10,2) columns come back from node-postgres as strings: the
+      // verbatim filter `10.5` must still pair with the stored `10.50`.
+      { id: 1, score: '10.50' },
+      { id: 2, score: '20.00' },
+    ]);
+    const adapter = createPostgresAdapter({ entity: 'user', client });
+
+    const results = await adapter.batch!(
+      [{ filters: { score: '10.5' } }, { filters: { score: '20' } }],
+      {},
+    );
+
+    // `String(row.score)` ("10.50") vs `String(value)` ("10.5") never
+    // matched, so both requests silently returned []. Each row must pair
+    // with the filter it matched.
+    expect(results).toEqual([[{ id: 1, score: '10.50' }], [{ id: 2, score: '20.00' }]]);
+  });
+
+  it('keeps jsonb, date and boolean values aligned when regrouping', async () => {
+    const created = new Date('2024-01-02T03:04:05.000Z');
+    const client = new FakeClient().onQuery(() => [
+      { id: 1, meta: { a: 1, b: 2 }, created, active: true },
+      { id: 2, meta: { b: 9 }, created, active: false },
+    ]);
+    const adapter = createPostgresAdapter({ entity: 'user', client });
+
+    const results = await adapter.batch!(
+      [{ filters: { meta: '{ "a": 1, "b": 2 }' } }, { filters: { active: 'false' } }],
+      {},
+    );
+
+    expect(results).toEqual([
+      [{ id: 1, meta: { a: 1, b: 2 }, created, active: true }],
+      [{ id: 2, meta: { b: 9 }, created, active: false }],
+    ]);
   });
 });
 

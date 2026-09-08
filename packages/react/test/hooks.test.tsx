@@ -93,6 +93,42 @@ describe('useOrbitQuery', () => {
     expect(client.getQueryData(['u'])).toBeUndefined();
   });
 
+  it('refetches a mounted query after invalidate() instead of hanging on pending', async () => {
+    const { transport } = fakeTransport();
+    transport.query.mockResolvedValue(okResponse({ v: 1 }));
+    const client = reactClientOf(transport);
+    const { result } = renderHook(() => useOrbitQuery(['u'], 'user { v }'), { wrapper: wrap(client) });
+    await waitFor(() => expect(result.current.data).toEqual({ v: 1 }));
+    expect(transport.query).toHaveBeenCalledTimes(1);
+
+    // F2: evicting a MOUNTED query must refetch it — markActive/unmarkActive
+    // made the refetch branch reachable, and the cache version re-runs the
+    // fetch even when the eviction came from a different path (mutations).
+    act(() => result.current.invalidate());
+    await vi.waitFor(() => expect(transport.query).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(result.current.data).toEqual({ v: 1 }));
+    expect(client.getQueryData(['u'])).toBeDefined();
+  });
+
+  it('refetches a mounted query evicted by protocol `invalidates` (entity path)', async () => {
+    const { transport } = fakeTransport();
+    transport.query.mockResolvedValue(okResponse({ id: 'p1', title: 'Hi' }));
+    const client = reactClientOf(transport);
+    const { result } = renderHook(() => useOrbitQuery(['post'], 'post { title }'), {
+      wrapper: wrap(client),
+    });
+    await waitFor(() => expect(result.current.data).toEqual({ id: 'p1', title: 'Hi' }));
+    transport.mutate.mockResolvedValue(okResponse({ id: 'p1', success: true }, { invalidates: ['post'] }));
+
+    // `post.delete` responds with `invalidates: ['post']` → the cached entry
+    // for `post { title }` is evicted. A mounted query must not stay pending.
+    act(() => {
+      void client.mutate('post.delete', { filter: { id: 'p1' } });
+    });
+    await vi.waitFor(() => expect(transport.query).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(result.current.data).toEqual({ id: 'p1', title: 'Hi' }));
+  });
+
   it('refetches when the key changes', async () => {
     const { transport } = fakeTransport();
     transport.query.mockResolvedValue(okResponse({ name: 'Ana' }));

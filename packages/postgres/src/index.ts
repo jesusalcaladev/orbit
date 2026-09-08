@@ -257,6 +257,67 @@ function remapRow(
   return out;
 }
 
+/**
+ * Stable JSON stringification — `jsonb` normalizes key order, so parsing then
+ * re-stringifying must sort keys too, or the same jsonb value authored with
+ * keys in different order would never pair.
+ */
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map((v) => stableStringify(v)).join(',')}]`;
+  if (value !== null && typeof value === 'object') {
+    const obj = value as Record<string, unknown>;
+    return `{${Object.keys(obj)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableStringify(obj[key])}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+/** Exact-match key mirroring SQL equality for node-postgres's typed values. */
+function pgExactKey(value: unknown): string {
+  if (value instanceof Date) return `d:${value.getTime()}`;
+  if (typeof value === 'boolean') return `b:${value ? '1' : '0'}`;
+  if (typeof value === 'object' && value !== null) return `j:${stableStringify(value)}`;
+  return `s:${String(value)}`;
+}
+
+/** Numeric key — only for values that parse as a finite number. Used as a
+ * fallback so `numeric(10,2)`-style string columns ("10.50") still pair with
+ * a verbatim filter ("10.5"). */
+function pgNumericKey(value: unknown): string | undefined {
+  const text = String(value);
+  if (text.trim() === '' || Number.isNaN(Number(text))) return undefined;
+  return `n:${Number(text)}`;
+}
+
+/**
+ * Does a row value satisfy a filter value? Exact equality first (the
+ * text-column case — a returned string always equals the parameter it
+ * matched), then instant equality for timestamp columns, then the numeric
+ * fallback for numeric string columns.
+ */
+function pgRowMatchesRowValue(rowValue: unknown, filterValue: unknown): boolean {
+  if (pgExactKey(rowValue) === pgExactKey(filterValue)) return true;
+  if (rowValue instanceof Date) {
+    const filterDate = new Date(String(filterValue));
+    return !Number.isNaN(filterDate.getTime()) && filterDate.getTime() === rowValue.getTime();
+  }
+  if (typeof rowValue === 'boolean') return String(rowValue) === String(filterValue);
+  if (typeof rowValue === 'object' && rowValue !== null) {
+    try {
+      const parsed: unknown = JSON.parse(String(filterValue));
+      return stableStringify(rowValue) === stableStringify(parsed);
+    } catch {
+      return false;
+    }
+  }
+  const numericKey = pgNumericKey(filterValue);
+  if (numericKey === undefined) return false;
+  const rowNumeric = pgNumericKey(rowValue);
+  return rowNumeric !== undefined && rowNumeric === numericKey;
+}
+
 function readLimit(raw: string | undefined, maxLimit: number): number | undefined {
   if (raw === undefined) return undefined;
   const parsed = Number(raw);
@@ -395,21 +456,29 @@ export function createPostgresAdapter(options: PostgresAdapterOptions): DataAdap
         const sql = `SELECT * FROM ${quoteIdent(config.table)} WHERE ${inClauses.join(' AND ')}`;
         const { rows } = await config.client.query(sql, params);
 
-        const buckets = new Map<string, PostgresRow[]>();
+        // Pair every returned row with the request(s) it matches. This
+        // reimplements SQL equality because node-postgres RETURNS TYPED
+        // values: `numeric(10,2)` comes back as a string ("10.50") while the
+        // filter is verbatim ("10.5"), timestamps come back as `Date`
+        // objects and jsonb as objects — `String(row[v]) === String(filter)`
+        // would silently miss all of them (empty relation results).
+        const perRequest: PostgresRow[][] = indexes.map(() => []);
         for (const row of rows) {
-          const key = columns.map((column) => String(row[column])).join('\u0000');
-          const bucket = buckets.get(key) ?? [];
-          bucket.push(row);
-          buckets.set(key, bucket);
+          for (let i = 0; i < indexes.length; i += 1) {
+            const plan = plans[indexes[i]!]!;
+            const matchedAll = columns.every((column, idx) =>
+              pgRowMatchesRowValue(row[column], plan.values[idx]),
+            );
+            if (matchedAll) perRequest[i]!.push(row);
+          }
         }
 
-        for (const i of indexes) {
-          const plan = plans[i]!;
-          const key = plan.values.map((value) => String(value)).join('\u0000');
-          const matched = (buckets.get(key) ?? []).map((row) =>
+        for (let i = 0; i < indexes.length; i += 1) {
+          const plan = plans[indexes[i]!]!;
+          const matched = perRequest[i]!.map((row) =>
             remapRow(row, config.columns, config.idColumn),
           );
-          results[i] = plan.single ? (matched[0] ?? null) : matched;
+          results[indexes[i]!] = plan.single ? (matched[0] ?? null) : matched;
         }
       }
 
@@ -455,7 +524,8 @@ export function createPostgresAdapter(options: PostgresAdapterOptions): DataAdap
           config.idColumn,
         )} = $${values.length} RETURNING *`;
 
-        await config.client.query(sql, values);
+        const result = await config.client.query(sql, values);
+        if (result.rows.length === 0) throw mutationFailed('update matched no document', { id });
         return { id: toId(id), invalidates: [config.entity] };
       }
 
@@ -467,7 +537,8 @@ export function createPostgresAdapter(options: PostgresAdapterOptions): DataAdap
       )} = $1 RETURNING ${quoteIdent(config.idColumn)} AS "id"`;
 
       const { rows } = await config.client.query(sql, [id]);
-      return { id: toId(rows[0]?.id ?? id), invalidates: [config.entity] };
+      if (rows.length === 0) throw mutationFailed('delete matched no document', { id });
+      return { id: toId(rows[0]!.id), invalidates: [config.entity] };
     },
   };
 

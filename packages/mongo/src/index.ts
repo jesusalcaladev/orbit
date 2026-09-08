@@ -376,6 +376,27 @@ function assertSafeValue(value: unknown, path: string): void {
   }
 }
 
+/**
+ * A stable bucket key for batch values — TYPE-aware, so `1` and `"1"` never
+ * collide (BSON equality does not coerce across types, and `String(1) ===
+ * String("1")` used to cross-assign documents between sibling requests).
+ * ObjectId-like ids map to their hex so an ObjectId still matches a string
+ * filter built through `toId`.
+ */
+function batchValueKey(value: unknown): string {
+  if (value instanceof Date) return `d:${value.getTime()}`;
+  if (typeof value === 'number') return `n:${value}`;
+  if (typeof value === 'bigint') return `b:${value}`;
+  if (typeof value === 'boolean') return `b:${value ? '1' : '0'}`;
+  if (typeof value === 'object' && value !== null) {
+    if (typeof (value as { toHexString?: unknown }).toHexString === 'function') {
+      return `s:${(value as { toHexString(): string }).toHexString()}`;
+    }
+    return `j:${JSON.stringify(value)}`;
+  }
+  return `s:${String(value)}`;
+}
+
 /** Build a MongoDB `DataAdapter`. */
 export function createMongoAdapter(options: MongoAdapterOptions): DataAdapter {
   const config: Config = {
@@ -473,7 +494,7 @@ export function createMongoAdapter(options: MongoAdapterOptions): DataAdapter {
 
         const buckets = new Map<string, MongoDocument[]>();
         for (const doc of docs) {
-          const key = fields.map((field) => String(doc[field])).join('\u0000');
+          const key = fields.map((field) => batchValueKey(doc[field])).join('\u0000');
           const bucket = buckets.get(key) ?? [];
           bucket.push(doc);
           buckets.set(key, bucket);
@@ -481,7 +502,7 @@ export function createMongoAdapter(options: MongoAdapterOptions): DataAdapter {
 
         for (const i of indexes) {
           const plan = plans[i]!;
-          const key = plan.values.map((value) => String(value)).join('\u0000');
+          const key = plan.values.map((value) => batchValueKey(value)).join('\u0000');
           const matched = (buckets.get(key) ?? []).map((doc) => remapDoc(doc, config));
           results[i] = plan.single ? (matched[0] ?? null) : matched;
         }
@@ -533,7 +554,13 @@ export function createMongoAdapter(options: MongoAdapterOptions): DataAdapter {
         }
         assertSafeValue(set, '$set');
 
-        await collection.updateOne({ [config.idField]: config.toId(id) }, { $set: set });
+        const { matchedCount } = await collection.updateOne(
+          { [config.idField]: config.toId(id) },
+          { $set: set },
+        );
+        if ((matchedCount ?? 0) === 0) {
+          throw mutationFailed('update matched no document', { id });
+        }
         return { id: config.fromId(config.toId(id)), invalidates: [config.entity] };
       }
 
@@ -541,7 +568,8 @@ export function createMongoAdapter(options: MongoAdapterOptions): DataAdapter {
       const id = filter.id;
       if (id === undefined) throw mutationFailed('delete requires filter.id');
 
-      await collection.deleteOne({ [config.idField]: config.toId(id) });
+      const { deletedCount } = await collection.deleteOne({ [config.idField]: config.toId(id) });
+      if ((deletedCount ?? 0) === 0) throw mutationFailed('delete matched no document', { id });
       return { id: config.fromId(config.toId(id)), invalidates: [config.entity] };
     },
   };
