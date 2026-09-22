@@ -21,9 +21,9 @@ book/
                             identity, auth mutations, role checks,
                             validation, MessagePack in+out, SSE streaming,
                             caching and realtime (subscribe + socket).
-../10-express.ts  interface — Express host (thin: transport + authn only).
-../11-hono.ts     interface — Hono host (same engine, same API).
-../12-cloudflare-workers.ts  interface — the Workers fetch handler (same engine, same API).
+../frameworks/10-express.ts  interface — Express host (thin: transport + authn only).
+../frameworks/11-hono.ts     interface — Hono host (same engine, same API).
+../frameworks/12-cloudflare-workers.ts  interface — the Workers fetch handler (same engine, same API).
 ```
 
 ## The security model (why it is split this way)

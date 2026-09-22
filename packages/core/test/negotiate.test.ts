@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { negotiateFormat, wantsGzip } from '../src/serialize/negotiate.js';
+import { negotiateEncoding, negotiateFormat, wantsGzip } from '../src/serialize/negotiate.js';
 
 describe('negotiateFormat', () => {
   it('defaults to json when nothing is requested', () => {
@@ -92,5 +92,53 @@ describe('wantsGzip', () => {
   it('accepts gzip with a positive q', () => {
     expect(wantsGzip('gzip;q=1')).toBe(true);
     expect(wantsGzip('gzip;q=0.5')).toBe(true);
+  });
+
+  it('accepts gzip through the wildcard', () => {
+    // `*` means "any of the remaining codecs" — gzip qualifies.
+    expect(wantsGzip('*')).toBe(true);
+    expect(wantsGzip('*;q=0')).toBe(false);
+  });
+});
+
+describe('negotiateEncoding', () => {
+  it('is null without the header', () => {
+    expect(negotiateEncoding(null)).toBeNull();
+    expect(negotiateEncoding(undefined)).toBeNull();
+    expect(negotiateEncoding('')).toBeNull();
+    expect(negotiateEncoding('identity')).toBeNull();
+  });
+
+  it('is null when no acceptable codec is supported by the runtime', () => {
+    // Node without `CompressionStream('br')` must never answer `content-encoding: br`.
+    expect(negotiateEncoding('br', { brotli: false })).toBeNull();
+    expect(negotiateEncoding('br, gzip;q=0', { brotli: false })).toBeNull();
+  });
+
+  it('prefers brotli over gzip when both are acceptable and supported', () => {
+    // Brotli compresses text ~15-20 % smaller than gzip, so it wins the tie.
+    expect(negotiateEncoding('gzip, deflate, br', { brotli: true })).toBe('br');
+    expect(negotiateEncoding('gzip, br', { brotli: true })).toBe('br');
+  });
+
+  it('falls back to gzip when brotli is unsupported or not offered', () => {
+    expect(negotiateEncoding('br, gzip', { brotli: false })).toBe('gzip');
+    expect(negotiateEncoding('gzip', { brotli: true })).toBe('gzip');
+  });
+
+  it('honours q-values, including a client-preferred gzip', () => {
+    expect(negotiateEncoding('gzip;q=1, br;q=0.5', { brotli: true })).toBe('gzip');
+    expect(negotiateEncoding('gzip;q=0.2, br;q=0.9', { brotli: true })).toBe('br');
+  });
+
+  it('rejects a codec disabled with q=0', () => {
+    expect(negotiateEncoding('br;q=0, gzip', { brotli: true })).toBe('gzip');
+    expect(negotiateEncoding('gzip;q=0, br', { brotli: true })).toBe('br');
+    expect(negotiateEncoding('br;q=0, gzip;q=0', { brotli: true })).toBeNull();
+  });
+
+  it('expands the wildcard to the best supported codec', () => {
+    expect(negotiateEncoding('*', { brotli: true })).toBe('br');
+    expect(negotiateEncoding('*', { brotli: false })).toBe('gzip');
   });
 });

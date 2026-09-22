@@ -48,6 +48,12 @@ jobs:
       - name: Typecheck
         run: pnpm run typecheck
 
+      # The starter template ships its own suite (node:test, no sockets).
+      # Node 20 is skipped: examples run TypeScript natively (Node ≥ 22.18).
+      - name: Test (starter template)
+        if: matrix.node != 20
+        run: pnpm run test:starter
+
       - name: Lint (Biome)
         run: pnpm exec biome check .
 

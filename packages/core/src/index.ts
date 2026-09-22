@@ -19,12 +19,13 @@ export type { OrbitConfig, OrbitHandler } from './engine.js';
 // Serialization & negotiation
 export { encodeMsgpack, decodeMsgpack } from './serialize/msgpack.js';
 export {
+  negotiateEncoding,
   negotiateFormat,
   wantsGzip,
   MSGPACK_CONTENT_TYPE,
   SSE_CONTENT_TYPE,
 } from './serialize/negotiate.js';
-export type { OrbitFormat } from './serialize/negotiate.js';
+export type { EncodingSupport, OrbitEncoding, OrbitFormat } from './serialize/negotiate.js';
 
 // Query language
 export { parseOQS, DEFAULT_MAX_DEPTH } from './parser.js';

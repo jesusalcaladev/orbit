@@ -4,6 +4,20 @@ Everything you can run with Orbit, organized by where it runs and by concept.
 
 ```
 examples/
+├── starter/               the canonical new-project skeleton (copy this to start)
+│   ├── src/
+│   │   ├── domain/          pure TypeScript entities + repositories (zero Orbit imports)
+│   │   ├── adapters/        DataAdapter per entity — the only bridge to the protocol
+│   │   ├── plugins/         authz: key → caller mapping (hosts) + read policy (engine)
+│   │   ├── app.ts           composition root — createOrbit({ adapters, plugins })
+│   │   ├── server/          thin node:http host (swap for Express/Hono/Workers)
+│   │   ├── config.ts        the only module that reads process.env
+│   │   ├── index.ts         entry — config → app → host → listen
+│   │   └── demo.ts          headless HTTP walkthrough (runs in run-all as example 00)
+│   ├── test/app.test.ts     the suite — orbit.execute() in-process, no sockets
+│   ├── package.json         ready to copy out of the repo (scripts wired)
+│   ├── tsconfig.json        strict, NodeNext, erasable-syntax-only
+│   └── README.md            the rules + growth table — full guide in docs/project-structure.md
 ├── node/                  headless console scripts (plain Node, no server to keep open)
 │   ├── fundamentals/      # Basic Orbit setup & first steps
 │   │   └── 01-hello.ts     one protocol facet: in-memory adapter, one query
@@ -32,7 +46,7 @@ examples/
 │   │   ├── engine.ts           → application: Orbit engine, adapters, auth policy, timing, caching
 │   │   ├── demo.ts             → book demo setup
 │   │   └── README.md           layering, authn/authz split & protocol walkthrough
-│   ├── run-all.ts           # runs 01–13 back to back
+│   ├── run-all.ts           # runs starter + 01–13 back to back
 │   └── standalone-server.ts   # zero-dependency node:http endpoint
 └── web/                   interactive browser demos (one server, http://localhost:4321)
     ├── chat-realtime/       realtime chat over WebSocket (OpenAI-style)
@@ -40,6 +54,8 @@ examples/
     ├── 03-mini-post/        nested relations + mutations feed
     ├── 04-mini-auth/        token auth through the plugin pipeline
     ├── 05-orbit-vs-graphql/ live A/B against graphql-js
+    ├── 06-tiktok-feed/      relations + realtime likes + entity-scoped cache eviction
+    ├── 07-react/            the same world via @orbit/react hooks + devtools
     ├── server.ts            the demo server (Orbit + graphql-js, same world;
     │                        also serves /vendor for the import maps)
     ├── shared.js            browser UI helpers + demoClient() (@orbit/client)
@@ -51,7 +67,7 @@ examples/
 ## Node — run headless
 
 ```bash
-npm run build                    # once — examples import from dist/
+pnpm run build                    # once — examples import from dist/
 node examples/node/fundamentals/01-hello.ts    # any single example
 node examples/node/run-all.ts    # all examples, back to back
 ```
@@ -61,11 +77,20 @@ Each file is self-contained and prints its results — see `docs/examples.md` fo
 ## Web — interactive
 
 ```bash
-npm run web    # builds, then serves http://localhost:4321
+pnpm run web    # builds, then serves http://localhost:4321
 ```
 
 One server hosts the real engine (`/orbit` + `/realtime`) and a real graphql-js (`/graphql` + `/graphql-ws`) over the **same in-memory world**, so the A/B lab races them honestly. All demos are vanilla HTML/CSS/JS — no frameworks, no build step: the transport is `@orbit/client`, wired into the browser via an import map served from `/vendor` (the built `packages/{client,core}/dist`). `node examples/web/check.ts` runs a scripted smoke check against a running server (pages, vendor files, and HTTP + realtime round-trips).
 
-## Reference architecture
+## Project templates
 
-`examples/node/book/` is the layered book API that `10-express.ts`, `11-hono.ts` and `12-cloudflare-workers.ts` serve — see `examples/node/book/README.md` for the layering, authn/authz split and the protocol walkthrough.
+Two examples carry the **architecture** instead of a single facet:
+
+- [`examples/starter/`](./starter/) — where a new project begins: the five
+  layers (domain → adapters → plugins → composition root → host), its
+  `node --test` suite and a growth table. Full guide:
+  [`docs/project-structure.md`](../docs/project-structure.md).
+- [`examples/node/book/`](./node/book/) — the same layering grown up: the
+  layered book API that `10-express.ts`, `11-hono.ts` and
+  `12-cloudflare-workers.ts` serve — see `examples/node/book/README.md` for
+  the layering, authn/authz split and the protocol walkthrough.

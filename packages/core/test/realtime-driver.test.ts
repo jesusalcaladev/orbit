@@ -142,6 +142,24 @@ describe('createSessionDriver — the shared frame contract (spec §10)', () => 
     expect('id' in sent.at(-1)!).toBe(false);
   });
 
+  it('enforces the engine maxOps on socket envelopes too', async () => {
+    const { orbit } = makeWorld();
+    const { driver, sent } = makeSession(orbit);
+
+    // One op past the default cap (64): validation rejects before any
+    // adapter work — same bound the HTTP path enforces (spec §3 limits).
+    const ops = Array.from({ length: 65 }, () => ({
+      do: 'post.create',
+      args: { payload: { id: 'never-created' } },
+    }));
+    await driver.dispatch({ ops, id: 'too-many' });
+    expect(sent.at(-1)).toMatchObject({
+      id: 'too-many',
+      status: 400,
+      error: { code: 'ORBIT_INVALID_QUERY' },
+    });
+  });
+
   it('acknowledges unsubscribing an unknown id without touching the hub', async () => {
     const { orbit } = makeWorld();
     const { driver, sent } = makeSession(orbit);

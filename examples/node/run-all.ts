@@ -2,8 +2,9 @@
  * Run every example back-to-back. Each example is self-contained and also
  * works standalone.
  *
- * Run:  node examples/node/run-all.ts   (after `npm run build`)
+ * Run:  node examples/node/run-all.ts   (after `pnpm run build`)
  */
+import { main as starter } from '../starter/src/demo.ts';
 import { main as hello } from './fundamentals/01-hello.ts';
 import { main as blog } from './relations/02-blog-relations.ts';
 import { main as auth } from './authentication/03-auth-plugin.ts';
@@ -19,6 +20,7 @@ import { main as workersDemo } from './frameworks/12-cloudflare-workers.ts';
 import { main as stackMongo } from './stack/13-fullstack-mongo.ts';
 
 const runs: Array<{ name: string; run: () => Promise<void> }> = [
+  { name: '00 · starter (recommended project layout)', run: starter },
   { name: '01 · hello', run: hello },
   { name: '02 · relations & batching', run: blog },
   { name: '03 · auth plugin', run: auth },

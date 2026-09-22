@@ -7,7 +7,7 @@
  * iterable, so clients can render progressively instead of waiting for the
  * whole tree (great for deep graphs on slow networks).
  *
- * Run:  node examples/node/streaming/06-streaming-sse.ts   (after `npm run build`)
+ * Run:  node examples/node/streaming/06-streaming-sse.ts   (after `pnpm run build`)
  */
 import { createServer } from 'node:http';
 import { pathToFileURL } from 'node:url';

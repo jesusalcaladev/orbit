@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { byteLength, fnv1a, fnv1a64, isRecord, isSerializedPayload } from '../src/utils.js';
+import {
+  byteLength,
+  fnv1a,
+  fnv1a64,
+  isRecord,
+  isSerializedPayload,
+  traceId,
+} from '../src/utils.js';
 
 describe('isRecord', () => {
   it('narrows plain objects', () => {
@@ -76,5 +83,33 @@ describe('isSerializedPayload', () => {
     expect(isSerializedPayload({ body: 'x' })).toBe(false);
     expect(isSerializedPayload('x')).toBe(false);
     expect(isSerializedPayload(null)).toBe(false);
+  });
+});
+
+describe('traceId', () => {
+  it('returns unique, well-formed ids', () => {
+    const a = traceId();
+    const b = traceId();
+    expect(a).not.toBe(b);
+    // UUID form when Web Crypto is available (Node ≥ 19 — the test runtimes);
+    // the time-random fallback otherwise.
+    expect(a).toMatch(/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/);
+  });
+
+  it('falls back to time-random ids without Web Crypto', () => {
+    // `globalThis.crypto` is a getter-only own property on modern Node —
+    // assignment throws. Redefine it (configurable in Node/Bun) so the
+    // fallback branch is exercised without depending on setter support.
+    const original = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+    Object.defineProperty(globalThis, 'crypto', { value: undefined, configurable: true });
+    try {
+      const id = traceId();
+      // Base36 time bucket + base36 random tail — unique across calls.
+      expect(id).toMatch(/^[0-9a-z]+-[0-9a-z]+$/);
+      expect(id).not.toBe(traceId());
+    } finally {
+      if (original) Object.defineProperty(globalThis, 'crypto', original);
+      else Reflect.deleteProperty(globalThis as unknown as object, 'crypto');
+    }
   });
 });

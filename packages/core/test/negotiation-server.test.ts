@@ -158,6 +158,78 @@ describe('handler — gzip', () => {
   });
 });
 
+/**
+ * Swaps `globalThis.CompressionStream` for a stub that reports a given Brotli
+ * capability, so the negotiated `br` path is deterministic on every runtime
+ * (Node's real `CompressionStream` has no `'br'`). Only `'br'` is intercepted —
+ * it becomes an identity pass-through (enough to pin the *negotiation*
+ * contract: `content-encoding` + honest degradation); every other codec
+ * delegates to the real implementation so gzip stays genuinely compressed.
+ */
+function stubCompressionStream(brotli: boolean): () => void {
+  const original = globalThis.CompressionStream;
+  const stub = (format: string) => {
+    if (format !== 'br') return new original(format as CompressionFormat);
+    if (!brotli) throw new TypeError('unsupported format: br');
+    return new TransformStream<Uint8Array<ArrayBuffer>, Uint8Array<ArrayBuffer>>();
+  };
+  (globalThis as unknown as { CompressionStream: unknown }).CompressionStream = stub;
+  return () => {
+    (globalThis as unknown as { CompressionStream: unknown }).CompressionStream = original;
+  };
+}
+
+describe('handler — brotli (br)', () => {
+  it('serves content-encoding: br when the runtime supports it and the client prefers it', async () => {
+    const restore = stubCompressionStream(true);
+    try {
+      const orbit = makeOrbit();
+      const response = await orbit.handler(
+        request({ query: 'user { name }' }, { headers: { 'accept-encoding': 'br, gzip' } }),
+      );
+      expect(response.headers.get('content-encoding')).toBe('br');
+      // The stub is identity, so the body is still readable JSON.
+      expect(await response.json()).toEqual({
+        data: [{ name: 'Ana' }, { name: 'Bruno' }],
+      });
+    } finally {
+      restore();
+    }
+  });
+
+  it('falls back to gzip when the runtime cannot produce brotli', async () => {
+    const restore = stubCompressionStream(false);
+    try {
+      const orbit = makeOrbit();
+      const response = await orbit.handler(
+        request({ query: 'user(id="1") { name }' }, { headers: { 'accept-encoding': 'br, gzip' } }),
+      );
+      // Never claim a codec the runtime can't produce — degrade to gzip.
+      expect(response.headers.get('content-encoding')).toBe('gzip');
+      const inflated = JSON.parse(
+        new TextDecoder().decode(await gunzip(new Uint8Array(await response.arrayBuffer()))),
+      );
+      expect(inflated.data).toEqual({ name: 'Ana' });
+    } finally {
+      restore();
+    }
+  });
+
+  it('serves uncompressed when the client accepts only brotli and the runtime lacks it', async () => {
+    const restore = stubCompressionStream(false);
+    try {
+      const orbit = makeOrbit();
+      const response = await orbit.handler(
+        request({ query: 'user(id="1") { name }' }, { headers: { 'accept-encoding': 'br' } }),
+      );
+      expect(response.headers.get('content-encoding')).toBeNull();
+      expect(await response.json()).toEqual({ data: { name: 'Ana' } });
+    } finally {
+      restore();
+    }
+  });
+});
+
 describe('handler — MessagePack envelopes', () => {
   it('accepts envelopes encoded as application/x-msgpack', async () => {
     const orbit = makeOrbit();

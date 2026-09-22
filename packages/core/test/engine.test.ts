@@ -658,6 +658,31 @@ describe('batch mutations (ops)', () => {
     });
   });
 
+  it('merges invalidation keys when only some ops invalidate', async () => {
+    const orbit = createOrbit({
+      adapters: memoryAdapter([
+        {
+          entity: 'user',
+          // The `return` re-query goes through `resolve` (spec §5), not
+          // `mutate`, so it contributes no invalidation — only the mutation
+          // op itself does.
+          resolve: () => ({ id: '1' }),
+          mutate: () => ({ invalidates: ['cache:user:1'] }),
+        },
+      ]),
+    });
+
+    const result = await orbit.execute({
+      ops: [
+        { do: 'user.update', args: {} },
+        { do: 'user.update', args: {}, return: 'user { id }' },
+      ],
+    });
+
+    // Only op 1 contributes a key — the union must still surface it.
+    expect(result.invalidates).toEqual(['cache:user:1']);
+  });
+
   it('runs pipeline hooks (onBeforeParse) for each op', async () => {
     const calls: string[] = [];
     const orbit = createOrbit({
@@ -691,11 +716,60 @@ describe('batch mutations (ops)', () => {
     expect(calls).toEqual(['user.update', 'user.update']);
   });
 
+  it('maps a body-carrying op result to null in the batch array', async () => {
+    const orbit = createOrbit({
+      adapters: memoryAdapter([
+        { entity: 'user', resolve: () => ({ id: '1' }), mutate: () => ({ id: '1' }) },
+      ]),
+      plugins: [
+        {
+          name: 'payload',
+          hooks: {
+            // A plugin payload (`{ body, contentType }`) replaces `data` with
+            // a `body`. The batch array has no slot for a body, so that op's
+            // entry is `null` — the documented lossy mapping.
+            onBeforeSerialize: () => ({ body: 'PLAIN', contentType: 'text/plain' }),
+          },
+        },
+      ],
+    });
+
+    const result = await orbit.execute({ ops: [{ do: 'user.update', return: 'user { id }' }] });
+
+    expect(result.data).toEqual([null]);
+  });
+
   it('rejects streaming with ops', async () => {
     const orbit = makeOrbit();
     await expect(collect(orbit.stream({ ops: [{ do: 'user.update' }] }))).rejects.toMatchObject({
       code: ErrorCode.INVALID_QUERY,
     });
+  });
+
+  it('enforces maxOps (default 64) and reports it in details', async () => {
+    const orbit = makeOrbit();
+    const ops = Array.from({ length: 65 }, () => ({ do: 'user.update', args: {} }));
+    await expect(orbit.execute({ ops })).rejects.toMatchObject({
+      code: ErrorCode.INVALID_QUERY,
+      details: { maxOps: 64 },
+    });
+  });
+
+  it('honors a custom maxOps — at the limit passes, one past fails', async () => {
+    const orbit = makeOrbit({ maxOps: 2 });
+    const two = [
+      { do: 'user.update', args: { filter: { id: '1' }, payload: { name: 'A' } } },
+      { do: 'user.update', args: { filter: { id: '2' }, payload: { name: 'B' } } },
+    ];
+    // Exactly at the configured limit: allowed.
+    await expect(orbit.execute({ ops: two })).resolves.toMatchObject({ status: 200 });
+    // restore
+    users[0]!.name = 'Ana';
+    users[1]!.name = 'Bruno';
+    // One past the limit: rejected, echoing the configured cap.
+    await expect(
+      orbit.execute({ ops: [...two, { do: 'user.update', args: {} }] }),
+    ).rejects.toMatchObject({ code: ErrorCode.INVALID_QUERY, details: { maxOps: 2 } });
   });
 });
 
@@ -874,5 +948,55 @@ describe('request timeout & cancellation (P0)', () => {
     const orbit = makeOrbit({ requestTimeoutMs: 1_000 });
     const result = await orbit.execute({ query: 'user(id="1") { name }' });
     expect(result.status).toBe(200);
+  });
+});
+
+describe('observability hooks', () => {
+  it('fires onAfterExecute with the result, envelope and ctx', async () => {
+    // `Parameters<H>` is a tuple — index `[0]` for the hook's input object.
+    const seen: Array<
+      Parameters<
+        NonNullable<import('../src/plugins/types.js').OrbitPlugin['hooks']['onAfterExecute']>
+      >[0]
+    > = [];
+    const spy = vi.fn((input: (typeof seen)[number]) => {
+      seen.push(input);
+    });
+    const orbit = makeOrbit({
+      plugins: [{ name: 'after-execute-spy', hooks: { onAfterExecute: spy } }],
+    });
+    const result = await orbit.execute({ query: 'user(id="1") { name }' });
+    expect(result.status).toBe(200);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.result?.status).toBe(200);
+    expect(seen[0]!.envelope.query).toBe('user(id="1") { name }');
+    expect(seen[0]!.ctx.providers).toEqual({});
+  });
+
+  it('fires onAfterExecute on the error path and swallows hook failures', async () => {
+    const events: string[] = [];
+    const orbit = makeOrbit({
+      plugins: [
+        {
+          name: 'after-execute-thrower',
+          hooks: {
+            onAfterExecute: ({ error }) => {
+              events.push(error === undefined ? 'success' : `error:${error.code}`);
+              // A broken observability sink must never change the outcome.
+              throw new Error('observability sink is down');
+            },
+          },
+        },
+      ],
+    });
+    await expect(orbit.execute({ query: 'ghost { id }' })).rejects.toMatchObject({
+      code: ErrorCode.ENTITY_UNREGISTERED,
+    });
+    expect(events).toEqual(['error:ORBIT_ENTITY_UNREGISTERED']);
+    // A broken sink also leaves success paths untouched.
+    await expect(orbit.execute({ query: 'user(id="1") { name }' })).resolves.toMatchObject({
+      status: 200,
+    });
+    expect(events).toEqual(['error:ORBIT_ENTITY_UNREGISTERED', 'success']);
   });
 });

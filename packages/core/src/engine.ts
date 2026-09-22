@@ -2,6 +2,7 @@ import { AdapterRegistry } from './adapters/registry.js';
 import type { DataAdapter } from './adapters/types.js';
 import {
   DEFAULT_MAX_PAYLOAD_BYTES,
+  DEFAULT_MAX_OPS,
   readEnvelopeBytes,
   readMsgpackEnvelope,
   validateEnvelope,
@@ -19,11 +20,12 @@ import type { OrbitPlugin, AfterExecuteInput } from './plugins/types.js';
 import {
   MSGPACK_CONTENT_TYPE,
   SSE_CONTENT_TYPE,
+  negotiateEncoding,
   negotiateFormat,
-  wantsGzip,
 } from './serialize/negotiate.js';
-import type { OrbitFormat } from './serialize/negotiate.js';
+import type { OrbitEncoding, OrbitFormat } from './serialize/negotiate.js';
 import { encodeMsgpack } from './serialize/msgpack.js';
+import { etagFor, etagMatches } from './serialize/etag.js';
 import { createCachePlugin } from './plugins/cache.js';
 import type {
   BatchRequest,
@@ -46,7 +48,7 @@ export type OrbitHandler = (request: Request) => Promise<Response>;
 
 /**
  * Every negotiated response varies on `accept` (JSON/msgpack/SSE) and
- * `accept-encoding` (gzip) — proxies/CDNs must key their cache on both or
+ * `accept-encoding` (br/gzip) — proxies/CDNs must key their cache on both or
  * they can serve the wrong format to a client that asked for another.
  */
 const VARY = 'accept, accept-encoding';
@@ -85,6 +87,13 @@ export interface OrbitConfig {
    * per-request object count even when the byte cap is not reached.
    */
   maxMultipartFields?: number;
+  /**
+   * Maximum number of batch mutation ops per envelope (the `ops` array).
+   * Default 64 — mutations run sequentially, so a payload within the byte
+   * limit can still carry thousands of them; the count gets its own bound.
+   * Rejected with `ORBIT_INVALID_QUERY` and `details.maxOps` (spec §3).
+   */
+  maxOps?: number;
 }
 
 interface OrbitOptions {
@@ -102,6 +111,7 @@ interface OrbitOptions {
   maxValueLength: number;
   requestTimeoutMs: number | undefined;
   maxMultipartFields: number;
+  maxOps: number;
 }
 
 interface SerializeOutcome {
@@ -122,6 +132,16 @@ interface QueryFinal {
 interface QueryStage {
   level: number;
   data: unknown;
+}
+
+/**
+ * Conditional-GET context for a response (spec §7). Absent when validators do
+ * not apply — mutations are not shared-cache representations, so a POST
+ * response gets neither an `etag` nor a `304`.
+ */
+interface Conditional {
+  /** The request's `if-none-match` header (may be absent). */
+  ifNoneMatch: string | null;
 }
 
 interface Pending {
@@ -218,12 +238,17 @@ export class Orbit {
     return this.#options.maxValueLength;
   }
 
+  /** Maximum batch mutation ops per envelope (used by the realtime hub too). */
+  get maxOps(): number {
+    return this.#options.maxOps;
+  }
+
   /**
    * Execute an envelope and return a structured result. Framework-agnostic —
    * use `handler` when you want a fetch-compatible `Response`.
    */
   async execute(envelope: OrbitEnvelope, ctx: OrbitContext = {}): Promise<OrbitResult> {
-    const valid = validateEnvelope(envelope);
+    const valid = validateEnvelope(envelope, this.#options.maxOps);
     // Providers are the engine's channel (plugin-declared boot-time services):
     // the merged container REPLACES any caller-supplied `providers`, so plugins
     // stay the single source of truth. Per-request caller values belong in
@@ -321,7 +346,7 @@ export class Orbit {
    * the complete, transformed payload. Mutations are not streamable.
    */
   async *stream(envelope: OrbitEnvelope, ctx: OrbitContext = {}): AsyncGenerator<OrbitStreamEvent> {
-    const valid = validateEnvelope(envelope);
+    const valid = validateEnvelope(envelope, this.#options.maxOps);
     const fullCtx: OrbitContext = {
       ...ctx,
       providers: this.#options.providers,
@@ -364,16 +389,27 @@ export class Orbit {
    *   `ctx.files` for the adapter's `mutate`).
    * - **Output:** negotiated from `Accept` — JSON (default), `application/x-msgpack`,
    *   or `text/event-stream` (progressive graph streaming).
-   * - **Compression:** gzip via `Accept-Encoding` when the runtime supports it.
+   * - **Compression:** `br` (Brotli, when the runtime provides
+   *   `CompressionStream('br')`) or `gzip` via `Accept-Encoding`, negotiated by
+   *   q-value. Neither is applied when the runtime lacks the codec.
    */
   async handler(request: Request, ctx: OrbitContext = {}): Promise<Response> {
     const base: OrbitContext = { ...ctx, request, headers: request.headers };
     const format = negotiateFormat(request.headers.get('accept'));
-    // Spec §7: gzip applies "when the runtime provides CompressionStream".
-    // Check the capability, not just the header — an engine on a runtime
-    // without CompressionStream must degrade to plain responses, not 500.
-    const gzip =
-      typeof CompressionStream !== 'undefined' && wantsGzip(request.headers.get('accept-encoding'));
+    // Spec §7: compression applies "when the runtime provides
+    // CompressionStream". Brotli additionally needs the codec itself (Node only
+    // shipped `CompressionStream('br')` recently), so the capability — not just
+    // the header — decides: a client asking for `br` on such a runtime falls
+    // back to gzip, and to an uncompressed body when it accepts neither.
+    const encoding =
+      typeof CompressionStream === 'undefined'
+        ? null
+        : negotiateEncoding(request.headers.get('accept-encoding'), { brotli: hasBrotli() });
+    // Conditional requests are only meaningful for the cacheable GET endpoint:
+    // a POST response is not a shared-cache representation, so it gets neither
+    // a validator nor a 304 (spec §7). `undefined` opts the response out.
+    const conditional =
+      request.method === 'GET' ? { ifNoneMatch: request.headers.get('if-none-match') } : undefined;
     try {
       // GET endpoint (spec §3 additive): queries via query-string/headers,
       // making them CDN-cacheable. Only { query } envelopes are allowed —
@@ -398,10 +434,10 @@ export class Orbit {
             maxKeyLength: this.#options.maxKeyLength,
             maxValueLength: this.#options.maxValueLength,
           });
-          return this.#sseResponse(this.stream(envelope, base), gzip, base);
+          return this.#sseResponse(this.stream(envelope, base), encoding, base);
         }
         const result = await this.execute(envelope, base);
-        return await this.#toResponse(result, format, gzip, base);
+        return await this.#toResponse(result, format, encoding, base, conditional);
       }
 
       // Cheap pre-check before buffering: reject oversized bodies early.
@@ -430,10 +466,10 @@ export class Orbit {
             maxKeyLength: this.#options.maxKeyLength,
             maxValueLength: this.#options.maxValueLength,
           });
-          return this.#sseResponse(this.stream(envelope, fullCtx), gzip, fullCtx);
+          return this.#sseResponse(this.stream(envelope, fullCtx), encoding, fullCtx);
         }
         const result = await this.execute(envelope, fullCtx);
-        return await this.#toResponse(result, format, gzip, fullCtx);
+        return await this.#toResponse(result, format, encoding, fullCtx, conditional);
       }
 
       const raw = new Uint8Array(await request.arrayBuffer());
@@ -452,16 +488,16 @@ export class Orbit {
           maxKeyLength: this.#options.maxKeyLength,
           maxValueLength: this.#options.maxValueLength,
         });
-        return this.#sseResponse(this.stream(envelope, base), gzip, base);
+        return this.#sseResponse(this.stream(envelope, base), encoding, base);
       }
 
       const result = await this.execute(envelope, base);
-      return await this.#toResponse(result, format, gzip, base);
+      return await this.#toResponse(result, format, encoding, base, conditional);
     } catch (error) {
       // `execute` already normalizes (running onError hooks once); only
       // normalize raw errors here so translators never run twice.
       const orbitError = isOrbitError(error) ? error : await this.#normalizeError(error, base);
-      return this.#errorResponse(orbitError, format, gzip, base);
+      return this.#errorResponse(orbitError, format, encoding, base);
     }
   }
 
@@ -510,7 +546,7 @@ export class Orbit {
     }
     let envelope: OrbitEnvelope;
     try {
-      envelope = validateEnvelope(JSON.parse(envelopeField));
+      envelope = validateEnvelope(JSON.parse(envelopeField), this.#options.maxOps);
     } catch (error) {
       if (error instanceof OrbitError) throw error;
       throw new OrbitError(ErrorCode.INVALID_QUERY, "The 'envelope' field is not valid JSON");
@@ -987,18 +1023,22 @@ export class Orbit {
   async #toResponse(
     result: OrbitResult,
     format: OrbitFormat,
-    gzip: boolean,
+    encoding: OrbitEncoding | null,
     ctx: OrbitContext,
+    conditional: Conditional | undefined,
   ): Promise<Response> {
     // A plugin payload is an explicit override — served verbatim, but still
-    // compressed when the client asked for gzip.
+    // compressed with the negotiated codec.
     if (result.body !== undefined) {
       const headers = finalHeaders({ 'content-type': result.contentType, vary: VARY }, ctx);
-      if (gzip) {
+      if (encoding !== null) {
         const bytes =
           typeof result.body === 'string' ? new TextEncoder().encode(result.body) : result.body;
-        headers.set('content-encoding', 'gzip');
-        return new Response(await gzipBytes(bytes), { status: result.status, headers });
+        headers.set('content-encoding', encoding);
+        return new Response(await compressBytes(bytes, encoding), {
+          status: result.status,
+          headers,
+        });
       }
       return new Response(result.body as BodyInit, { status: result.status, headers });
     }
@@ -1009,21 +1049,40 @@ export class Orbit {
       ...(result.invalidates ? { invalidates: result.invalidates } : {}),
     };
 
+    // The validator covers the RESOURCE (`data`), never the envelope: the
+    // `fromCache` marker says how THIS response was produced, so hashing the
+    // whole body would give a cache hit a different validator than the miss it
+    // is equivalent to — conditional GETs would never see a 304 behind a CDN.
+    // Encoding-independent by construction (the same validator serves JSON and
+    // MessagePack of the same resource).
+    const validator = new TextEncoder().encode(JSON.stringify(result.data ?? null));
+
     if (format === 'msgpack') {
       const bytes = encodeMsgpack(payload);
       const headers = finalHeaders({ 'content-type': MSGPACK_CONTENT_TYPE, vary: VARY }, ctx);
-      if (gzip) {
-        headers.set('content-encoding', 'gzip');
-        return new Response(await gzipBytes(bytes), { status: result.status, headers });
+      if (conditional !== undefined) {
+        const notModified = conditionalResponse(validator, headers, conditional.ifNoneMatch);
+        if (notModified !== undefined) return notModified;
+      }
+      if (encoding !== null) {
+        headers.set('content-encoding', encoding);
+        return new Response(await compressBytes(bytes, encoding), {
+          status: result.status,
+          headers,
+        });
       }
       return new Response(bytes, { status: result.status, headers });
     }
 
     const body = JSON.stringify(payload);
     const headers = finalHeaders({ 'content-type': JSON_CONTENT_TYPE, vary: VARY }, ctx);
-    if (gzip) {
-      headers.set('content-encoding', 'gzip');
-      return new Response(await gzipBytes(new TextEncoder().encode(body)), {
+    if (conditional !== undefined) {
+      const notModified = conditionalResponse(validator, headers, conditional.ifNoneMatch);
+      if (notModified !== undefined) return notModified;
+    }
+    if (encoding !== null) {
+      headers.set('content-encoding', encoding);
+      return new Response(await compressBytes(new TextEncoder().encode(body), encoding), {
         status: result.status,
         headers,
       });
@@ -1034,7 +1093,7 @@ export class Orbit {
   async #errorResponse(
     orbitError: OrbitError,
     format: OrbitFormat,
-    gzip: boolean,
+    encoding: OrbitEncoding | null,
     ctx: OrbitContext,
   ): Promise<Response> {
     const payload = orbitError.toJSON();
@@ -1066,9 +1125,12 @@ export class Orbit {
           ctx,
         ),
       );
-      if (gzip) {
-        headers.set('content-encoding', 'gzip');
-        return new Response(await gzipBytes(bytes), { status: orbitError.status, headers });
+      if (encoding !== null) {
+        headers.set('content-encoding', encoding);
+        return new Response(await compressBytes(bytes, encoding), {
+          status: orbitError.status,
+          headers,
+        });
       }
       return new Response(bytes, { status: orbitError.status, headers });
     }
@@ -1079,9 +1141,9 @@ export class Orbit {
         ctx,
       ),
     );
-    if (gzip) {
-      headers.set('content-encoding', 'gzip');
-      return new Response(await gzipBytes(new TextEncoder().encode(body)), {
+    if (encoding !== null) {
+      headers.set('content-encoding', encoding);
+      return new Response(await compressBytes(new TextEncoder().encode(body), encoding), {
         status: orbitError.status,
         headers,
       });
@@ -1091,7 +1153,7 @@ export class Orbit {
 
   #sseResponse(
     events: AsyncGenerator<OrbitStreamEvent>,
-    gzip: boolean,
+    encoding: OrbitEncoding | null,
     ctx: OrbitContext,
   ): Response {
     const encoder = new TextEncoder();
@@ -1142,9 +1204,9 @@ export class Orbit {
       { 'content-type': SSE_CONTENT_TYPE, 'cache-control': 'no-cache', vary: VARY },
       ctx,
     );
-    if (gzip) {
-      headers.set('content-encoding', 'gzip');
-      stream = stream.pipeThrough(new CompressionStream('gzip'));
+    if (encoding !== null) {
+      headers.set('content-encoding', encoding);
+      stream = stream.pipeThrough(compressionStream(encoding));
     }
     return new Response(stream, { status: 200, headers });
   }
@@ -1199,6 +1261,7 @@ export function createOrbit(config: OrbitConfig = {}): Orbit {
     maxValueLength: config.maxValueLength ?? DEFAULT_MAX_VALUE_LENGTH,
     requestTimeoutMs: config.requestTimeoutMs,
     maxMultipartFields: config.maxMultipartFields ?? 64,
+    maxOps: config.maxOps ?? DEFAULT_MAX_OPS,
   });
 }
 
@@ -1315,6 +1378,31 @@ function finalHeaders(base: Record<string, string>, ctx: OrbitContext): Headers 
 }
 
 /**
+ * Apply the conditional-GET contract (spec §7) to a negotiated payload.
+ *
+ * Stamps a weak ETag derived from the response bytes — unless a plugin already
+ * set one (plugins own their validators, exactly like the cache headers) — and
+ * answers `304 Not Modified` when the client's `If-None-Match` says its copy is
+ * current. The 304 keeps every header, `cache-control` included, so a CDN stays
+ * inside its freshness window; it carries no body and no `content-encoding`,
+ * because it transmits no representation.
+ *
+ * Returns `undefined` when the caller should serve the payload normally.
+ */
+function conditionalResponse(
+  bytes: Uint8Array,
+  headers: Headers,
+  ifNoneMatch: string | null,
+): Response | undefined {
+  if (!headers.has('etag')) headers.set('etag', etagFor(bytes));
+  if (ifNoneMatch === null) return undefined;
+  // The statement above guarantees an `etag` header exists by now — the cast
+  // replaces an unreachable null check (same idiom as the cache plugin).
+  const etag = headers.get('etag') as string;
+  return etagMatches(ifNoneMatch, etag) ? new Response(null, { status: 304, headers }) : undefined;
+}
+
+/**
  * Race a promise against an AbortSignal: settles with the promise's value,
  * or rejects with an `AbortError` (DOMException-like) the moment the signal
  * aborts — even if the promise never settles. Used by `execute` for the
@@ -1342,9 +1430,53 @@ async function raceWithAbort<T>(promise: Promise<T>, signal: AbortSignal): Promi
   });
 }
 
-/** gzip a byte payload via the web-standard CompressionStream. */
-async function gzipBytes(bytes: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> {
-  const source = new Blob([bytes]).stream().pipeThrough(new CompressionStream('gzip'));
+/**
+ * Memoized-per-constructor Brotli capability probe. The answer cannot change
+ * for a given `CompressionStream`, and constructing the stream is the only
+ * reliable test: `CompressionStream` exists on every supported runtime but
+ * historically implemented gzip/deflate only (Node added `'br'` later, Workers
+ * vary), so checking the constructor exists is not enough — asking it for
+ * `'br'` is. Keying the memo on the constructor also re-probes honestly if a
+ * runtime (or a test) swaps the implementation.
+ */
+let brotliProbe: { ctor: unknown; capable: boolean } | undefined;
+
+function hasBrotli(): boolean {
+  if (brotliProbe === undefined || brotliProbe.ctor !== CompressionStream) {
+    brotliProbe = { ctor: CompressionStream, capable: probeBrotli() };
+  }
+  return brotliProbe.capable;
+}
+
+function probeBrotli(): boolean {
+  try {
+    // Throws where the platform doesn't implement the codec (e.g. Node), and
+    // also where `CompressionStream` doesn't exist at all — both mean "no".
+    compressionStream('br');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Construct a compression stream for a negotiated codec.
+ *
+ * The bundled DOM lib's `CompressionFormat` predates Brotli (gzip/deflate/
+ * deflate-raw only), so the cast is required — but it is honest: Brotli is only
+ * ever requested after `hasBrotli()` successfully constructed one, and an
+ * unsupported format still throws where the platform doesn't accept it.
+ */
+function compressionStream(encoding: OrbitEncoding): CompressionStream {
+  return new CompressionStream(encoding as CompressionFormat);
+}
+
+/** Compress a byte payload via the web-standard `CompressionStream`. */
+async function compressBytes(
+  bytes: Uint8Array<ArrayBuffer>,
+  encoding: OrbitEncoding,
+): Promise<Uint8Array<ArrayBuffer>> {
+  const source = new Blob([bytes]).stream().pipeThrough(compressionStream(encoding));
   const reader = source.getReader();
   const chunks: Uint8Array[] = [];
   for (;;) {

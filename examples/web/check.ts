@@ -5,7 +5,7 @@
  * migration: the /vendor import-map files resolve, every demo page serves,
  * and a client round-trip works over HTTP and the realtime socket.
  *
- * Run:  node examples/web/server.ts &   (after `npm run build`)
+ * Run:  node examples/web/server.ts &   (after `pnpm run build`)
  *       node examples/web/check.ts
  */
 import { createClient } from '@orbit/client';

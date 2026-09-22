@@ -23,11 +23,11 @@ pnpm install
 | `pnpm run build` | Emit ESM + `.d.ts` to `dist/` in every package |
 | `pnpm run example` | Run the zero-dependency demo server |
 | `pnpm run examples` | Run all eleven runnable examples |
-| `pnpm run bench` | Run the B1–B9 benchmarks and regenerate the chart |
+| `pnpm run bench` | Run the B1–B11 benchmarks and regenerate the chart |
 
 ## Running the benchmarks
 
-`npm run bench` builds `dist/`, measures all nine scenarios, and writes
+`pnpm run bench` builds `dist/`, measures every scenario, and writes
 `bench/results/benchmarks.json` + `bench/results/chart.svg`. The chart in
 `docs/benchmarks.md` is a copy of that SVG — re-embed it when the numbers
 change so the docs stay honest.

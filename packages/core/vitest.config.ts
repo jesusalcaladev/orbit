@@ -9,7 +9,9 @@ export default defineConfig({
       include: ['src/**/*.ts'],
       // Pure API surfaces with zero runtime statements (re-export barrel and
       // type-only modules) — nothing to execute, so nothing to cover.
-      exclude: ['src/index.ts', 'src/types.ts', 'src/adapters/types.ts'],
+      // Pure re-export barrel (`@orbit/core/browser`) — same statement count
+      // rule as `src/index.ts`: nothing to execute, nothing to cover.
+      exclude: ['src/index.ts', 'src/browser.ts', 'src/types.ts', 'src/adapters/types.ts'],
       thresholds: {
         lines: 100,
         functions: 100,

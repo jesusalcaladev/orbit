@@ -4,7 +4,8 @@
  * Everything about the API's *behavior* lives here: the Orbit engine, its
  * adapters over the in-memory repository, the authorization policy, a timing
  * plugin, client-driven caching and the realtime subscription feed. Both
- * framework entries (`../10-express.ts` and `../11-hono.ts`) build on this
+ * framework entries (`../frameworks/10-express.ts` and
+ * `../frameworks/11-hono.ts`) build on this
  * exact engine — one API, two hosts.
  *
  * Auth split (defense in depth):

@@ -5,6 +5,15 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
 ## [Unreleased]
 
 ### Added
+- **Project starter + architecture guide** — `examples/starter/` is the
+  canonical skeleton of a new Orbit project (domain → adapters → plugins →
+  composition root → host, with a `node --test` suite driven through
+  `orbit.execute()` and a growth table: memory → Postgres, TTL → Redis,
+  node:http → Express/Hono/Workers), registered as example 00 in
+  `run-all.ts` and covered by `pnpm run test:starter` in CI (Node ≥ 22).
+  `docs/project-structure.md` is the full reference — the five layers, the
+  import matrix, the authn/authz split, plugin order as a security control,
+  where every first-party package lands, and the common mistakes.
 - **Batch mutations (`ops`)** — `@orbit/core` now accepts an `ops` array on
   the envelope: `[{ do, args?, return? }, …]`. Mutations execute
   sequentially (fail-fast on first error); response `data` is a per-op
@@ -190,6 +199,21 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
   `docs/ecosystem.md` and the cache READMEs updated.
 
 ### Docs
+- **Living-doc drift cleanup** — ROADMAP now reflects reality: `@orbit/client`
+  and `@orbit/react` shipped (§7 tree, §9 step 7, recap, P1 #4), plus
+  `@orbit/rate-limit`/`@orbit/metrics` and the full B1–B11 benchmark set
+  (B10/B11 rows added); the mangled §1 plugin list was re-flowed; stale
+  `src/…`/`test/…` paths now carry their `packages/core/` prefix; the header
+  points at the actual `spec.md`. Count-dependent claims removed from living
+  docs so they stop rotting (test totals, "~4 100 lines", "thirteen
+  examples", "Six interactive demos") — historical CHANGELOG entries keep
+  their numbers. Stale example paths fixed (`Run:` headers missing the
+  concept folder, book README/engine host paths), `npm run` → `pnpm run`
+  across docs and examples, missing `docs/client.md` + `docs/project-structure.md`
+  rows added to the README table, missing `06-tiktok-feed`/`07-react` demos
+  added to the examples tables, and the redundant npm `workspaces` field
+  dropped from the root `package.json` (`pnpm-workspace.yaml` is the source
+  of truth).
 - **Pagination convention** (`docs/adapters.md`) — reserved `limit`/`cursor`
   filter keys, a page shape example, and validate-the-limit guidance. No
   syntax change (filters are verbatim by design — spec §4).

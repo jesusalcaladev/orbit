@@ -10,7 +10,7 @@
  * WebSocket protocol (RFC 6455) is hand-rolled. The client is `@orbit/client`
  * with an injectable WebSocket so the demo can simulate the drop.
  *
- * Run:  node examples/node/streaming/08-realtime.ts   (after `npm run build`)
+ * Run:  node examples/node/streaming/08-realtime.ts   (after `pnpm run build`)
  */
 import { createServer } from 'node:http';
 import { pathToFileURL } from 'node:url';

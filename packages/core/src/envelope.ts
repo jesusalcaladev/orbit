@@ -9,12 +9,19 @@ const decoder = new TextDecoder();
 export const DEFAULT_MAX_PAYLOAD_BYTES = 10 * 1024 * 1024;
 
 /**
+ * Default maximum number of batch mutation ops per envelope. Mutations run
+ * sequentially, so a payload within the byte limit can still carry thousands
+ * of them — the count gets its own bound (configurable via `maxOps`).
+ */
+export const DEFAULT_MAX_OPS = 64;
+
+/**
  * Validate and normalize a raw envelope value.
  *
  * Runs on every `execute` call, so envelopes built by hand get the same
  * guarantees as envelopes read from the wire.
  */
-export function validateEnvelope(value: unknown): OrbitEnvelope {
+export function validateEnvelope(value: unknown, maxOps: number = DEFAULT_MAX_OPS): OrbitEnvelope {
   if (!isRecord(value)) {
     throw new OrbitError(ErrorCode.INVALID_QUERY, 'Envelope must be a JSON object');
   }
@@ -48,6 +55,15 @@ export function validateEnvelope(value: unknown): OrbitEnvelope {
     const list = ops as unknown[];
     if (list.length === 0) {
       throw new OrbitError(ErrorCode.INVALID_QUERY, "'ops' must be a non-empty array");
+    }
+    // The count bound lands before per-op validation: an oversized batch is a
+    // shape error, and failing here avoids scanning thousands of entries.
+    if (list.length > maxOps) {
+      throw new OrbitError(
+        ErrorCode.INVALID_QUERY,
+        `'ops' exceeds the configured batch limit (${maxOps})`,
+        { details: { maxOps } },
+      );
     }
     const validated: MutationOp[] = [];
     for (let i = 0; i < list.length; i += 1) {

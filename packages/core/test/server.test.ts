@@ -678,3 +678,99 @@ describe('GET query endpoint', () => {
     expect(response.status).toBe(500);
   });
 });
+
+describe('ETag / conditional GET', () => {
+  const QUERY = encodeURIComponent('user(id="1") { name }');
+
+  it('stamps a weak ETag on a GET query response', async () => {
+    const orbit = makeOrbit();
+    const response = await orbit.handler(get(`http://localhost/orbit?query=${QUERY}`));
+    expect(response.status).toBe(200);
+    // Weak: the same resource has several byte-level representations
+    // (identity/gzip/br), so the validator must not claim byte equality.
+    expect(response.headers.get('etag')).toMatch(/^W\/".+"$/);
+  });
+
+  it('is stable for the same query and distinct across queries', async () => {
+    const orbit = makeOrbit();
+    const first = await orbit.handler(get(`http://localhost/orbit?query=${QUERY}`));
+    const again = await orbit.handler(get(`http://localhost/orbit?query=${QUERY}`));
+    const other = await orbit.handler(
+      get(`http://localhost/orbit?query=${encodeURIComponent('user(id="2") { name }')}`),
+    );
+    expect(again.headers.get('etag')).toBe(first.headers.get('etag'));
+    expect(other.headers.get('etag')).not.toBe(first.headers.get('etag'));
+  });
+
+  it('answers 304 without a body when if-none-match matches', async () => {
+    const orbit = makeOrbit();
+    const url = `http://localhost/orbit?query=${QUERY}`;
+    const initial = await orbit.handler(get(url));
+    const etag = initial.headers.get('etag')!;
+    const response = await orbit.handler(get(url, { 'if-none-match': etag }));
+    expect(response.status).toBe(304);
+    expect(await response.text()).toBe('');
+    expect(response.headers.get('etag')).toBe(etag);
+    // A 304 carries no representation, so it must not advertise an encoding.
+    expect(response.headers.get('content-encoding')).toBeNull();
+  });
+
+  it('matches the wildcard and a comma-separated list (weak comparison)', async () => {
+    const orbit = makeOrbit();
+    const url = `http://localhost/orbit?query=${QUERY}`;
+    const etag = (await orbit.handler(get(url))).headers.get('etag')!;
+    expect((await orbit.handler(get(url, { 'if-none-match': '*' }))).status).toBe(304);
+    expect((await orbit.handler(get(url, { 'if-none-match': `W/"stale", ${etag}` }))).status).toBe(
+      304,
+    );
+  });
+
+  it('serves 200 when if-none-match does not match', async () => {
+    const orbit = makeOrbit();
+    const url = `http://localhost/orbit?query=${QUERY}`;
+    const response = await orbit.handler(get(url, { 'if-none-match': 'W/"nope"' }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ data: { name: 'Ana' } });
+  });
+
+  it('keeps the cache-control a cache spec advertised on the 304', async () => {
+    const orbit = makeOrbit({ cache: {} });
+    const url = `http://localhost/orbit?query=${QUERY}&cache=ttl=300`;
+    const etag = (await orbit.handler(get(url))).headers.get('etag')!;
+    const response = await orbit.handler(get(url, { 'if-none-match': etag }));
+    expect(response.status).toBe(304);
+    // The CDN must keep serving from its still-fresh copy.
+    expect(response.headers.get('cache-control')).toBe('public, max-age=300');
+  });
+
+  it('does not stamp an ETag on POST responses or error responses', async () => {
+    const orbit = makeOrbit();
+    const posted = await orbit.handler(post({ query: 'user(id="1") { name }' }));
+    expect(posted.headers.get('etag')).toBeNull();
+    const failed = await orbit.handler(get('http://localhost/orbit?query=ghost { id }'));
+    expect(failed.headers.get('etag')).toBeNull();
+  });
+
+  it('never overwrites an ETag a plugin set explicitly', async () => {
+    const orbit = makeOrbit({
+      plugins: [
+        {
+          name: 'own-etag',
+          hooks: {
+            // Plugins own their validators through the response-headers
+            // channel — the engine only supplies a default when none is set.
+            onAfterParse({ ctx }) {
+              (ctx.responseHeaders ??= {}).etag = 'W/"plugin"';
+            },
+          },
+        },
+      ],
+    });
+    const url = `http://localhost/orbit?query=${QUERY}`;
+    const response = await orbit.handler(get(url));
+    expect(response.headers.get('etag')).toBe('W/"plugin"');
+    // The plugin's validator — not a recomputed one — drives the 304.
+    const conditional = await orbit.handler(get(url, { 'if-none-match': 'W/"plugin"' }));
+    expect(conditional.status).toBe(304);
+  });
+});

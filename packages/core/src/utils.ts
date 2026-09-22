@@ -70,6 +70,27 @@ export function fnv1a64(input: string): string {
 }
 
 /**
+ * Byte-oriented double FNV-1a — the same two offset bases as `fnv1a64`, over
+ * raw bytes instead of UTF-16 code units.
+ *
+ * Used for HTTP validators (ETags), where the hash must cover the exact wire
+ * bytes: a MessagePack payload is binary, so a string-based hash could not be
+ * derived from it without a lossy intermediate representation.
+ */
+export function fnv1a64Bytes(bytes: Uint8Array): string {
+  let a = 0x811c9dc5;
+  let b = 0x84222325;
+  for (let i = 0; i < bytes.length; i += 1) {
+    const byte = bytes[i]!;
+    a ^= byte;
+    a = Math.imul(a, 0x01000193);
+    b ^= byte;
+    b = Math.imul(b, 0x01000193);
+  }
+  return `${(a >>> 0).toString(36)}${(b >>> 0).toString(36)}`;
+}
+
+/**
  * Generate a short, collision-resistant request trace id for log/error
  * correlation across the pipeline. Uses Web Crypto when available (all modern
  * browsers + Node >= 19); falls back to a time-random hybrid on runtimes without

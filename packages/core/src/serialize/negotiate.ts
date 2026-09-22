@@ -9,6 +9,12 @@ interface AcceptEntry {
   q: number;
 }
 
+/** One `accept-encoding` entry: a codec name and its q-value. */
+interface EncodingEntry {
+  name: string;
+  q: number;
+}
+
 function parseAccept(header: string | null | undefined): AcceptEntry[] {
   if (!header) return [];
   return header.split(',').map((part) => {
@@ -80,15 +86,77 @@ export function negotiateFormat(header: string | null | undefined): OrbitFormat 
 
 /** True when the client accepts `gzip` (and not with `q=0`). */
 export function wantsGzip(header: string | null | undefined): boolean {
-  if (!header) return false;
-  return header.split(',').some((part) => {
-    const [name, ...params] = part.trim().split(';');
-    // `split()` always yields at least one element, so `name` is defined.
-    if (name!.trim().toLowerCase() !== 'gzip') return false;
+  return parseEncodingEntries(header).some(
+    (entry) => (entry.name === 'gzip' || entry.name === '*') && entry.q > 0,
+  );
+}
+
+/** Response compression codecs Orbit can apply (`content-encoding` values). */
+export type OrbitEncoding = 'br' | 'gzip';
+
+/** Which codecs the runtime can actually produce (see `handler`). */
+export interface EncodingSupport {
+  /** `CompressionStream('br')` is available on this runtime. */
+  brotli: boolean;
+}
+
+/**
+ * Preference order when the client's q-values tie: smaller output wins, so
+ * Brotli (typically 15-20 % smaller than gzip on JSON) is tried first.
+ */
+const ENCODING_PREFERENCE: OrbitEncoding[] = ['br', 'gzip'];
+
+function parseEncodingEntries(header: string | null | undefined): EncodingEntry[] {
+  if (!header) return [];
+  return header.split(',').map((part) => {
+    const [rawName, ...params] = part.trim().split(';');
+    let q = 1;
     for (const param of params) {
       const [key, value] = param.trim().split('=');
-      if (key === 'q' && Number(value) === 0) return false;
+      if (key === 'q' && value !== undefined) {
+        const parsed = Number(value);
+        if (Number.isFinite(parsed)) q = parsed;
+      }
     }
-    return true;
+    // `split()` always yields at least one element, so `rawName` is defined.
+    return { name: rawName!.trim().toLowerCase(), q };
   });
+}
+
+/**
+ * Negotiate the response `content-encoding` from an `accept-encoding` header.
+ *
+ * - The client's q-values decide first (`gzip;q=1, br;q=0.5` → gzip);
+ *   ties break toward the smaller codec (`br` before `gzip`).
+ * - `*` expands to every codec the `supported` argument reports — so a
+ *   `*`-only header gets gzip on a runtime without Brotli.
+ * - A codec the runtime cannot produce (`supported.brotli === false`) and one
+ *   the client disabled with `q=0` are both skipped.
+ *
+ * Returns `null` when no codec is acceptable AND supported — the caller then
+ * serves the body uncompressed rather than lying with a `content-encoding`.
+ */
+export function negotiateEncoding(
+  header: string | null | undefined,
+  supported: EncodingSupport = { brotli: false },
+): OrbitEncoding | null {
+  const allowed = ENCODING_PREFERENCE.filter((codec) => codec !== 'br' || supported.brotli);
+  let best: OrbitEncoding | null = null;
+  let bestQ = 0;
+  let bestRank = Number.POSITIVE_INFINITY;
+  for (const entry of parseEncodingEntries(header)) {
+    if (entry.q <= 0) continue;
+    // `*` means "any of the remaining codecs" — expand it to the supported set.
+    const names = entry.name === '*' ? allowed : [entry.name as OrbitEncoding];
+    for (const name of names) {
+      const rank = allowed.indexOf(name);
+      if (rank === -1) continue; // unknown codec, or Brotli on a runtime without it
+      if (entry.q > bestQ || (entry.q === bestQ && rank < bestRank)) {
+        best = name;
+        bestQ = entry.q;
+        bestRank = rank;
+      }
+    }
+  }
+  return best;
 }

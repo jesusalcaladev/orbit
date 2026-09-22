@@ -73,7 +73,7 @@ That's why the core has **zero runtime dependencies**: a contract layer should b
 - **Frozen contracts.** The `DataAdapter` interface (resolve/batch/mutate/subscribe) and the envelope are canonicalized in [`spec.md`](./spec.md) — realtime is designed into the adapter contract, and the WebSocket transport is shipped in v0.0.1.
 - **Framework-agnostic handler.** Works with `Request`/`Response` runtimes, or call `orbit.execute(envelope, ctx)` directly.
 - **Ecosystem packages.** `@orbit/rest` (fetch-based `DataAdapter`: queries → `GET`, mutations → `POST`/`PATCH`/`DELETE`), `@orbit/postgres` and `@orbit/mongo` (SQL and document-store `DataAdapter`s: parameterized `WHERE` / match documents, `IN`/`$in` batching, `create`/`update`/`delete` — injection-safe by construction), `@orbit/cache` (the cache plugin's dedicated distribution home and the `CacheStore` contract), `@orbit/redis` and `@orbit/kv-cache` (production cache stores for Redis and Cloudflare KV), `@orbit/auth` (authn/authz hooks — caller identity reaches queries **and** mutations), `@orbit/logging` (request-timing observability), `@orbit/rate-limit` (a zero-dep token-bucket plugin gating queries **and** mutations), the server wrappers `@orbit/express`, `@orbit/hono` and `@orbit/cloudflare-workers` (Workers-native WebSocket realtime included), and the two client packages — `@orbit/client` (vanilla: envelope requests, SSE streaming, multipart, WebSocket realtime with reconnect + resume) and `@orbit/react` (cache-aware React/RN bindings: hooks, TTL + SWR cache, protocol-driven invalidation, devtools) — ship alongside the frozen core — see [docs/ecosystem.md](./docs/ecosystem.md). Each package has its own README: [`@orbit/rest`](./packages/rest/README.md), [`@orbit/postgres`](./packages/postgres/README.md), [`@orbit/mongo`](./packages/mongo/README.md), [`@orbit/cache`](./packages/cache/README.md), [`@orbit/redis`](./packages/redis/README.md), [`@orbit/kv-cache`](./packages/kv-cache/README.md), [`@orbit/auth`](./packages/auth/README.md), [`@orbit/logging`](./packages/logging/README.md), [`@orbit/rate-limit`](./packages/rate-limit/README.md), [`@orbit/express`](./packages/express/README.md), [`@orbit/hono`](./packages/hono/README.md), [`@orbit/cloudflare-workers`](./packages/cloudflare-workers/README.md), [`@orbit/client`](./packages/client/README.md) and [`@orbit/react`](./packages/react/README.md).
-- **Zero runtime dependencies.** `typescript` and `vitest` are dev-only. The whole protocol is a compact (~4 100 lines), typed ES2022 core — including the MessagePack codec and the WebSocket transport.
+- **Zero runtime dependencies.** `typescript` and `vitest` are dev-only. The whole protocol is a compact, typed ES2022 core — including the MessagePack codec and the WebSocket transport.
 
 ## When to use Orbit — and when not to
 
@@ -186,7 +186,7 @@ curl -s localhost:3000/orbit \
 { "data": { "name": "Ana", "posts": [{ "title": "Why Orbit?" }] } }
 ```
 
-See [examples/node/standalone-server.ts](./examples/node/standalone-server.ts) for a complete zero-dependency server (`npm run example`), the [thirteen runnable examples](./docs/examples.md) for one facet each, [docs/benchmarks.md](./docs/benchmarks.md) for the B1–B11 numbers against measured graphql-js (including the real-HTTP wire path, the client/react-layer overhead stories and the cache-vs-DataLoader comparison), [docs/use-cases.md](./docs/use-cases.md) for where Orbit fits, [docs/security.md](./docs/security.md) for the threat model, [docs/ecosystem.md](./docs/ecosystem.md) for the first-party `@orbit/*` package plan, [docs/protocol-audit.md](./docs/protocol-audit.md) for the spec-vs-code verification, and [docs/spec-vision.md](./docs/spec-vision.md) for the north star behind the spec.
+See [examples/node/standalone-server.ts](./examples/node/standalone-server.ts) for a complete zero-dependency server (`pnpm run example`), [examples/starter](./examples/starter/) as the skeleton of a new project (the architecture, folder by folder, in [docs/project-structure.md](./docs/project-structure.md)), the [runnable examples](./docs/examples.md) for one facet each, [docs/benchmarks.md](./docs/benchmarks.md) for the B1–B11 numbers against measured graphql-js (including the real-HTTP wire path, the client/react-layer overhead stories and the cache-vs-DataLoader comparison), [docs/use-cases.md](./docs/use-cases.md) for where Orbit fits, [docs/security.md](./docs/security.md) for the threat model, [docs/ecosystem.md](./docs/ecosystem.md) for the first-party `@orbit/*` package plan, [docs/protocol-audit.md](./docs/protocol-audit.md) for the spec-vs-code verification, and [docs/spec-vision.md](./docs/spec-vision.md) for the north star behind the spec.
 
 ## Query syntax at a glance
 
@@ -258,9 +258,11 @@ Every failure is an `OrbitError` with a standard code and a correct HTTP status:
 | [Serialization](./docs/serialization.md) | JSON, MessagePack, SSE streaming, gzip — `Accept`/`Accept-Encoding` negotiation |
 | [Benchmarks](./docs/benchmarks.md) | B1–B11 vs measured graphql-js — latency, round-trips, throughput, payload, streaming, realtime, real-HTTP wire path, client + react-layer overhead, cache-vs-DataLoader |
 | [Security](./docs/security.md) | Threat model: payload/depth limits, prototype-pollution hardening, realtime protocol defenses |
-| [Examples](./docs/examples.md) | The thirteen runnable examples, tour and reading order |
+| [Examples](./docs/examples.md) | The runnable examples, tour and reading order |
 | [Architecture](./docs/architecture.md) | How the engine executes a query, serialization, extension points |
+| [Project structure](./docs/project-structure.md) | How to structure a new Orbit project — the five layers, import rules, growth path |
 | [Server integration](./docs/server.md) | Express, Hono, Cloudflare Workers (fetch handler + native realtime), Bun, Deno, node:http |
+| [Client](./docs/client.md) | `@orbit/client` — the vanilla transport client: queries, mutations, SSE, realtime, uploads |
 | [Errors](./docs/errors.md) | Error reference and the `onError` hook |
 | [Protocol audit](./docs/protocol-audit.md) | Spec-vs-code verification — every inconsistency found and fixed, what remains |
 | [Use cases](./docs/use-cases.md) | Where Orbit fits — social, e-commerce, dashboards, IoT — with real code for each |
@@ -276,12 +278,13 @@ in as `packages/*`.
 
 ```bash
 pnpm install         # dev dependencies only (typescript, vitest)
-pnpm test            # 1029 tests, Vitest (486 core + 144 client + 134 react + 42 mongo + 40 cloudflare-workers + 33 postgres + 26 rest + 22 rate-limit + 18 express + 17 redis + 15 auth + 13 hono + 11 logging + 10 metrics + 9 cache + 9 kv-cache; +3 redis integration skipped without a live server)
+pnpm test            # every package's Vitest suite, back to back (per-package counts live in each package's README)
+pnpm run test:starter # the starter template's suite (node --test — Node ≥ 22.18, skipped on Node 20 in CI)
 pnpm run test:coverage # every package with its own v8 thresholds (≥90% stmts/funcs/lines, ≥85% branch — most at/over 90% branch)
 pnpm run typecheck   # strict TypeScript (builds all packages, then checks examples/bench)
 pnpm run build       # ESM + .d.ts → dist/ in every package
 pnpm run example     # zero-dep demo server on localhost:3000 (examples/node/standalone-server.ts)
-pnpm run examples    # all thirteen headless examples, back to back (examples/node/)
+pnpm run examples    # every headless example (starter → 13), back to back (examples/node/)
 pnpm run web         # interactive demos on localhost:4321 — chat, uploads, posts, auth + the Orbit-vs-GraphQL A/B lab (examples/web/, see docs/examples.md)
 pnpm run bench       # B1–B11 benchmarks + chart (docs/benchmarks.md)
 pnpm run size        # core package weight vs graphql-js (docs/benchmarks.md)

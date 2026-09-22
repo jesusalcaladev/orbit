@@ -1,0 +1,23 @@
+{
+  "name": "orbit-starter",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "How to structure a new Orbit project — copy this folder and grow it.",
+  "scripts": {
+    "dev": "node src/index.ts",
+    "start": "node src/index.ts",
+    "test": "node --test test/app.test.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@orbit/core": "^0.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^7.0.2"
+  },
+  "engines": {
+    "node": ">=22.18"
+  }
+}

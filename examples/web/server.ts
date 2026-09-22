@@ -13,7 +13,7 @@
  * The two protocols share the SAME in-memory world (the chat message bus),
  * so the orbit-vs-graphql demo races them honestly.
  *
- * Run:  npm run web   (builds first, then serves on http://localhost:4321)
+ * Run:  pnpm run web   (builds first, then serves on http://localhost:4321)
  */
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -867,7 +867,7 @@ const server = createServer(async (req, res) => {
       const filePath = normalize(resolve(ROOT_DIR, distDir, rest));
       if (!filePath.startsWith(resolve(ROOT_DIR, distDir)) || !existsSync(filePath)) {
         res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
-        res.end('404 — not found. Did you run `npm run build` first?');
+        res.end('404 — not found. Did you run `pnpm run build` first?');
         return;
       }
       const data = await readFile(filePath);
@@ -896,14 +896,14 @@ const server = createServer(async (req, res) => {
     }
 
     // Static demos. React demos (`.jsx`) are bundled on the fly with esbuild
-    // so the showcase needs no build step — `npm run web` is enough.
+    // so the showcase needs no build step — `pnpm run web` is enough.
     if (req.method === 'GET') {
       let requested = url.pathname === '/' ? '/index.html' : url.pathname;
       if (requested.endsWith('/')) requested += 'index.html';
       const filePath = normalize(join(WEB_DIR, requested));
       if (!filePath.startsWith(WEB_DIR) || !existsSync(filePath)) {
         res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
-        res.end('404 — not found. Is this the web demos server? (npm run web)');
+        res.end('404 — not found. Is this the web demos server? (pnpm run web)');
         return;
       }
       const isJsx = extname(filePath).toLowerCase() === '.jsx';

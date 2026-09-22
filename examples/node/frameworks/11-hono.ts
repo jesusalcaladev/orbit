@@ -2,19 +2,19 @@
  * 11 — Book API on Hono
  *
  * The Hono host for the shared book API — the exact same engine as the
- * Express host (`examples/node/10-express.ts`), proving that the Orbit engine is
+ * Express host (`examples/node/frameworks/10-express.ts`), proving that the Orbit engine is
  * framework-agnostic:
  *
  *   examples/node/book/data.ts    → domain: entities + in-memory repository
  *   examples/node/book/engine.ts  → application: Orbit engine, adapters, auth
  *                              policy, timing, caching (framework-agnostic)
- *   examples/node/11-hono.ts      → interface: Hono wiring on top
+ *   examples/node/frameworks/11-hono.ts      → interface: Hono wiring on top
  *
  * The framework layer only does transport + authentication; authorization
  * stays in the engine. `Hono` itself is runtime-agnostic, so the app is
  * hosted on Node with `@hono/node-server`.
  *
- * Run:  node examples/node/11-hono.ts   (after `npm run build`)
+ * Run:  node examples/node/frameworks/11-hono.ts   (after `pnpm run build`)
  */
 import { pathToFileURL } from 'node:url';
 import { serve } from '@hono/node-server';

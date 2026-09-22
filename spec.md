@@ -87,7 +87,10 @@ of `query`, `do`, or `ops` must be present.
 | `cache` | `string` | Cache spec, e.g. `ttl=300`, `stale=60`. Used with `query`. |
 
 Limits: envelope size defaults to **10 MiB** (`maxPayloadBytes`, configurable);
-query depth defaults to **10 levels** (`maxQueryDepth`, configurable).
+query depth defaults to **10 levels** (`maxQueryDepth`, configurable); batch
+mutations default to **64 ops** (`maxOps`, configurable) — a larger `ops`
+array is rejected with `ORBIT_INVALID_QUERY` (400) and `details.maxOps`,
+mirroring the multipart field-count cap (§7).
 
 **Frozen in v0.0.1.** Any future extension must be additive — new optional
 fields only.
@@ -125,6 +128,7 @@ Accept: application/json
 | `return` / `cache` not strings | `ORBIT_INVALID_QUERY` (400) |
 | Body larger than `maxPayloadBytes` | `ORBIT_PAYLOAD_TOO_LARGE` (413) |
 | Body not valid JSON / MessagePack | `ORBIT_INVALID_QUERY` (400) |
+| `ops` longer than `maxOps` (default 64) | `ORBIT_INVALID_QUERY` (400) |
 
 ---
 
@@ -189,6 +193,9 @@ posts(status="published", limit="10") { title, author { name } }
   identity always reaches `mutate`. The hook's return value is ignored: a
   mutation has no query to rewrite.
 - Mutations are **not** streamable.
+- A batch `ops` array is capped at `maxOps` (default **64**, configurable at
+  `createOrbit`) — a payload within the byte limit can still carry thousands
+  of sequential mutations, so the count gets its own bound. See §3 limits.
 
 Error codes: `ORBIT_MUTATION_FAILED` (500) when the adapter rejects; `ORBIT_ENTITY_UNREGISTERED` (404) for unknown entities.
 
@@ -278,6 +285,14 @@ Explicit types always beat wildcards; highest `q`-value wins. At equal
 (`content-encoding: gzip`), for JSON, MessagePack, SSE and plugin payloads,
 when the runtime provides `CompressionStream`.
 
+`Accept-Encoding: br` → response is Brotli-compressed
+(`content-encoding: br`) when the runtime supports it
+(`CompressionStream('br')` — Node ≥ 21.2 with flag / enabled by default from
+Node 22 era runtimes; browsers, Bun and Workers). Where the runtime lacks
+Brotli the handler silently falls back to gzip, and to identity encoding when
+neither is supported. Negotiation prefers `br` over `gzip` at equal
+`q`-values and only compresses responses above 1 KiB.
+
 ### Response headers (additive)
 
 Plugins and adapters may attach response headers by setting
@@ -296,6 +311,30 @@ additionally emits `x-orbit-cache: hit|miss` and an age-aware
 `cache-control` (spec §8) on responses it handled — but the error contract's
 `no-store` always wins, even when a plugin stamped cache headers before a
 resolution failure.
+
+The handler stamps an **`etag`** (a 64-bit FNV-1a of the exact response
+bytes, quoted) on successful JSON responses and honors conditional requests:
+`if-none-match` matching the current etag answers **`304 Not Modified`** —
+no body, no serialization work, no compression — with the stored `etag`
+echoed back. A non-matching or absent `if-none-match` is answered normally
+with the `etag` attached. MessagePack, SSE and error responses are not
+etagged (a CDN should not replay a mutation envelope or a half-stream), and
+a `no-store` error contract never carries one.
+
+### Cross-origin requests (CORS)
+
+CORS is not wired into the core handler (a browsers-only concern, and host
+frameworks carry their own middleware); it ships as the zero-dependency
+**`@orbit/cors`** plugin implementing the §11 hook contract:
+`origin` (exact string, allowlist array, reflect-`true`, or `false` to
+disallow), `methods`, `allowedHeaders`, `exposedHeaders`, `credentials`, and
+`maxAge`. On an `OPTIONS` preflight the plugin short-circuits inside
+`onBeforeParse` with a **204** and the full `Access-Control-Allow-*` set
+before any pipeline work runs; on real requests it stamps the allow headers
+through the `responseHeaders` channel above, so every response format
+(JSON, MessagePack, SSE) and every error path carries them. A disallowed
+origin receives no allow headers, and its preflight answers 403 with
+`details.origin`. See [docs/plugins.md](./docs/plugins.md#orbitcors).
 
 ### Streaming semantics (SSE) ✅
 
@@ -327,7 +366,9 @@ header) — a comma- or space-separated spec, or a JSON object:
 | `ttl=300` | Fresh for 300 s. |
 | `stale=60` | Serve stale up to 60 s while revalidating in the background (stale-while-revalidate). |
 | `ttl=300,stale=60` | Fresh for 300 s, then serve stale + background revalidation for 60 s. |
+| `ttl=300,email=600` | Field TTL — the `email` top-level field may go stale after 600 s while the entry stays fresh for 300 s (fields past their own TTL are dropped on serve). |
 | `{"ttl":300,"stale":60}` | JSON object form — equivalent to the comma-separated spec above. |
+| `{"ttl":300,"email":600}` | JSON object form of the field TTL. |
 
 Cache hits are marked `fromCache: true`. **Server-side eviction is automatic
 and precise at the entity level**: the cache plugin indexes every stored entry
@@ -350,6 +391,17 @@ path served, and `cache-control` mirrors the spec with **age-aware** values
 max-age=0, stale-while-revalidate=<remaining window>` when serving stale) so
 a CDN/proxy caches Orbit's answers for exactly as long as Orbit itself would
 — and revalidates in the background the same way.
+
+**Field-level TTLs (additive, opt-in).** A `<field>=<seconds>` pair — any
+name other than `ttl`/`stale` in either spec form — gives one top-level
+field of the cached payload its own freshness clock, stored alongside the
+entry. On a **fresh serve**, a field past its own TTL is dropped (its key
+removed) before the response leaves the engine, so sensitive or fast-aging
+fields disappear without shortening the whole entry's life; the store's
+entry-level TTL and the §7 `cache-control` hint stay untouched. `fromCache`
+still marks the response. Field TTLs only inspect the top level of `data`
+(the common envelope shape); non-object data and per-branch pruning are out
+of scope for the core.
 
 ---
 

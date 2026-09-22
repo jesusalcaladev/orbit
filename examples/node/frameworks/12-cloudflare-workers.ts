@@ -7,7 +7,7 @@
  *   examples/node/book/data.ts    → domain: entities + in-memory repository
  *   examples/node/book/engine.ts  → application: Orbit engine, adapters, auth
  *                              policy, timing, caching (framework-agnostic)
- *   examples/node/12-cloudflare-workers.ts → interface: the worker itself
+ *   examples/node/frameworks/12-cloudflare-workers.ts → interface: the worker itself
  *
  * The framework layer only does transport + authentication (mapping
  * `x-api-key` to a caller identity); authorization stays in the engine. In
@@ -17,7 +17,7 @@
  * handler) and runs the realtime session over a fake socket (the same
  * `createRealtimeSession` the WebSocketPair 101 upgrade starts in workerd).
  *
- * Run:  node examples/node/12-cloudflare-workers.ts   (after `npm run build`)
+ * Run:  node examples/node/frameworks/12-cloudflare-workers.ts   (after `pnpm run build`)
  */
 import { pathToFileURL } from 'node:url';
 import { createWorker, createRealtimeSession } from '@orbit/cloudflare-workers';

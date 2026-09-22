@@ -17,7 +17,7 @@
  *                        the standard `RateLimit-*` response headers.
  * - `@orbit/logging`    — one structured, timed entry per request.
  *
- * Run:  node examples/node/stack/13-fullstack-mongo.ts   (after `npm run build`)
+ * Run:  node examples/node/stack/13-fullstack-mongo.ts   (after `pnpm run build`)
  *
  * No server required — an in-memory Mongo-compatible client and an
  * in-memory Redis-compatible client stand in, so the demo runs anywhere.

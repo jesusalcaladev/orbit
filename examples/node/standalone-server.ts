@@ -5,14 +5,14 @@
  * dependencies: the `handler` is a fetch-compatible function, so it drops
  * into Hono, Express, Cloudflare Workers, Bun or Deno unchanged.
  *
- * Run it with:  npm run example
+ * Run it with:  pnpm run example
  * Try it with:
  *   curl -s localhost:3000/orbit \
  *     -H 'content-type: application/json' \
  *     -d '{"query":"user(id=\"1\") { name, posts(status=\"published\") { title, views } }"}'
  */
 // The example imports the built package so it runs with Node's native
-// TypeScript support (`npm run example` builds first).
+// TypeScript support (`pnpm run example` builds first).
 import { createServer } from 'node:http';
 import { createCachePlugin, createOrbit, memoryAdapter } from '@orbit/core';
 import type { OrbitContext } from '@orbit/core';

@@ -97,7 +97,7 @@ export function createSessionDriver(
       // rejects bad shapes, strips unknown fields (including the correlation
       // `id`), and enforces the `query` XOR `do` rule — identical semantics,
       // one source of truth. Validation failures carry the `id` too.
-      const envelope = validateEnvelope(message);
+      const envelope = validateEnvelope(message, orbit.maxOps);
       // The session's auth context (from `authorize`) rides into the engine,
       // so socket envelopes hit the same identity-stamped pipeline as HTTP.
       const result = await orbit.execute(envelope, { ...(hooks.ctx ?? {}) });
@@ -134,11 +134,13 @@ export function createSessionDriver(
         throw new OrbitError(ErrorCode.INVALID_QUERY, 'Realtime message must be a JSON object');
       }
 
-      // Envelope request/response: a frame carrying `query` or `do` (even an
-      // invalid-typed one — let the envelope validator say so) is executed
-      // through the full engine pipeline, and the reply mirrors the HTTP JSON
-      // payload (spec §10 request/response).
-      if ('query' in message || 'do' in message) {
+      // Envelope request/response: a frame carrying `query`, `do` or `ops`
+      // (even an invalid-typed one — let the envelope validator say so) is
+      // executed through the full engine pipeline, and the reply mirrors the
+      // HTTP JSON payload (spec §10 request/response). `ops` rides the exact
+      // batch-mutation semantics as HTTP (sequential, fail-fast, capped by
+      // the engine's `maxOps`) — validation failures echo the correlation id.
+      if ('query' in message || 'do' in message || 'ops' in message) {
         await executeEnvelope(message);
         return;
       }

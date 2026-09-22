@@ -25,7 +25,7 @@ const server = createServer(async (req, res) => {
 });
 ```
 
-A complete version ships in [examples/node/standalone-server.ts](../examples/node/standalone-server.ts) — run it with `npm run example`.
+A complete version ships in [examples/node/standalone-server.ts](../examples/node/standalone-server.ts) — run it with `pnpm run example`.
 
 ## Hono
 

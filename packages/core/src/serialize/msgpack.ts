@@ -16,147 +16,340 @@ import { setOwn } from '../utils.js';
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-/** Encode a JSON-compatible value into MessagePack bytes. */
-export function encodeMsgpack(value: unknown): Uint8Array<ArrayBuffer> {
-  const chunks: number[][] = [];
-  write(value, chunks);
-  let total = 0;
-  for (const chunk of chunks) total += chunk.length;
-  const out = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    out.set(chunk, offset);
-    offset += chunk.length;
+/**
+ * Growable byte writer. The whole encode is a single scratch buffer that
+ * grows geometrically; `encodeMsgpack` slices out the exact result at the
+ * end. This removes the old O(N)-pushes + O(N)-flatten pattern entirely:
+ * writing a 70k-item payload is now one amortized-linear pass with zero
+ * per-value allocations (the previous per-byte `number[]` spreading made a
+ * 70k encode cost >100 ms and flaked the 5 s test timeout under CI load).
+ */
+class ByteWriter {
+  private buf: Uint8Array = new Uint8Array(256);
+  private view = new DataView(this.buf.buffer);
+  len = 0;
+
+  private ensure(extra: number): void {
+    const needed = this.len + extra;
+    if (needed <= this.buf.length) return;
+    let cap = this.buf.length * 2;
+    while (cap < needed) cap *= 2;
+    const grown = new Uint8Array(cap);
+    grown.set(this.buf.subarray(0, this.len));
+    this.buf = grown;
+    this.view = new DataView(grown.buffer);
   }
-  return out;
+
+  /** Reserve `n` bytes and return the write offset. */
+  claim(n: number): number {
+    this.ensure(n);
+    const at = this.len;
+    this.len += n;
+    return at;
+  }
+
+  byte(b: number): void {
+    this.ensure(1);
+    this.buf[this.len] = b;
+    this.len += 1;
+  }
+
+  /** Big-endian writes at a previously claimed offset. */
+  setUint8(at: number, v: number): void {
+    this.view.setUint8(at, v);
+  }
+
+  setUint16(at: number, v: number): void {
+    this.view.setUint16(at, v, false);
+  }
+
+  setUint32(at: number, v: number): void {
+    this.view.setUint32(at, v, false);
+  }
+
+  setInt16(at: number, v: number): void {
+    this.view.setInt16(at, v, false);
+  }
+
+  setInt32(at: number, v: number): void {
+    this.view.setInt32(at, v, false);
+  }
+
+  setBigUint64(at: number, v: bigint): void {
+    this.view.setBigUint64(at, v, false);
+  }
+
+  setBigInt64(at: number, v: bigint): void {
+    this.view.setBigInt64(at, v, false);
+  }
+
+  setFloat64(at: number, v: number): void {
+    this.view.setFloat64(at, v, false);
+  }
+
+  /** Copy raw bytes (UTF-8 payloads, bin payloads) at the write position. */
+  raw(bytes: Uint8Array): void {
+    this.ensure(bytes.length);
+    this.buf.set(bytes, this.len);
+    this.len += bytes.length;
+  }
+
+  /** Write an ASCII-only string's char codes at a previously claimed offset. */
+  writeAscii(at: number, s: string): void {
+    for (let i = 0; i < s.length; i += 1) this.buf[at + i] = s.charCodeAt(i);
+  }
+
+  finish(): Uint8Array<ArrayBuffer> {
+    return this.buf.slice(0, this.len) as Uint8Array<ArrayBuffer>;
+  }
 }
 
-function write(value: unknown, out: number[][]): void {
+/** Encode a JSON-compatible value into MessagePack bytes. */
+export function encodeMsgpack(value: unknown): Uint8Array<ArrayBuffer> {
+  const w = new ByteWriter();
+  write(value, w);
+  return w.finish();
+}
+
+/**
+ * One writer, one growing scratch buffer — never one number per byte. The
+ * previous codec spread byte payloads into `number[]` slots
+ * (`out.push([...bytes])`), making an N-item payload cost O(N) pushes plus an
+ * O(N) element-wise flatten; a 70k-item encode cost >100 ms and flaked the
+ * suite's 5 s timeout under CI load. Everything is now written in place into
+ * `ByteWriter`'s geometrically growing buffer.
+ */
+function write(value: unknown, w: ByteWriter): void {
   switch (typeof value) {
     case 'undefined':
     case 'function':
     case 'symbol':
-      out.push([0xc0]); // nil
+      w.byte(0xc0); // nil
       return;
     case 'boolean':
-      out.push(value ? [0xc3] : [0xc2]);
+      w.byte(value ? 0xc3 : 0xc2);
       return;
     case 'number':
-      writeNumber(value, out);
+      writeNumber(value, w);
       return;
     case 'bigint':
-      writeBigInt(value, out);
+      writeBigInt(value, w);
       return;
     case 'string':
-      writeString(value, out);
+      writeString(value, w);
       return;
     case 'object':
       if (value === null) {
-        out.push([0xc0]);
+        w.byte(0xc0);
         return;
       }
       if (value instanceof Uint8Array) {
-        writeBin(value, out);
+        writeBin(value, w);
         return;
       }
       if (Array.isArray(value)) {
-        writeArray(value, out);
+        writeArray(value, w);
         return;
       }
-      writeMap(value as Record<string, unknown>, out);
+      writeMap(value as Record<string, unknown>, w);
   }
 }
 
-function writeNumber(n: number, out: number[][]): void {
+function writeNumber(n: number, w: ByteWriter): void {
   if (Number.isInteger(n)) {
     if (n >= -32 && n <= 127) {
-      out.push([n < 0 ? n + 256 : n]); // positive/negative fixint
+      // positive/negative fixint — `n + 256` maps negatives into 0..255.
+      w.byte(n < 0 ? n + 256 : n);
       return;
     }
     if (n >= 0) {
-      if (n <= 0xff) out.push([0xcc, n]);
-      else if (n <= 0xffff) out.push([0xcd, n >> 8, n & 0xff]);
-      else if (n <= 0xffff_ffff) {
-        out.push([0xce, (n >>> 24) & 0xff, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n & 0xff]);
+      if (n <= 0xff) {
+        const at = w.claim(2);
+        w.setUint8(at, 0xcc);
+        w.setUint8(at + 1, n);
+      } else if (n <= 0xffff) {
+        const at = w.claim(3);
+        w.setUint8(at, 0xcd);
+        w.setUint16(at + 1, n);
+      } else if (n <= 0xffff_ffff) {
+        const at = w.claim(5);
+        w.setUint8(at, 0xce);
+        w.setUint32(at + 1, n);
       } else {
-        out.push([0xcf, ...u64Bytes(n)]);
+        const at = w.claim(9);
+        w.setUint8(at, 0xcf);
+        w.setBigUint64(at + 1, BigInt(Math.trunc(n)));
       }
       return;
     }
-    if (n >= -128) out.push([0xd0, n & 0xff]);
-    else if (n >= -32768) out.push([0xd1, (n >> 8) & 0xff, n & 0xff]);
-    else if (n >= -2_147_483_648) {
-      out.push([0xd2, (n >>> 24) & 0xff, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n & 0xff]);
+    if (n >= -128) {
+      const at = w.claim(2);
+      w.setUint8(at, 0xd0);
+      w.setUint8(at + 1, n & 0xff);
+    } else if (n >= -32768) {
+      const at = w.claim(3);
+      w.setUint8(at, 0xd1);
+      w.setInt16(at + 1, n);
+    } else if (n >= -2_147_483_648) {
+      const at = w.claim(5);
+      w.setUint8(at, 0xd2);
+      w.setInt32(at + 1, n);
     } else {
-      out.push([0xd3, ...i64Bytes(n)]);
+      const at = w.claim(9);
+      w.setUint8(at, 0xd3);
+      w.setBigInt64(at + 1, BigInt(Math.trunc(n)));
     }
     return; // without this, negative ints would fall through to float64
   }
   // float64
-  const view = new DataView(new ArrayBuffer(8));
-  view.setFloat64(0, n);
-  out.push([0xcb, ...new Uint8Array(view.buffer)]);
+  const at = w.claim(9);
+  w.setUint8(at, 0xcb);
+  w.setFloat64(at + 1, n);
 }
 
-function writeBigInt(n: bigint, out: number[][]): void {
-  const view = new DataView(new ArrayBuffer(8));
+function writeBigInt(n: bigint, w: ByteWriter): void {
+  const at = w.claim(9);
   if (n >= 0n) {
-    view.setBigUint64(0, n);
-    out.push([0xcf, ...new Uint8Array(view.buffer)]);
+    w.setUint8(at, 0xcf);
+    w.setBigUint64(at + 1, n);
   } else {
-    view.setBigInt64(0, n);
-    out.push([0xd3, ...new Uint8Array(view.buffer)]);
+    w.setUint8(at, 0xd3);
+    w.setBigInt64(at + 1, n);
   }
 }
 
-function writeString(s: string, out: number[][]): void {
+function writeString(s: string, w: ByteWriter): void {
+  // ASCII fast path: map keys and short ASCII values dominate real payloads,
+  // and TextEncoder.encode's fixed per-call overhead showed up as ~1.4 s to
+  // encode a 70k-key map. Char-code writing skips the encoder and its
+  // per-call allocation entirely; multi-byte text still routes through
+  // TextEncoder below.
+  let ascii = true;
+  const n = s.length;
+  for (let i = 0; i < n; i += 1) {
+    if (s.charCodeAt(i) > 0x7f) {
+      ascii = false;
+      break;
+    }
+  }
+  if (ascii) {
+    if (n <= 31) {
+      const at = w.claim(1 + n);
+      w.setUint8(at, 0xa0 | n);
+      w.writeAscii(at + 1, s);
+      return;
+    }
+    if (n <= 0xff) {
+      const at = w.claim(2 + n);
+      w.setUint8(at, 0xd9);
+      w.setUint8(at + 1, n);
+      w.writeAscii(at + 2, s);
+      return;
+    }
+    if (n <= 0xffff) {
+      const at = w.claim(3 + n);
+      w.setUint8(at, 0xda);
+      w.setUint16(at + 1, n);
+      w.writeAscii(at + 3, s);
+      return;
+    }
+    const at = w.claim(5 + n);
+    w.setUint8(at, 0xdb);
+    w.setUint32(at + 1, n);
+    w.writeAscii(at + 5, s);
+    return;
+  }
   const bytes = encoder.encode(s);
   const len = bytes.length;
-  if (len <= 31) out.push([0xa0 | len]);
-  else if (len <= 0xff) out.push([0xd9, len]);
-  else if (len <= 0xffff) out.push([0xda, len >> 8, len & 0xff]);
-  else out.push([0xdb, (len >>> 24) & 0xff, (len >>> 16) & 0xff, (len >>> 8) & 0xff, len & 0xff]);
-  out.push([...bytes]);
+  if (len <= 31) {
+    // Hot path for short strings (object keys, small values): claim the
+    // header byte and append the payload in one pass.
+    const at = w.claim(1);
+    w.setUint8(at, 0xa0 | len);
+    w.raw(bytes);
+    return;
+  }
+  if (len <= 0xff) {
+    const at = w.claim(2);
+    w.setUint8(at, 0xd9);
+    w.setUint8(at + 1, len);
+  } else if (len <= 0xffff) {
+    const at = w.claim(3);
+    w.setUint8(at, 0xda);
+    w.setUint16(at + 1, len);
+  } else {
+    const at = w.claim(5);
+    w.setUint8(at, 0xdb);
+    w.setUint32(at + 1, len);
+  }
+  w.raw(bytes);
 }
 
-function writeBin(bytes: Uint8Array, out: number[][]): void {
+function writeBin(bytes: Uint8Array, w: ByteWriter): void {
   const len = bytes.length;
-  if (len <= 0xff) out.push([0xc4, len]);
-  else if (len <= 0xffff) out.push([0xc5, len >> 8, len & 0xff]);
-  else out.push([0xc6, (len >>> 24) & 0xff, (len >>> 16) & 0xff, (len >>> 8) & 0xff, len & 0xff]);
-  out.push([...bytes]);
+  if (len <= 0xff) {
+    const at = w.claim(2);
+    w.setUint8(at, 0xc4);
+    w.setUint8(at + 1, len);
+  } else if (len <= 0xffff) {
+    const at = w.claim(3);
+    w.setUint8(at, 0xc5);
+    w.setUint16(at + 1, len);
+  } else {
+    const at = w.claim(5);
+    w.setUint8(at, 0xc6);
+    w.setUint32(at + 1, len);
+  }
+  w.raw(bytes);
 }
 
-function writeArray(arr: unknown[], out: number[][]): void {
+function writeArray(arr: unknown[], w: ByteWriter): void {
   const len = arr.length;
-  if (len <= 15) out.push([0x90 | len]);
-  else if (len <= 0xffff) out.push([0xdc, len >> 8, len & 0xff]);
-  else out.push([0xdd, (len >>> 24) & 0xff, (len >>> 16) & 0xff, (len >>> 8) & 0xff, len & 0xff]);
-  for (const item of arr) write(item, out);
-}
-
-function writeMap(map: Record<string, unknown>, out: number[][]): void {
-  const entries = Object.entries(map).filter(([, value]) => value !== undefined);
-  const len = entries.length;
-  if (len <= 15) out.push([0x80 | len]);
-  else if (len <= 0xffff) out.push([0xde, len >> 8, len & 0xff]);
-  else out.push([0xdf, (len >>> 24) & 0xff, (len >>> 16) & 0xff, (len >>> 8) & 0xff, len & 0xff]);
-  for (const [key, value] of entries) {
-    writeString(key, out);
-    write(value, out);
+  if (len <= 15) w.byte(0x90 | len);
+  else if (len <= 0xffff) {
+    const at = w.claim(3);
+    w.setUint8(at, 0xdc);
+    w.setUint16(at + 1, len);
+  } else {
+    const at = w.claim(5);
+    w.setUint8(at, 0xdd);
+    w.setUint32(at + 1, len);
+  }
+  for (let i = 0; i < arr.length; i += 1) {
+    const item = arr[i];
+    // Inline fixint fast path — large numeric arrays (ids, sensor rows) are
+    // the dominant big-payload shape; skipping the `write` dispatch per item
+    // keeps encoding linear and cheap even under coverage instrumentation.
+    if (typeof item === 'number' && Number.isInteger(item) && item >= -32 && item <= 127) {
+      w.byte(item < 0 ? item + 256 : item);
+    } else {
+      write(item, w);
+    }
   }
 }
 
-function u64Bytes(n: number): number[] {
-  const view = new DataView(new ArrayBuffer(8));
-  view.setBigUint64(0, BigInt(Math.trunc(n)));
-  return [...new Uint8Array(view.buffer)];
-}
-
-function i64Bytes(n: number): number[] {
-  const view = new DataView(new ArrayBuffer(8));
-  view.setBigInt64(0, BigInt(Math.trunc(n)));
-  return [...new Uint8Array(view.buffer)];
+function writeMap(map: Record<string, unknown>, w: ByteWriter): void {
+  const entries = Object.entries(map).filter(([, value]) => value !== undefined);
+  const len = entries.length;
+  if (len <= 15) w.byte(0x80 | len);
+  else if (len <= 0xffff) {
+    const at = w.claim(3);
+    w.setUint8(at, 0xde);
+    w.setUint16(at + 1, len);
+  } else {
+    const at = w.claim(5);
+    w.setUint8(at, 0xdf);
+    w.setUint32(at + 1, len);
+  }
+  for (const [key, value] of entries) {
+    writeString(key, w);
+    // Same inline fixint fast path as `writeArray` (large flat maps).
+    if (typeof value === 'number' && Number.isInteger(value) && value >= -32 && value <= 127) {
+      w.byte(value < 0 ? value + 256 : value);
+    } else {
+      write(value, w);
+    }
+  }
 }
 
 /** Decode MessagePack bytes into a JSON-compatible value. */
@@ -188,7 +381,36 @@ export function decodeMsgpack(bytes: Uint8Array): unknown {
     pos += len;
     return slice;
   };
-  const readString = (len: number): string => decoder.decode(readBytes(len));
+  const readString = (len: number): string => {
+    if (pos + len > bytes.byteLength) fail();
+    const end = pos + len;
+    // ASCII fast path: one scan pass, then char-code assembly — skips the
+    // slice copy and the per-call TextDecoder overhead, which dominated
+    // decoding of key-heavy maps (70k keys → 70k decoder calls). Non-ASCII
+    // bytes bail out to the decoder untouched.
+    let ascii = true;
+    for (let i = pos; i < end; i += 1) {
+      if (bytes[i]! > 0x7f) {
+        ascii = false;
+        break;
+      }
+    }
+    if (ascii) {
+      let s = '';
+      if (len <= 32) {
+        for (let i = pos; i < end; i += 1) s += String.fromCharCode(bytes[i]!);
+      } else {
+        for (let i = pos; i < end; i += 1024) {
+          s += String.fromCharCode(...bytes.subarray(i, Math.min(i + 1024, end)));
+        }
+      }
+      pos = end;
+      return s;
+    }
+    const slice = bytes.slice(pos, end);
+    pos = end;
+    return decoder.decode(slice);
+  };
 
   const readArray = (len: number): unknown[] => {
     const out: unknown[] = [];

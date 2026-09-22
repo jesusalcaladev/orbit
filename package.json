@@ -4,9 +4,6 @@
   "description": "Modular data layer for the modern fullstack — monorepo root. The protocol core lives in packages/core (@orbit/core).",
   "private": true,
   "type": "module",
-  "workspaces": [
-    "packages/*"
-  ],
   "packageManager": "pnpm@11.11.0",
   "engines": {
     "node": ">=20"
@@ -16,6 +13,7 @@
     "build": "pnpm -r run build",
     "typecheck": "pnpm run build && pnpm -r run typecheck && tsc -p tsconfig.json",
     "test": "pnpm -r run test",
+    "test:starter": "node --test examples/starter/test/app.test.ts",
     "test:watch": "pnpm --filter @orbit/core run test:watch",
     "test:coverage": "pnpm -r run test:coverage",
     "test:e2e": "pnpm run build && playwright test -c examples/web/playwright.config.ts",

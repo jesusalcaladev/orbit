@@ -6,13 +6,13 @@
  *   examples/node/book/data.ts    → domain: entities + in-memory repository
  *   examples/node/book/engine.ts  → application: Orbit engine, adapters, auth
  *                              policy, timing, caching (framework-agnostic)
- *   examples/node/10-express.ts   → interface: Express wiring on top
+ *   examples/node/frameworks/10-express.ts → interface: Express wiring on top
  *
  * The framework layer only does transport + authentication (mapping
  * `x-api-key` to a caller identity); authorization stays in the engine, so
- * the same API is served identically by Hono (`examples/node/11-hono.ts`).
+ * the same API is served identically by Hono (`examples/node/frameworks/11-hono.ts`).
  *
- * Run:  node examples/node/10-express.ts   (after `npm run build`)
+ * Run:  node examples/node/frameworks/10-express.ts   (after `pnpm run build`)
  */
 import { pathToFileURL } from 'node:url';
 import { attachRealtime, createExpressApp } from '@orbit/express';

@@ -6,7 +6,7 @@
  * a MessagePack response (`accept: application/x-msgpack`), and decode it
  * with the built-in zero-dependency codec.
  *
- * Run:  node examples/node/05-msgpack.ts   (after `npm run build`)
+ * Run:  node examples/node/serialization/05-msgpack.ts   (after `pnpm run build`)
  */
 import { pathToFileURL } from 'node:url';
 import {

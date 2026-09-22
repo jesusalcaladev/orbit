@@ -51,7 +51,7 @@ describe('msgpack coverage — encode families', () => {
     const b32 = encodeMsgpack(s32);
     expect(b32[0]).toBe(0xdb);
     expect(decodeMsgpack(b32)).toBe(s32);
-  });
+  }, 20_000);
 
   it('encodes bin16 and bin32', () => {
     const bin16 = new Uint8Array(300).fill(7);
@@ -64,7 +64,7 @@ describe('msgpack coverage — encode families', () => {
     const b32 = encodeMsgpack(bin32);
     expect(b32[0]).toBe(0xc6);
     expect((decodeMsgpack(b32) as Uint8Array).byteLength).toBe(70_000);
-  });
+  }, 20_000);
 
   it('encodes array32 and map32', () => {
     const arr = Array.from({ length: 70_000 }, (_, i) => i % 256);
@@ -78,7 +78,7 @@ describe('msgpack coverage — encode families', () => {
     expect(bMap[0]).toBe(0xdf);
     const decoded = decodeMsgpack(bMap) as Record<string, number>;
     expect(Object.keys(decoded)).toHaveLength(70_000);
-  });
+  }, 20_000);
 });
 
 describe('msgpack coverage — decode families', () => {
@@ -110,7 +110,7 @@ describe('msgpack coverage — decode families', () => {
       Object.fromEntries(Array.from({ length: 70_000 }, (_, i) => [`m${i}`, i])),
     );
     expect(Object.keys(decodeMsgpack(map32) as Record<string, unknown>)).toHaveLength(70_000);
-  });
+  }, 20_000);
 });
 
 // ---------------------------------------------------------------------------

@@ -33,20 +33,58 @@ describe('encodeMsgpack — primitive bytes', () => {
     expect(bytes.byteLength).toBe(9);
   });
 
-  it('encodes strings with fixstr/str8/str16/str32', () => {
-    expect([...encodeMsgpack('hi')]).toEqual([0xa2, 0x68, 0x69]);
-    const long = 'x'.repeat(40);
-    const bytes = encodeMsgpack(long);
-    expect(bytes[0]).toBe(0xd9);
-    expect(bytes[1]).toBe(40);
-    expect(decodeMsgpack(bytes)).toBe(long);
-  });
-
   it('encodes unicode strings by byte length', () => {
     const value = '🔮orbit';
     const bytes = encodeMsgpack(value);
     expect(bytes[0]).toBe(0xa0 | (4 + 5)); // 4-byte emoji + 5 ascii
     expect(decodeMsgpack(bytes)).toBe(value);
+  });
+});
+
+describe('encodeMsgpack — scaling budgets', () => {
+  // TDD regression budgets for the codec's algorithmic shape. The original
+  // codec spread byte payloads one number per array slot
+  // (`out.push([...bytes])`), making a 70k-item encode cost O(N) pushes plus
+  // an O(N) element-wise flatten on top of the per-item work — measured
+  // ~175 ms for a 70k numeric array and slow enough to flake the suite's
+  // 5 s timeout under full parallel load. The growable-writer codec encodes
+  // the same value in ~5-10 ms.
+  //
+  // Budgets are RELATIVE (time(70k) vs time(5k) of the same shape) instead of
+  // absolute wall-clock: instrumentation (`vitest --coverage`) and slow CI
+  // hardware multiply both sides equally, so the ratio cancels environment
+  // overhead — while still separating linear encoding (ratio ≈ 14-20×) from
+  // the old quadratic/spreading signature (ratio ≈ 200-350×). Threshold 60×
+  // keeps a ≥3× margin to both sides.
+  const BIG = 70_000;
+  const SMALL = 5_000;
+  const RATIO_BUDGET = 60;
+
+  function bestOf(value: unknown, runs: number = 3): number {
+    let best = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < runs; i += 1) {
+      const t0 = performance.now();
+      encodeMsgpack(value);
+      best = Math.min(best, performance.now() - t0);
+    }
+    return best;
+  }
+
+  it('encodes numeric arrays linearly (70k vs 5k ratio budget)', () => {
+    const big = Array.from({ length: BIG }, (_, i) => i % 256);
+    const small = Array.from({ length: SMALL }, (_, i) => i % 256);
+    expect(bestOf(big) / bestOf(small)).toBeLessThan(RATIO_BUDGET);
+  });
+
+  it('encodes binary payloads linearly (70k vs 5k ratio budget)', () => {
+    expect(
+      bestOf(new Uint8Array(BIG).fill(7) as Uint8Array<ArrayBuffer>) /
+        bestOf(new Uint8Array(SMALL).fill(7) as Uint8Array<ArrayBuffer>),
+    ).toBeLessThan(RATIO_BUDGET);
+  });
+
+  it('encodes long strings linearly (70k vs 5k ratio budget)', () => {
+    expect(bestOf('x'.repeat(BIG)) / bestOf('x'.repeat(SMALL))).toBeLessThan(RATIO_BUDGET);
   });
 });
 
@@ -68,9 +106,28 @@ describe('encodeMsgpack — collections', () => {
     expect(decodeMsgpack(bytes)).toEqual(big);
   });
 
+  it('encodes negative and out-of-fixint values in arrays and maps', () => {
+    // The inline per-item fast path only claims -32..127; everything else
+    // (the negative boundary, uint8 range, non-integers) routes through the
+    // general value writer — bytes below assert the exact encodings, which
+    // still use the SMALLEST representation (see the primitive-bytes suite:
+    // -33 is int8 `0xd0 0xdf`, not int16 `0xd1`).
+    expect([...encodeMsgpack([-33, 128, 1.5])]).toEqual([
+      0x93, 0xd0, 0xdf, 0xcc, 128, 0xcb, 63, 248, 0, 0, 0, 0, 0, 0,
+    ]);
+    expect([...encodeMsgpack({ n: -33 })]).toEqual([0x81, 0xa1, 0x6e, 0xd0, 0xdf]);
+  });
+
   it('omits undefined values like JSON does', () => {
     expect(decodeMsgpack(encodeMsgpack({ a: 1, b: undefined }))).toEqual({ a: 1 });
     expect(decodeMsgpack(encodeMsgpack({ a: 1, b: null }))).toEqual({ a: 1, b: null });
+  });
+
+  it('encodes negative fixints through the inline per-item fast path', () => {
+    // The fast path claims -32..127 and maps negatives into 0..255 — this
+    // pins the negative arm for both collections (arrays and map values).
+    expect([...encodeMsgpack([-1, -5])]).toEqual([0x92, 0xff, 0xfb]);
+    expect([...encodeMsgpack({ a: -1 })]).toEqual([0x81, 0xa1, 0x61, 0xff]);
   });
 
   it('encodes binary as bin types', () => {
@@ -93,6 +150,16 @@ describe('round-trips', () => {
       nested: { deep: { deeper: '🔮' } },
     };
     expect(roundTrip(value)).toEqual(value);
+  });
+
+  it('round-trips multibyte strings in every str family', () => {
+    // Multi-byte path through fixstr, str8, str16 and str32 — the ASCII fast
+    // path must never mangle non-ASCII payloads (byte length ≠ char length).
+    const emoji = '🔮'; // 4 UTF-8 bytes, 2 UTF-16 code units
+    expect(roundTrip(emoji)).toBe(emoji);
+    expect(roundTrip(`${emoji}orbit-${'✓'.repeat(30)}`)).toBe(`${emoji}orbit-${'✓'.repeat(30)}`);
+    expect(roundTrip(`${emoji}${'✓'.repeat(300)}`)).toBe(`${emoji}${'✓'.repeat(300)}`);
+    expect(roundTrip(`${emoji}${'✓'.repeat(70_000)}`)).toBe(`${emoji}${'✓'.repeat(70_000)}`);
   });
 
   it('round-trips empty structures', () => {

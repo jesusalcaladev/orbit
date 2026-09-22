@@ -1,11 +1,12 @@
 # Examples
 
-The examples live in `examples/` and are organized in two folders:
+The examples live in `examples/` and are organized in three places:
 
 ```
 examples/
-  node/   headless console scripts — run with plain Node, one facet per file
-  web/    interactive HTML/CSS/JS demos — one server, real engine + graphql-js A/B
+  starter/  the canonical new-project skeleton — five layers, tests, growth guide
+  node/     headless console scripts — run with plain Node, one facet per file
+  web/      interactive HTML/CSS/JS demos — one server, real engine + graphql-js A/B
 ```
 
 Every node example imports the **built** package and runs with plain Node — no
@@ -13,9 +14,28 @@ framework, no runtime dependencies. They double as executable documentation:
 each one demonstrates one facet of the protocol and prints its results.
 
 ```bash
-npm run build                   # once (examples import from dist/)
-node examples/node/run-all.ts   # run all thirteen, back to back
+pnpm run build                   # once (examples import from dist/)
+node examples/node/run-all.ts   # run every example (starter → 13), back to back
 ```
+
+## The starter — a new project's skeleton (`examples/starter/`)
+
+The recommended architecture as code: `domain/` (pure TypeScript, zero Orbit
+imports) → `adapters/` (the protocol bridge) → `plugins/` (the authz policy)
+→ `app.ts` (the composition root) → `server/` (a thin host), plus a
+`node --test` suite that drives the whole pipeline in-process.
+
+```bash
+node examples/starter/src/index.ts   # the server on :3000
+pnpm run test:starter                # its suite (no sockets — execute() in-process)
+node examples/starter/src/demo.ts    # headless HTTP walkthrough, with assertions
+```
+
+[docs/project-structure.md](./project-structure.md) is the full reference:
+folder by folder, what each layer may import, the authn/authz split, and how
+to grow the starter (Postgres, Redis, Express/Hono/Workers) one file at a
+time. [`examples/node/book/`](../examples/node/book/) is the same layering
+grown up — one engine behind three hosts.
 
 ## The node examples (`examples/node/`)
 
@@ -45,7 +65,7 @@ The interactive showcase runs one server that mounts the real engine **and** a
 real graphql-js competition, then serves the demos over HTTP:
 
 ```bash
-npm run web    # builds, then serves http://localhost:4321
+pnpm run web    # builds, then serves http://localhost:4321
 ```
 
 Open the index and pick a demo — every one is vanilla HTML/CSS/JS in the
@@ -58,12 +78,15 @@ browser talking to the protocol:
 | [`03-mini-post`](../examples/web/03-mini-post/) | A feed with **nested relations** (`posts { author { name } }`) resolved through the adapter contract and batched per level, plus like/unlike mutations. |
 | [`04-mini-auth`](../examples/web/04-mini-auth/) | Register/log in (scrypt-hashed passwords), the plugin reads `x-orbit-token` into `ctx.state.caller`, and a protected query is denied with `ORBIT_PERMISSION_DENIED` without the token. |
 | [`05-orbit-vs-graphql`](../examples/web/05-orbit-vs-graphql/) | **The A/B lab**: the same chat, the same message bus, two protocols on one server. Send simultaneously to both, or run batches — end-to-end round-trips (send → mutation → shared bus → subscription → your tab) measured live, p50/p95/p99/max, payload bytes, and a comparative chart. |
+| [`06-tiktok-feed`](../examples/web/06-tiktok-feed/) | A vertical clip feed where one query pulls clips, creators and comments together; likes broadcast over the WebSocket to every tab; and the server cache evicts by entity, so a like makes the next reload cold. |
+| [`07-react`](../examples/web/07-react/) | The same clip world through `@orbit/react`: a TTL-cached `useOrbitQuery` feed, `useOrbitMutation` likes with entity invalidation, live updates via `useOrbitSubscription`, and the cross-platform devtools panel. |
 
-The node examples live in concept folders under `examples/node/`:
+The starter template lives in `examples/starter/`; the node concept demos
+live in concept folders under `examples/node/`:
 `fundamentals/`, `relations/`, `authentication/`, `adapters/`, `serialization/`,
-`streaming/`, `performance/` and `frameworks/`. The web demos live under
+`streaming/`, `performance/`, `frameworks/` and `stack/`. The web demos live under
 `examples/web/` (`chat-realtime/`, `twitter-post/`, `03-mini-post/`,
-`04-mini-auth/`, `05-orbit-vs-graphql/`).
+`04-mini-auth/`, `05-orbit-vs-graphql/`, `06-tiktok-feed/`, `07-react/`).
 
 **How the A/B is wired** — `examples/web/server.ts` creates one shared world;
 Orbit serves `/orbit` (handler) + `/realtime` (its WebSocket), graphql-js
@@ -79,7 +102,7 @@ is a complete zero-dependency endpoint on `node:http` — the fetch-compatible
 `handler` dropped into a raw server:
 
 ```bash
-npm run example
+pnpm run example
 ```
 
 ```bash
@@ -91,6 +114,10 @@ It ships with the cache plugin mounted, so repeat the same request with
 `"cache":"ttl=300"` and the second response includes `"fromCache": true`.
 
 ## Reading order
+
+**Starting a project?** Read [`examples/starter/README.md`](../examples/starter/README.md)
+first (with [docs/project-structure.md](./project-structure.md)), then come
+back here for the protocol facets.
 
 New to Orbit? Start with `01-hello`, then `02` (the N+1 fix — the core reason
 to exist), then `03` (how plugins give the protocol its brains). `05–07` are
