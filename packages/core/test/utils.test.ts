@@ -5,6 +5,7 @@ import {
   fnv1a64,
   isRecord,
   isSerializedPayload,
+  stableStringify,
   traceId,
 } from '../src/utils.js';
 
@@ -60,6 +61,11 @@ describe('fnv1a64', () => {
   it('keeps the 32-bit collision bound out of reach for cache keys', () => {
     // 100k distinct inputs — a single 32-bit hash has a ~1/3 chance of at
     // least one collision at this scale; 64-bit must have zero.
+    //
+    // ~100k hashes is genuinely CPU-bound and exceeds vitest's default 5 s
+    // timeout on a loaded machine (the whole suite runs files in parallel), so
+    // the budget is stated explicitly: this asserts a property of the hash,
+    // not a speed.
     const seen = new Set<string>();
     for (let i = 0; i < 100_000; i += 1) {
       const key = fnv1a64(`cache:user:${i}:${i * 2654435761}`);
@@ -67,6 +73,59 @@ describe('fnv1a64', () => {
       seen.add(key);
     }
     expect(seen.size).toBe(100_000);
+  }, 60_000);
+});
+
+describe('stableStringify', () => {
+  it('is order-independent for objects', () => {
+    expect(stableStringify({ a: 1, b: 2 })).toBe(stableStringify({ b: 2, a: 1 }));
+  });
+
+  it('canonicalizes arrays and nested structures', () => {
+    // Arrays keep their order (it is data), but their ELEMENTS are canonical,
+    // so an array of objects keys off content rather than insertion order.
+    expect(stableStringify([{ a: 1, b: 2 }])).toBe(stableStringify([{ b: 2, a: 1 }]));
+    expect(stableStringify([1, 'two', true, null])).toBe('[1,"two",true,null]');
+    expect(stableStringify({ list: [{ x: 1 }, 2] })).toBe('{"list":[{"x":1},2]}');
+    // Order within an array IS significant and must not be normalized away.
+    expect(stableStringify([1, 2])).not.toBe(stableStringify([2, 1]));
+  });
+
+  it('refuses anything not losslessly representable', () => {
+    // `undefined` is the signal to fall back to a safe path — a lossy key
+    // would let two different values collide on one cache entry.
+    const cyclic: Record<string, unknown> = { name: 'x' };
+    cyclic.self = cyclic;
+    for (const value of [
+      undefined,
+      () => {},
+      Symbol('s'),
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      new Date(),
+      new Map(),
+      new Set(),
+      new (class Thing {})(),
+      cyclic,
+      [1, () => {}],
+    ]) {
+      expect(stableStringify(value)).toBeUndefined();
+    }
+  });
+
+  it('keeps primitives, nulls and plain objects', () => {
+    // A FINITE number must round-trip through the canonical form; the
+    // non-finite half of the guard is pinned by the refusal test above.
+    expect(stableStringify(1.5)).toBe('1.5');
+    expect(stableStringify(-0)).toBe('0');
+    expect(stableStringify(null)).toBe('null');
+    expect(stableStringify(1)).toBe('1');
+    expect(stableStringify('a')).toBe('"a"');
+    expect(stableStringify(true)).toBe('true');
+    expect(stableStringify(false)).toBe('false');
+    expect(stableStringify(10n)).toBe('"10"');
+    expect(stableStringify({})).toBe('{}');
+    expect(stableStringify([])).toBe('[]');
   });
 });
 

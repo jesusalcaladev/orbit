@@ -91,6 +91,60 @@ export function fnv1a64Bytes(bytes: Uint8Array): string {
 }
 
 /**
+ * Canonical, order-independent stringification of a JSON-ish value.
+ *
+ * Object keys are emitted in sorted order, so two structurally equal values
+ * always produce the same string regardless of insertion order. Returns
+ * `undefined` for anything that is not losslessly representable — `undefined`,
+ * functions, symbols, non-finite numbers, class instances, Maps/Sets/Dates, and
+ * cyclic graphs. Callers use that as a signal to fall back to a safe path
+ * rather than hash a lossy approximation (two different values collapsing to
+ * the same key is exactly the failure this guards against).
+ */
+export function stableStringify(value: unknown): string | undefined {
+  const seen = new Set<object>();
+  const walk = (input: unknown): string | undefined => {
+    if (input === null) return 'null';
+    const type = typeof input;
+    if (type === 'string') return JSON.stringify(input);
+    if (type === 'number') return Number.isFinite(input) ? JSON.stringify(input) : undefined;
+    if (type === 'boolean') return input ? 'true' : 'false';
+    if (type === 'bigint') return JSON.stringify((input as bigint).toString());
+    // `undefined`, functions and symbols carry no identity worth keying on.
+    if (type !== 'object') return undefined;
+
+    const object = input as object;
+    if (seen.has(object)) return undefined; // cycle
+    seen.add(object);
+    try {
+      if (Array.isArray(object)) {
+        const parts: string[] = [];
+        for (const item of object) {
+          const part = walk(item);
+          if (part === undefined) return undefined;
+          parts.push(part);
+        }
+        return `[${parts.join(',')}]`;
+      }
+      // Only plain objects (and null-prototype ones) have a meaningful key order.
+      const proto = Object.getPrototypeOf(object) as object | null;
+      if (proto !== Object.prototype && proto !== null) return undefined;
+      const record = object as Record<string, unknown>;
+      const parts: string[] = [];
+      for (const key of Object.keys(record).sort()) {
+        const part = walk(record[key]);
+        if (part === undefined) return undefined;
+        parts.push(`${JSON.stringify(key)}:${part}`);
+      }
+      return `{${parts.join(',')}}`;
+    } finally {
+      seen.delete(object);
+    }
+  };
+  return walk(value);
+}
+
+/**
  * Generate a short, collision-resistant request trace id for log/error
  * correlation across the pipeline. Uses Web Crypto when available (all modern
  * browsers + Node >= 19); falls back to a time-random hybrid on runtimes without

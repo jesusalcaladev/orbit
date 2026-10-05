@@ -353,17 +353,23 @@ export class OrbitReactClient {
    * TTL/SWR timestamps; a key that had no entry is removed.
    */
   optimisticWrite<T = unknown>(key: QueryKey, data: T, options: QueryOptions = {}): () => void {
-    const snapshot: { cacheKey: string; entry?: CacheEntry }[] = [];
+    // Snapshot every entry that matches the key. Only entries that EXIST are
+    // snapshotted, and `setQueryData` likewise only updates existing entries —
+    // so the pair is symmetric: a key with no cached entry is neither written
+    // nor rolled back, and the rollback never has to invent a removal.
+    const snapshot: { cacheKey: string; entry: CacheEntry }[] = [];
     for (const { cacheKey, state } of this.cache.allStates()) {
-      if (state.entry !== undefined && keyEqual(state.entry.key, key)) {
-        snapshot.push({ cacheKey, entry: state.entry });
+      const entry = state.entry;
+      if (entry !== undefined && keyEqual(entry.key, key)) {
+        snapshot.push({ cacheKey, entry });
       }
     }
     this.setQueryData(key, data, options);
     return () => {
       for (const { cacheKey, entry } of snapshot) {
-        if (entry !== undefined) this.cache.set(cacheKey, entry);
-        else this.cache.remove(cacheKey);
+        // Restores the entry with its ORIGINAL TTL/SWR timestamps: an entry
+        // resurrected as already-stale would silently refetch on the next read.
+        this.cache.set(cacheKey, entry);
       }
     };
   }

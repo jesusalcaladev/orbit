@@ -1,6 +1,6 @@
 import { ErrorCode, OrbitError } from '../errors.js';
 import type { OrbitContext, OrbitEngineLike, QueryNode } from '../types.js';
-import { fnv1a64, isRecord } from '../utils.js';
+import { fnv1a64, isRecord, stableStringify } from '../utils.js';
 import type { OrbitPlugin } from './types.js';
 
 /** Parsed cache spec: seconds of hard freshness (`ttl`) and/or SWR window (`stale`). */
@@ -148,14 +148,52 @@ function treeKey(node: QueryNode): string {
   for (const [name, child] of Object.entries(node.relations)) {
     relations[name] = treeKey(child);
   }
-  return JSON.stringify({ e: node.entity, f: node.filters, s: node.fields, r: relations });
+  return JSON.stringify({
+    e: node.entity,
+    f: node.filters,
+    s: node.fields,
+    r: relations,
+  });
 }
 
-function cacheKeyFor(node: QueryNode): string {
+function cacheKeyFor(node: QueryNode, scope = ''): string {
   // 64-bit key: a 32-bit hash would collide at ~65k entries (feasible
   // intentional cache-poisoning), 64-bit raises the bound to ~4e9 (see utils).
-  return `orbit:${fnv1a64(treeKey(node))}`;
+  // `scope` partitions the key space per caller identity — without it two
+  // tenants issuing the same query text would share one entry.
+  return `orbit:${fnv1a64(scope === '' ? treeKey(node) : `${scope}\u0000${treeKey(node)}`)}`;
 }
+
+/**
+ * Derive the cache partition for a request from the identity an auth plugin
+ * stamped on `ctx.state.caller`.
+ *
+ * The cache short-circuits at `onBeforeResolve`, which runs BEFORE
+ * `onBeforeExecute` — the stage where `@orbit/auth`'s `scope` gate injects
+ * per-caller filters. A purely structural key therefore serves tenant A's rows
+ * to tenant B on an identical query. Partitioning the key by caller identity
+ * closes that: two callers only share an entry when they ARE the same caller.
+ *
+ * Returns `''` for anonymous requests (single-tenant/shared data, the previous
+ * behaviour) and for identities that cannot be canonicalised (class instances,
+ * cyclic objects) — for those the safe move is to fall back to the unscoped
+ * key only when NO scope plugin is in play, which the engine enforces by
+ * refusing to cache an unresolvable identity.
+ */
+function callerScope(ctx: OrbitContext): string {
+  const state = ctx.state;
+  if (!isRecord(state)) return '';
+  const caller = state.caller;
+  if (caller === undefined || caller === null) return '';
+  const serialized = stableStringify(caller);
+  // An identity we cannot canonicalise (a class instance, a cyclic object) must
+  // NOT silently collapse into the shared '' partition — that is the leak we
+  // are fixing. `null` marks it uncacheable; see `isCacheable`.
+  return serialized === undefined ? UNCACHEABLE : fnv1a64(serialized);
+}
+
+/** Sentinel partition: the caller exists but has no canonical representation. */
+const UNCACHEABLE = '\u0000uncacheable';
 
 /**
  * Every entity a query tree reads (root + relations, deduped). Powers
@@ -346,7 +384,15 @@ export function createCachePlugin(options: CachePluginOptions = {}): CachePlugin
     invalidateEntity: async (entity) => {
       const keys = entityIndex.get(entity);
       if (!keys) return;
-      for (const key of [...keys]) await store.delete(key);
+      for (const key of [...keys]) {
+        await store.delete(key);
+        // Drop the key from the OTHER entities' buckets too — a query reading
+        // `user` + `post` is indexed under both, so evicting on `user` alone
+        // would leave the `post` bucket holding dead keys forever. Without this
+        // the index grows monotonically with every distinct key ever stored,
+        // even though the store itself evicts by capacity.
+        unindexKey(key);
+      }
       entityIndex.delete(entity);
     },
     clear: async () => {
@@ -369,7 +415,17 @@ export function createCachePlugin(options: CachePluginOptions = {}): CachePlugin
         const spec = (ctx.state?.[SPEC_KEY] ?? {}) as CacheSpec;
         if (spec.ttl === undefined && spec.stale === undefined) return;
 
-        const key = cacheKeyFor(parsed);
+        const scope = callerScope(ctx);
+        // An authenticated caller whose identity cannot be canonicalised gets
+        // no cache at all: sharing the anonymous partition would hand its rows
+        // to every other caller, and giving it a per-request partition would
+        // silently disable caching behind the user's back.
+        if (scope === UNCACHEABLE) {
+          setCacheHeaders(ctx, spec, 'miss', 0);
+          return;
+        }
+
+        const key = cacheKeyFor(parsed, scope);
         const entry = await store.get(key);
         if (!entry) {
           // Cache miss: remember to store the fresh value after resolution.
@@ -425,7 +481,11 @@ export function createCachePlugin(options: CachePluginOptions = {}): CachePlugin
         if (ctx.state?.[SKIP_KEY]) return;
         const miss = ctx.state?.[MISS_KEY] as { key: string; query: string } | undefined;
         if (!miss) return;
-        await store.set(miss.key, { value: data, createdAt: Date.now(), query: miss.query });
+        await store.set(miss.key, {
+          value: data,
+          createdAt: Date.now(),
+          query: miss.query,
+        });
         indexKey(miss.key, node);
         delete ctx.state![MISS_KEY];
       },
@@ -440,17 +500,43 @@ export function createCachePlugin(options: CachePluginOptions = {}): CachePlugin
   ): Promise<void> {
     try {
       // Skip the cache entirely so revalidation always re-resolves from the
-      // source, then store the fresh value ourselves.
+      // source, then store the fresh value ourselves. The revalidation runs
+      // on a FRESH context object (`{}`) — never on the live request's
+      // `ctx.state` (spread here): the background work outlives the request
+      // that triggered it, and a shared state would let the two executions
+      // race on the SPEC_KEY/MISS_KEY/SKIP_KEY slots (a concurrent mutation
+      // response could leave MISS_KEY behind from the revalidation and
+      // poison its store write, or the request's finally-cleanup could erase
+      // the revalidation's skip flag mid-run). The revalidation only needs
+      // the identity/plugins context of the original request — providers,
+      // headers and state.caller ride along; per-request scratch does not.
+      const { state: _sharedState, ...requestCtx } = ctx;
+      // The refresh MUST re-resolve under the original caller's identity —
+      // `onBeforeExecute` scoping depends on it — but must NOT inherit the
+      // request's AbortSignal or its `Request` (which holds the body and
+      // aborts on client disconnect). A refresh launched by a request that has
+      // since been cancelled would abort instantly, the error would be
+      // swallowed below, and the entry would sit stale forever.
+      const caller = isRecord(ctx.state) ? ctx.state.caller : undefined;
+      const { signal: _signal, request: _request, ...carriedCtx } = requestCtx;
       const result = await engine.execute(
         { query },
         {
-          ...ctx,
+          ...carriedCtx,
           envelope: undefined,
-          state: { ...ctx.state, [SPEC_KEY]: undefined, [SKIP_KEY]: true },
+          signal: undefined,
+          state: {
+            [SKIP_KEY]: true,
+            ...(caller !== undefined ? { caller } : {}),
+          },
         },
       );
       if (result.body === undefined) {
-        await store.set(key, { value: result.data, createdAt: Date.now(), query });
+        await store.set(key, {
+          value: result.data,
+          createdAt: Date.now(),
+          query,
+        });
       }
     } catch {
       // Keep the stale value on failure — SWR tolerates upstream hiccups.

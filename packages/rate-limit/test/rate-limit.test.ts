@@ -1,5 +1,5 @@
 import { ErrorCode, createOrbit, memoryAdapter } from '@orbit/core';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createMemoryRateLimitStore, createRateLimitPlugin } from '../src/index.js';
 import type { BucketParams, RateLimitBucketStore, RateLimiter } from '../src/index.js';
 
@@ -137,6 +137,24 @@ describe('createRateLimitPlugin', () => {
     await expect(orbit.execute({ query: 'user { id }' })).resolves.toMatchObject({ status: 200 });
   });
 
+  it('handles a rejecting async store reset without an unhandled rejection', async () => {
+    const reset = vi.fn(() => Promise.reject(new Error('store unavailable')));
+    const store: RateLimitBucketStore = {
+      consume: () => ({ ok: true }),
+      reset,
+    };
+    const plugin = createRateLimitPlugin({ windowMs: 60_000, limit: 1, store });
+    const catchSpy = vi.spyOn(Promise.prototype, 'catch');
+    try {
+      plugin.reset();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(reset).toHaveBeenCalledOnce();
+      expect(catchSpy).toHaveBeenCalled();
+    } finally {
+      catchSpy.mockRestore();
+    }
+  });
+
   it('defaults keyOf to x-forwarded-for, x-real-ip, then anonymous', async () => {
     const plugin = createRateLimitPlugin({ windowMs: 60_000, limit: 1 });
     const orbit = makeOrbit(plugin);
@@ -175,6 +193,24 @@ describe('createRateLimitPlugin', () => {
     await expect(
       orbit.execute({ query: 'user { id }' }, withHeaders('x-real-ip', '10.0.0.2')),
     ).resolves.toMatchObject({ status: 200 });
+  });
+  it('can ignore client-controlled proxy headers in the default key', async () => {
+    const plugin = createRateLimitPlugin({
+      windowMs: 60_000,
+      limit: 1,
+      trustProxyHeaders: false,
+    });
+    const orbit = makeOrbit(plugin);
+    const forwarded = (ip: string) => ({
+      headers: new Headers({ 'x-forwarded-for': ip }),
+    });
+
+    await expect(
+      orbit.execute({ query: 'user { id }' }, forwarded('1.2.3.4')),
+    ).resolves.toMatchObject({ status: 200 });
+    await expect(
+      orbit.execute({ query: 'user { id }' }, forwarded('5.6.7.8')),
+    ).rejects.toMatchObject({ status: 429 });
   });
 });
 
@@ -216,6 +252,27 @@ describe('createMemoryRateLimitStore', () => {
     expect((await store.consume('a', params, 0)).ok).toBe(false);
     expect((await store.consume('b', params, 0)).ok).toBe(true); // own bucket
     expect(store.bucketCount).toBe(2);
+  });
+  it('rejects a maxBuckets that is not a positive integer', () => {
+    // Silently coercing a bad cap would either evict everything immediately or
+    // grow without bound — both are worse than failing at construction.
+    for (const maxBuckets of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() => createMemoryRateLimitStore({ maxBuckets })).toThrowError(
+        /maxBuckets must be a positive integer/,
+      );
+    }
+  });
+  it('evicts the least-recently-seen bucket at the configured cap', async () => {
+    const store = createMemoryRateLimitStore({ maxBuckets: 2 });
+    const oneToken = { limit: 1, rate: 1 / 60_000, windowMs: 60_000 };
+
+    expect((await store.consume('a', oneToken, 0)).ok).toBe(true);
+    expect((await store.consume('b', oneToken, 1)).ok).toBe(true);
+    expect((await store.consume('a', oneToken, 2)).ok).toBe(false); // touch a
+    expect((await store.consume('c', oneToken, 3)).ok).toBe(true);
+    expect(store.bucketCount).toBe(2);
+    expect((await store.consume('a', oneToken, 4)).ok).toBe(false); // retained
+    expect((await store.consume('b', oneToken, 5)).ok).toBe(true); // eviction reset b
   });
 });
 

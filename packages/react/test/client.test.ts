@@ -375,6 +375,79 @@ describe('OrbitReactClient', () => {
     expect(state.data).toEqual({ name: 'Ana' });
   });
 
+  describe('activity tracking', () => {
+    it('counts mounted observers and drops the key at zero', () => {
+      const { transport } = fakeTransport();
+      const react = reactClientOf(transport);
+      const cacheKey = react.cacheKeyOf(['u'], 'user { name }');
+
+      expect(react.isActive(cacheKey)).toBe(false);
+      react.markActive(cacheKey);
+      react.markActive(cacheKey);
+      // Two mounted hooks on one key (a list rendered twice) still read active.
+      expect(react.isActive(cacheKey)).toBe(true);
+
+      react.unmarkActive(cacheKey);
+      expect(react.isActive(cacheKey)).toBe(true);
+      react.unmarkActive(cacheKey);
+      expect(react.isActive(cacheKey)).toBe(false);
+
+      // Releasing past zero (an unmount without a matching mount, or a
+      // double-unmount in StrictMode) must not resurrect or corrupt the count.
+      react.unmarkActive(cacheKey);
+      expect(react.isActive(cacheKey)).toBe(false);
+    });
+  });
+
+  describe('optimisticWrite', () => {
+    it('writes optimistically and restores the exact prior entry on rollback', async () => {
+      const { transport } = fakeTransport();
+      transport.query.mockResolvedValue(okResponse({ name: 'Ana' }));
+      const react = reactClientOf(transport);
+      await react.ensureQuery(['u'], 'user { name }', { ttl: 60_000 });
+      const before = react.getQueryData(['u']);
+
+      const rollback = react.optimisticWrite(['u'], { name: 'Optimistic' });
+      expect(react.getQueryData(['u'])).toEqual({ name: 'Optimistic' });
+
+      rollback();
+      // The rollback restores the DATA and the freshness timestamps, not just
+      // the value — an entry resurrected as stale would silently refetch.
+      expect(react.getQueryData(['u'])).toEqual(before);
+      expect(react.getQueryData(['u'])).toEqual({ name: 'Ana' });
+    });
+
+    it('leaves other keys untouched on rollback', async () => {
+      const { transport } = fakeTransport();
+      transport.query.mockResolvedValue(okResponse({ name: 'Ana' }));
+      const react = reactClientOf(transport);
+      await react.ensureQuery(['u'], 'user { name }', { ttl: 60_000 });
+      await react.ensureQuery(['p'], 'post { title }', { ttl: 60_000 });
+
+      const rollback = react.optimisticWrite(['u'], { name: 'Optimistic' });
+      expect(react.getQueryData(['u'])).toEqual({ name: 'Optimistic' });
+
+      rollback();
+      // Only the written key is restored; a sibling entry is not disturbed.
+      expect(react.getQueryData(['u'])).toEqual({ name: 'Ana' });
+      expect(react.getQueryData(['p'])).toEqual({ name: 'Ana' });
+    });
+
+    it('does not create an entry for a key that has none cached', () => {
+      const { transport } = fakeTransport();
+      const react = reactClientOf(transport);
+      // `setQueryData` only updates EXISTING entries, so an optimistic write to
+      // an uncached key is a no-op — and its rollback must not fabricate a
+      // removal for something that was never there.
+      const rollback = react.optimisticWrite(['nobody'], { x: 1 });
+      expect(react.getQueryData(['nobody'])).toBeUndefined();
+      expect(react.cache.entries()).toHaveLength(0);
+      expect(() => rollback()).not.toThrow();
+      expect(react.getQueryData(['nobody'])).toBeUndefined();
+      expect(react.cache.entries()).toHaveLength(0);
+    });
+  });
+
   describe('invalidate', () => {
     it('evicts by exact key (string and array) and by predicate', async () => {
       const { transport } = fakeTransport();

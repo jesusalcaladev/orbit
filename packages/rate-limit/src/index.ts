@@ -128,23 +128,60 @@ export interface RateLimiter {
   consume(key: string, now?: number): ConsumeResult | Promise<ConsumeResult>;
 }
 
+export interface MemoryRateLimitStoreOptions {
+  /**
+   * Maximum buckets retained by the in-memory store. Defaults to 10,000.
+   * The least-recently-seen bucket is evicted when the cap is exceeded.
+   */
+  maxBuckets?: number;
+}
+
+const DEFAULT_MAX_BUCKETS = 10_000;
+
 /**
  * The in-memory rate-limit store — the reference implementation of
  * `RateLimitBucketStore`, and the default store of `createRateLimitPlugin`.
- * Synchronous, exact token-bucket math, `bucketCount` + `reset()` for tests.
+ * Synchronous, exact token-bucket math, bounded LRU eviction, `bucketCount` +
+ * `reset()` for tests.
  */
-export function createMemoryRateLimitStore(): RateLimitBucketStore {
+export function createMemoryRateLimitStore(
+  options: MemoryRateLimitStoreOptions = {},
+): RateLimitBucketStore {
+  const maxBuckets = options.maxBuckets ?? DEFAULT_MAX_BUCKETS;
+  if (!Number.isSafeInteger(maxBuckets) || maxBuckets <= 0) {
+    throw new Error('createMemoryRateLimitStore: maxBuckets must be a positive integer');
+  }
   interface Bucket {
     tokens: number;
     last: number;
+    lastSeen: number;
   }
   const buckets = new Map<string, Bucket>();
   const store: RateLimitBucketStore = {
     consume(key, { limit, rate }, now) {
       let bucket = buckets.get(key);
       if (!bucket) {
-        bucket = { tokens: limit, last: now };
-        buckets.set(key, bucket);
+        bucket = { tokens: limit, last: now, lastSeen: now };
+      }
+      // Reinsert so Map iteration order is least-recently-seen first.
+      bucket.lastSeen = now;
+      buckets.delete(key);
+      buckets.set(key, bucket);
+      if (buckets.size > maxBuckets) {
+        // `size > maxBuckets >= 1` guarantees at least one key exists, so the
+        // iterator yields a string. Kept explicit for the type, not a guess.
+        const lruKey = buckets.keys().next().value as string;
+        /*
+         * The cap is a memory-safety boundary: eviction gives that key a fresh
+         * budget, so an attacker who can cycle through more identities than
+         * the cap may obtain extra requests. Set maxBuckets above the expected
+         * legitimate identity count, and prefer trusted keyOf/Redis-backed
+         * stores when stronger anti-bypass guarantees are required.
+         */
+        // `lruKey` is a string whenever this branch is reached (see the cast
+        // above), so there is nothing to guard: the check existed only because
+        // `IteratorResult.value` is typed `T | undefined`.
+        buckets.delete(lruKey);
       }
       // Lazy refill: tokens accumulate at `rate` per ms, capped at capacity.
       const elapsed = Math.max(0, now - bucket.last);
@@ -188,6 +225,11 @@ export interface RateLimitOptions {
    */
   store?: RateLimitBucketStore;
   /**
+   * Maximum buckets retained by the default in-memory store. Defaults to
+   * 10,000. Ignored when a custom store is supplied.
+   */
+  maxBuckets?: number;
+  /**
    * Expose the limiter on `ctx.providers` (🧪 provides channel) so adapters
    * and plugins can consume the SAME shared buckets imperatively. Default
    * `'rateLimiter'` (so `ctx.providers?.rateLimiter`); set a custom name, or
@@ -202,6 +244,14 @@ export interface RateLimitOptions {
    * limits, e.g. from an auth plugin's `ctx.state`).
    */
   keyOf?: (ctx: OrbitContext) => string;
+  /**
+   * Whether the default key extractor may trust `x-forwarded-for` and
+   * `x-real-ip`. Defaults to `true` for backwards compatibility, assuming a
+   * trusted proxy replaces client-supplied values. Set `false` to ignore both
+   * headers and put all default-keyed clients in the shared `anonymous`
+   * bucket. Ignored when `keyOf` is supplied.
+   */
+  trustProxyHeaders?: boolean;
   /**
    * Build the error for an exceeded bucket. Default: `ORBIT_PERMISSION_DENIED`
    * with status 429 and `details: { limit, windowMs, retryAfterMs }`. Throw
@@ -256,14 +306,18 @@ function setRateLimitHeaders(ctx: OrbitContext, limit: number, result: ConsumeRe
 
 /**
  * Default identity key: the client's IP as seen by a proxy, else a shared
- * bucket. Deployment note: set `keyOf` when you can resolve a real identity
- * (user id, API key) — IP-based buckets are a floor, not a contract.
+ * bucket. These headers are client-controlled unless a trusted reverse proxy
+ * replaces them, so rotating the header bypasses per-client limits when the
+ * service is directly exposed. Set `trustProxyHeaders: false` in that setup,
+ * or prefer `keyOf` with a verified user id or API key.
  */
-function defaultKeyOf(ctx: OrbitContext): string {
-  const forwarded = ctx.headers?.get('x-forwarded-for')?.split(',')[0]?.trim();
-  if (forwarded) return forwarded;
-  const realIp = ctx.headers?.get('x-real-ip')?.trim();
-  if (realIp) return realIp;
+function defaultKeyOf(ctx: OrbitContext, trustProxyHeaders: boolean): string {
+  if (trustProxyHeaders) {
+    const forwarded = ctx.headers?.get('x-forwarded-for')?.split(',')[0]?.trim();
+    if (forwarded) return forwarded;
+    const realIp = ctx.headers?.get('x-real-ip')?.trim();
+    if (realIp) return realIp;
+  }
   return 'anonymous';
 }
 
@@ -273,7 +327,8 @@ function defaultKeyOf(ctx: OrbitContext): string {
  * (`@orbit/redis` `createRedisRateLimitStore`) shares limits across
  * instances via one atomic `consume` per request. */
 export function createRateLimitPlugin(options: RateLimitOptions): RateLimitPlugin {
-  const { windowMs, limit, keyOf = defaultKeyOf, now = () => Date.now() } = options;
+  const { windowMs, limit, now = () => Date.now(), trustProxyHeaders = true } = options;
+  const keyOf = options.keyOf ?? ((ctx: OrbitContext) => defaultKeyOf(ctx, trustProxyHeaders));
   if (!Number.isFinite(windowMs) || windowMs <= 0) {
     throw new Error('createRateLimitPlugin: windowMs must be a positive number');
   }
@@ -281,7 +336,7 @@ export function createRateLimitPlugin(options: RateLimitOptions): RateLimitPlugi
     throw new Error('createRateLimitPlugin: limit must be a positive number');
   }
   const rate = limit / windowMs; // tokens per ms
-  const store = options.store ?? createMemoryRateLimitStore();
+  const store = options.store ?? createMemoryRateLimitStore({ maxBuckets: options.maxBuckets });
   const params = { limit, rate, windowMs };
 
   // The imperative limiter: same store, same params, same clock as the
@@ -307,7 +362,7 @@ export function createRateLimitPlugin(options: RateLimitOptions): RateLimitPlugi
     },
 
     reset: () => {
-      void store.reset?.();
+      void Promise.resolve(store.reset?.()).catch(() => undefined);
     },
 
     hooks: {

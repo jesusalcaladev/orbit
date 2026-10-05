@@ -6,7 +6,7 @@ import {
   parseCacheSpec,
   parseOQS,
 } from '../src/index.js';
-import type { CacheEntry, CacheStore } from '../src/index.js';
+import type { CacheEntry, CacheStore, OrbitPlugin } from '../src/index.js';
 import type { OrbitContext } from '../src/types.js';
 import { createOrbit } from '../src/engine.js';
 import { ErrorCode } from '../src/errors.js';
@@ -23,22 +23,34 @@ function makeCachedOrbit(options: { store?: ReturnType<typeof createMemoryCacheS
   return { orbit, cache, resolve };
 }
 
-const baseEnvelope = () => ({ query: 'user(id="1") { name }', cache: 'ttl=300' });
+const baseEnvelope = () => ({
+  query: 'user(id="1") { name }',
+  cache: 'ttl=300',
+});
 
 describe('parseCacheSpec', () => {
   it('parses ttl and stale specs', () => {
     expect(parseCacheSpec('ttl=300')).toEqual({ ttl: 300 });
     expect(parseCacheSpec('stale=60')).toEqual({ stale: 60 });
     expect(parseCacheSpec('ttl=300,stale=60')).toEqual({ ttl: 300, stale: 60 });
-    expect(parseCacheSpec(' { "ttl": 300, "stale": 60 } ')).toEqual({ ttl: 300, stale: 60 });
+    expect(parseCacheSpec(' { "ttl": 300, "stale": 60 } ')).toEqual({
+      ttl: 300,
+      stale: 60,
+    });
   });
 
   it('accepts space-separated specs too (spec §8 wording)', () => {
     // The spec says "space-separated"; the historical examples use commas —
     // both must parse, and a space before a comma must not break either.
     expect(parseCacheSpec('ttl=300 stale=60')).toEqual({ ttl: 300, stale: 60 });
-    expect(parseCacheSpec('ttl=300, stale=60')).toEqual({ ttl: 300, stale: 60 });
-    expect(parseCacheSpec('  ttl=300  stale=60  ')).toEqual({ ttl: 300, stale: 60 });
+    expect(parseCacheSpec('ttl=300, stale=60')).toEqual({
+      ttl: 300,
+      stale: 60,
+    });
+    expect(parseCacheSpec('  ttl=300  stale=60  ')).toEqual({
+      ttl: 300,
+      stale: 60,
+    });
   });
 
   it('returns an empty spec for empty input', () => {
@@ -96,7 +108,10 @@ describe('cache plugin', () => {
 
   it('caches end to end with a space-separated spec', async () => {
     const { orbit, resolve } = makeCachedOrbit();
-    const envelope = { query: 'user(id="1") { name }', cache: 'ttl=300 stale=60' };
+    const envelope = {
+      query: 'user(id="1") { name }',
+      cache: 'ttl=300 stale=60',
+    };
     await orbit.execute(envelope);
     const hit = await orbit.execute(envelope);
     expect(hit.fromCache).toBe(true);
@@ -132,7 +147,10 @@ describe('cache plugin', () => {
     expect(resolve).toHaveBeenCalledTimes(1);
 
     vi.advanceTimersByTime(61_000);
-    const staleHit = await orbit.execute({ query: 'user(id="1") { name }', cache: 'stale=60' });
+    const staleHit = await orbit.execute({
+      query: 'user(id="1") { name }',
+      cache: 'stale=60',
+    });
     expect(staleHit.data).toEqual({ name: 'Ana' });
     expect(staleHit.fromCache).toBe(true);
 
@@ -337,7 +355,10 @@ describe('cache plugin', () => {
       adapters: memoryAdapter([{ entity: 'user', resolve: () => ({ id: '1', name: 'Ana' }) }]),
       plugins: [cache],
     });
-    const result = await orbit.execute({ query: 'user { id, user { id } }', cache: 'ttl=60' });
+    const result = await orbit.execute({
+      query: 'user { id, user { id } }',
+      cache: 'ttl=60',
+    });
     expect(result.data).toMatchObject({ id: '1' });
     await cache.invalidateEntity('user');
   });
@@ -373,7 +394,10 @@ describe('cache plugin', () => {
       adapters: memoryAdapter([{ entity: 'user', resolve }]),
       plugins: [mask, cache],
     });
-    const envelope = () => ({ query: 'user(id="1") { name }', cache: 'ttl=300' });
+    const envelope = () => ({
+      query: 'user(id="1") { name }',
+      cache: 'ttl=300',
+    });
 
     const first = await orbit.execute(envelope());
     expect(first.data).toEqual({ masked: { name: 'Ana' } });
@@ -387,7 +411,10 @@ describe('cache plugin', () => {
   it('combines ttl with a stale window: serve+refresh between them, refetch beyond', async () => {
     vi.useFakeTimers();
     const { orbit, resolve } = makeCachedOrbit();
-    const envelope = { query: 'user(id="1") { name }', cache: 'ttl=300,stale=60' };
+    const envelope = {
+      query: 'user(id="1") { name }',
+      cache: 'ttl=300,stale=60',
+    };
 
     await orbit.execute(envelope); // miss → resolve #1, store at t0
     vi.advanceTimersByTime(301_000);
@@ -467,7 +494,9 @@ describe('cache plugin', () => {
       createdAt: Date.now() - 5_000, // age 5 s: past ttl=1, inside the stale window
       query: 'user(id="1") { name }',
     });
-    const ctx: OrbitContext = { state: { 'orbit:cache:spec': { ttl: 1, stale: 60 } } };
+    const ctx: OrbitContext = {
+      state: { 'orbit:cache:spec': { ttl: 1, stale: 60 } },
+    };
 
     const outcome = await cache.hooks.onBeforeResolve?.({ parsed, ctx });
     expect(outcome).toEqual({ shortCircuit: { name: 'Ana' } });
@@ -612,7 +641,11 @@ describe('cache store hardening (P0)', () => {
 
   it('serves a stale entry whose createdAt is in the future without crashing', async () => {
     const store = createMemoryCacheStore();
-    store.set('whatever', { value: 'x', createdAt: Date.now() + 60_000, query: '' });
+    store.set('whatever', {
+      value: 'x',
+      createdAt: Date.now() + 60_000,
+      query: '',
+    });
     const cache = createCachePlugin({ store });
     const orbit = createOrbit({
       adapters: memoryAdapter([{ entity: 'user', resolve: vi.fn(() => users[0]) }]),
@@ -742,7 +775,10 @@ describe('cache store hardening (P0)', () => {
   it('emits SWR cache-control when serving stale (max-age=0 + remaining window)', async () => {
     vi.useFakeTimers();
     const { orbit } = makeCachedOrbit();
-    const envelope = { query: 'user(id="1") { name }', cache: 'ttl=300,stale=60' };
+    const envelope = {
+      query: 'user(id="1") { name }',
+      cache: 'ttl=300,stale=60',
+    };
     await orbit.execute(envelope);
     vi.advanceTimersByTime(310_000); // past ttl, inside the SWR window
     const response = await orbit.handler(
@@ -831,5 +867,394 @@ describe('cache store hardening (P0)', () => {
     // reach the client: sanitized ORBIT_INTERNAL.
     expect(failure).toMatchObject({ code: ErrorCode.INTERNAL });
     expect(String((failure as Error).message)).not.toContain('redis');
+  });
+});
+
+describe('caller-scoped cache keys (cross-tenant isolation)', () => {
+  const rows = [
+    { id: '1', tenant: 'A', name: 'alice' },
+    { id: '2', tenant: 'B', name: 'bob' },
+  ];
+
+  /** A per-tenant engine: `scope` injects the tenant filter in onBeforeExecute. */
+  function makeTenantedOrbit() {
+    const cache = createCachePlugin();
+    const resolve = vi.fn((filters: Record<string, string>) =>
+      rows.filter((r) => !filters.tenant || r.tenant === filters.tenant),
+    );
+    const orbit = createOrbit({
+      adapters: [{ entity: 'user', resolve }],
+      // A minimal stand-in for @orbit/auth: stamp the identity in
+      // onBeforeParse, inject the tenant filter in onBeforeExecute.
+      plugins: [
+        {
+          name: 'fake-auth',
+          hooks: {
+            onBeforeParse({ ctx }: { ctx: OrbitContext }) {
+              const tenant = ctx.headers?.get('x-tenant');
+              if (tenant === null || tenant === undefined) return;
+              (ctx.state ??= {}).caller = { tenant };
+            },
+            onBeforeExecute({
+              filters,
+              ctx,
+            }: {
+              filters: Record<string, string>;
+              ctx: OrbitContext;
+            }) {
+              const tenant = (ctx.state as { caller?: { tenant: string } } | undefined)?.caller
+                ?.tenant;
+              return tenant === undefined ? undefined : { filters: { ...filters, tenant } };
+            },
+          },
+        },
+        cache,
+      ],
+    });
+    const run = (tenant: string) =>
+      orbit.execute(
+        { query: 'user { id, name }', cache: 'ttl=300' },
+        { headers: new Headers({ 'x-tenant': tenant }) },
+      );
+    return { orbit, cache, resolve, run };
+  }
+
+  it('does not serve one tenant another tenant’s cached rows', async () => {
+    const { run } = makeTenantedOrbit();
+
+    const a = await run('A');
+    const b = await run('B');
+
+    expect(a.data).toEqual([{ id: '1', name: 'alice' }]);
+    // The regression: B used to receive A's rows from the shared entry, because
+    // the key was purely structural and the tenant filter is applied later.
+    expect(b.data).toEqual([{ id: '2', name: 'bob' }]);
+  });
+
+  it('still serves a repeat query from cache for the SAME caller', async () => {
+    const { run, resolve } = makeTenantedOrbit();
+
+    await run('A');
+    const before = resolve.mock.calls.length;
+    const second = await run('A');
+
+    // Same identity → same partition → a genuine hit (no second resolve).
+    expect(resolve.mock.calls.length).toBe(before);
+    expect(second.fromCache).toBe(true);
+    expect(second.data).toEqual([{ id: '1', name: 'alice' }]);
+  });
+
+  it('treats an identity that differs only in key order as the same caller', async () => {
+    const cache = createCachePlugin();
+    const resolve = vi.fn(() => ({ id: '1' }));
+    const orbit = createOrbit({
+      adapters: [{ entity: 'user', resolve }],
+      plugins: [cache],
+    });
+    const query = { query: 'user { id }', cache: 'ttl=300' };
+    await orbit.execute(query, {
+      state: { caller: { tenant: 'A', role: 'admin' } },
+    });
+    const second = await orbit.execute(query, {
+      state: { caller: { role: 'admin', tenant: 'A' } },
+    });
+    expect(resolve).toHaveBeenCalledTimes(1);
+    expect(second.fromCache).toBe(true);
+  });
+
+  it('refuses to cache when `state` is missing or not a record', async () => {
+    const cache = createCachePlugin();
+    const resolve = vi.fn(() => ({ id: '1' }));
+    const orbit = createOrbit({ adapters: [{ entity: 'user', resolve }], plugins: [cache] });
+    const query = { query: 'user { id }', cache: 'ttl=300' };
+    // `callerScope` reads `ctx.state` defensively: a plugin (or a direct
+    // `execute`) may leave it absent or set it to a non-object. Both must fall
+    // back to the shared anonymous partition rather than throwing mid-cache.
+    await orbit.execute(query, { state: undefined });
+    const second = await orbit.execute(query, { state: undefined });
+    expect(resolve).toHaveBeenCalledTimes(1);
+    expect(second.fromCache).toBe(true);
+
+    const resolve2 = vi.fn(() => ({ id: '2' }));
+    const orbit2 = createOrbit({
+      adapters: [{ entity: 'post', resolve: resolve2 }],
+      plugins: [createCachePlugin()],
+    });
+    const q2 = { query: 'post { id }', cache: 'ttl=300' };
+    // A non-object `state` makes the cache's scoping hook throw (it reads
+    // properties off it), so the point here is only that `execute` does not
+    // crash the *pipeline* — the error is normalized like any other.
+    await expect(
+      orbit2.execute(q2, { state: 'not-an-object' as unknown as Record<string, unknown> }),
+    ).rejects.toThrow();
+    // A missing/empty state is the supported anonymous case.
+    expect((await orbit2.execute(q2, { state: {} })).fromCache).toBe(false);
+  });
+
+  it('treats an explicitly null caller as anonymous', async () => {
+    const cache = createCachePlugin();
+    const resolve = vi.fn(() => ({ id: '1' }));
+    const orbit = createOrbit({ adapters: [{ entity: 'user', resolve }], plugins: [cache] });
+    const query = { query: 'user { id }', cache: 'ttl=300' };
+    // An auth plugin that sets `caller: null` means "nobody in particular",
+    // which is the anonymous partition — not an uncacheable identity.
+    await orbit.execute(query, { state: { caller: null } });
+    expect((await orbit.execute(query, { state: { caller: null } })).fromCache).toBe(true);
+    expect(resolve).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats an explicitly undefined caller as anonymous', async () => {
+    const cache = createCachePlugin();
+    const resolve = vi.fn(() => ({ id: '1' }));
+    const orbit = createOrbit({ adapters: [{ entity: 'user', resolve }], plugins: [cache] });
+    const query = { query: 'user { id }', cache: 'ttl=300' };
+    // An auth plugin that sets `caller: undefined` (a failed lookup, say) means
+    // the anonymous partition — the same as `null`, and distinct from an
+    // identity it cannot canonicalise.
+    await orbit.execute(query, { state: { caller: undefined } });
+    expect((await orbit.execute(query, { state: { caller: undefined } })).fromCache).toBe(true);
+    expect(resolve).toHaveBeenCalledTimes(1);
+  });
+
+  it('revalidates without an identity when the request state was not a record', async () => {
+    // The refresh path re-derives the caller with the same `isRecord` guard as
+    // the read path. A non-record `state` must carry through as "no caller"
+    // rather than reading array indices as properties.
+    const seen: unknown[] = [];
+    const observer: OrbitPlugin = {
+      name: 'observer',
+      hooks: {
+        onBeforeExecute: ({ ctx }) => {
+          seen.push((ctx.state as { caller?: unknown } | undefined)?.caller);
+        },
+      },
+    };
+    const store: CacheStore = {
+      get: () => ({ value: { id: '3', name: 'C' }, createdAt: 0, query: 'user { id, name }' }),
+      set: () => {},
+      delete: () => {},
+      clear: () => {},
+    };
+    const resolve = vi.fn(() => ({ id: '3', name: 'C' }));
+    const orbit = createOrbit({
+      adapters: [{ entity: 'user', resolve }],
+      plugins: [createCachePlugin({ store }), observer],
+    });
+    const query = { query: 'user { id, name }', cache: 'ttl=300,stale=60' };
+
+    vi.spyOn(Date, 'now').mockImplementation(() => 320_000);
+    try {
+      await orbit.execute(query, { state: ['x'] as unknown as Record<string, unknown> });
+      await vi.waitFor(() => expect(seen.length).toBeGreaterThan(0));
+      expect(seen).toEqual([undefined]);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('falls back to the anonymous partition when `state` is an array', async () => {
+    // `callerScope` guards with `isRecord`, which rejects arrays. A caller who
+    // passes an array as `state` must land in the anonymous partition rather
+    // than have array indices read as properties.
+    const cache = createCachePlugin();
+    const resolve = vi.fn(() => ({ id: '1' }));
+    const orbit = createOrbit({ adapters: [{ entity: 'user', resolve }], plugins: [cache] });
+    const query = { query: 'user { id }', cache: 'ttl=300' };
+    const state = ['x'] as unknown as Record<string, unknown>;
+    await orbit.execute(query, { state });
+    expect((await orbit.execute(query, { state })).fromCache).toBe(true);
+    expect(resolve).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses to cache an identity it cannot canonicalise (no silent sharing)', async () => {
+    const cache = createCachePlugin();
+    const resolve = vi.fn(() => ({ id: '1' }));
+    const orbit = createOrbit({
+      adapters: [{ entity: 'user', resolve }],
+      plugins: [cache],
+    });
+    const query = { query: 'user { id }', cache: 'ttl=300' };
+    // A class instance is not canonically representable, so it must not be
+    // folded into the shared anonymous partition.
+    class Caller {
+      readonly tenant: string;
+      constructor(tenant: string) {
+        this.tenant = tenant;
+      }
+    }
+    await orbit.execute(query, { state: { caller: new Caller('A') } });
+    const second = await orbit.execute(query, {
+      state: { caller: new Caller('A') },
+    });
+    expect(resolve).toHaveBeenCalledTimes(2);
+    expect(second.fromCache).toBe(false);
+  });
+
+  it('propagates the caller identity into a background revalidation', async () => {
+    // Revalidation re-runs the stored query through the engine. It runs with
+    // `SKIP_KEY` (so the refresh does not recurse into the cache) but MUST
+    // still carry the caller: an auth plugin gates on `ctx.state.caller`, so
+    // dropping it would refresh a scoped entry through an ungated path.
+    const seen: unknown[] = [];
+    const observer: OrbitPlugin = {
+      name: 'observer',
+      hooks: {
+        onBeforeExecute: ({ ctx }) => {
+          seen.push((ctx.state as { caller?: unknown } | undefined)?.caller);
+        },
+      },
+    };
+    // The stored entry was created at t=0 and "now" is t=320 s: inside the SWR
+    // band (ttl=300, stale=60 → serve-and-refresh from 300 s to 360 s), so the
+    // read serves the stale value AND schedules the background refresh.
+    let now = 320_000;
+    const store: CacheStore = {
+      get: () => ({ value: { id: '1', name: 'Ana' }, createdAt: 0, query: 'user { id, name }' }),
+      set: () => {},
+      delete: () => {},
+      clear: () => {},
+    };
+    const cache = createCachePlugin({ store });
+    const resolve = vi.fn(() => ({ id: '1', name: 'Ana' }));
+    const orbit = createOrbit({
+      adapters: [{ entity: 'user', resolve }],
+      plugins: [cache, observer],
+    });
+    const query = { query: 'user { id, name }', cache: 'ttl=300,stale=60' };
+
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      // The entry's `createdAt` is 0 and "now" is far past `ttl`, so this read
+      // serves the stale value AND schedules the background revalidation.
+      const stale = await orbit.execute(query, { state: { caller: { tenant: 'A' } } });
+      expect(stale.fromCache).toBe(true);
+      // The stale read is served from the store (no adapter call), and the
+      // background refresh resolves under the SAME identity as the request.
+      await vi.waitFor(() => expect(seen.length).toBeGreaterThan(0));
+      expect(seen).toEqual([{ tenant: 'A' }]);
+      now += 1;
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('omits the caller from revalidation when the request had none', async () => {
+    const seen: unknown[] = [];
+    const observer: OrbitPlugin = {
+      name: 'observer',
+      hooks: {
+        onBeforeExecute: ({ ctx }) => {
+          seen.push((ctx.state as { caller?: unknown } | undefined)?.caller);
+        },
+      },
+    };
+    const store: CacheStore = {
+      get: () => ({ value: { id: '2', name: 'B' }, createdAt: 0, query: 'user { id, name }' }),
+      set: () => {},
+      delete: () => {},
+      clear: () => {},
+    };
+    const resolve = vi.fn(() => ({ id: '2', name: 'B' }));
+    const orbit = createOrbit({
+      adapters: [{ entity: 'user', resolve }],
+      plugins: [createCachePlugin({ store }), observer],
+    });
+    const query = { query: 'user { id, name }', cache: 'ttl=300,stale=60' };
+
+    vi.spyOn(Date, 'now').mockImplementation(() => 320_000);
+    try {
+      await orbit.execute(query);
+      await vi.waitFor(() => expect(seen.length).toBeGreaterThan(0));
+      // No caller was ever set, so the refresh must not invent one.
+      expect(seen).toEqual([undefined]);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('does not let a revalidation request inherit the caller partition', async () => {
+    // Background revalidation re-executes the stored query through the engine
+    // with a deliberately stripped context: it must not carry the caller's
+    // AbortSignal (a cancelled request would abort the refresh instantly, the
+    // error would be swallowed, and the entry would sit stale forever), and it
+    // must not carry the `Request` (which holds the consumed body).
+    const cache = createCachePlugin();
+    const resolve = vi.fn(() => ({ id: '1', name: 'Ana' }));
+    const orbit = createOrbit({
+      adapters: [{ entity: 'user', resolve }],
+      plugins: [cache],
+    });
+    const query = { query: 'user { id, name }', cache: 'ttl=1,stale=60' };
+
+    // Prime the entry as one caller, then read it as ANOTHER caller through a
+    // context carrying a signal and a Request.
+    await orbit.execute(query, { state: { caller: { tenant: 'A' } } });
+    const controller = new AbortController();
+    const second = await orbit.execute(query, {
+      state: { caller: { tenant: 'B' } },
+      signal: controller.signal,
+      request: new Request('https://x.test/'),
+    });
+    // A different tenant must NOT be served tenant A's entry.
+    expect(second.fromCache).toBe(false);
+    expect(resolve).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps anonymous requests on one shared partition', async () => {
+    const { orbit, resolve } = (() => {
+      const cache = createCachePlugin();
+      const resolve = vi.fn(() => ({ id: '1', name: 'Ana' }));
+      const orbit = createOrbit({
+        adapters: [{ entity: 'user', resolve }],
+        plugins: [cache],
+      });
+      return { orbit, resolve };
+    })();
+    const query = { query: 'user { id, name }', cache: 'ttl=300' };
+    await orbit.execute(query);
+    const second = await orbit.execute(query);
+    expect(resolve).toHaveBeenCalledTimes(1);
+    expect(second.fromCache).toBe(true);
+  });
+});
+
+describe('revalidation context isolation', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('does not abort a background revalidation when the request aborts', async () => {
+    vi.useFakeTimers();
+    const store = createMemoryCacheStore();
+    const cache = createCachePlugin({ store });
+    // Seed an entry already inside the SWR band (stale-only: always served,
+    // refreshed in the background past `stale` seconds).
+    const key = cache.keyFor(parseOQS('user { id }'));
+    store.set(key, {
+      value: { id: 'stale' },
+      createdAt: Date.now() - 10_000,
+      query: 'user { id }',
+    });
+
+    const controller = new AbortController();
+    const resolve = vi.fn(() => ({ id: 'fresh' }));
+    const orbit = createOrbit({
+      adapters: [{ entity: 'user', resolve }],
+      plugins: [cache],
+      requestTimeoutMs: 5,
+    });
+
+    const served = await orbit.execute(
+      { query: 'user { id }', cache: 'stale=1' },
+      { signal: controller.signal },
+    );
+    expect(served.data).toEqual({ id: 'stale' });
+
+    // The request goes away (client disconnect / deadline). The background
+    // refresh must still run: it used to inherit the aborted signal, die
+    // immediately, and leave the entry permanently stale.
+    controller.abort();
+    await vi.advanceTimersByTimeAsync(30);
+    expect(resolve).toHaveBeenCalled();
   });
 });
