@@ -34,25 +34,5 @@ services:
     ports:
       - "8787:8787"
 
-  mongodb:
-    image: mongo:7-rs
-    environment:
-      - MONGO_INITDB_ROOT_USERNAME=${MONGO_ROOT_USERNAME:-admin}
-      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_ROOT_PASSWORD:-password}
-    ports:
-      - "27017:27017"
-    healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.runCommand('ping')"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
-
-  sqlite:
-    image: kitchenpi/sqlite:latest
-    volumes:
-      - sqlite-data:/data/db
-    ports:
-      - "3306:3306"  # Using SQLite HTTP interface example
-
-volumes:
-  sqlite-data:
+# Redis is intentionally the only local infrastructure service shipped here.
+# It is used for the optional cache and distributed rate-limit examples.

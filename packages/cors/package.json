@@ -1,7 +1,7 @@
 {
-  "name": "@orbit/mongo",
+  "name": "@orbit/cors",
   "version": "0.1.0",
-  "description": "MongoDB DataAdapter for @orbit/core — verbatim filters→$match, $in batching and create/update/delete mutations over an injected mongodb client.",
+  "description": "First-party CORS for @orbit/core — a dependency-free plugin that answers the allowlist, preflight and credential contract from the frozen response-headers channel.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -26,9 +26,8 @@
   },
   "keywords": [
     "orbit",
-    "mongodb",
-    "mongo",
-    "adapter",
+    "cors",
+    "preflight",
     "data-layer"
   ],
   "license": "MIT",
@@ -37,7 +36,6 @@
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
-    "mongodb": "^6.16.0",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"
   }
