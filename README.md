@@ -8,20 +8,21 @@
 [![CI](https://github.com/jesusalcaladev/orbit/actions/workflows/ci.yml/badge.svg)](https://github.com/jesusalcaladev/orbit/actions/workflows/ci.yml)
 
 ```ts
-import { createOrbit, memoryAdapter, createCachePlugin } from '@orbit/core';
+import { createOrbit, memoryAdapter, createCachePlugin } from "@orbit/core";
 
 const orbit = createOrbit({
   adapters: memoryAdapter([
-    { entity: 'user', resolve: ({ id }) => users.find((u) => u.id === id) },
+    { entity: "user", resolve: ({ id }) => users.find((u) => u.id === id) },
   ]),
   plugins: [createCachePlugin()],
 });
 
 // One HTTP round-trip for the whole graph.
-await fetch('/orbit', {
-  method: 'POST',
+await fetch("/orbit", {
+  method: "POST",
   body: JSON.stringify({
-    query: 'user(id="123") { name, posts(status="published") { title, views } }',
+    query:
+      'user(id="123") { name, posts(status="published") { title, views } }',
   }),
 });
 ```
@@ -36,9 +37,9 @@ Every fullstack project eventually hits the same three walls:
 
 2. **HTTP caching is dumb by default.** Browsers cache by URL, not by intent. Invalidating the right keys after a mutation feels like juggling glass, so most teams give up and rebuild client-side stores that drift out of sync.
 
-3. **Schema lock-in.** Once the ORM owns your types, your database, your migrations and your opinions, swapping Postgres for Mongo is a rewrite, not a config change. The framework's "magic" only works while you stay inside its world.
+3. **Schema lock-in.** Once an ORM owns your types, your database, your migrations and your opinions, changing persistence becomes a rewrite, not a config change. Orbit keeps that boundary in your application.
 
-The ecosystem answered each wall with *more framework*. GraphQL gave us one request — but demanded a schema you must maintain, resolvers with their own ceremony, and a runtime that owns your HTTP layer. ORMs gave us type safety — but tied us to a database. Caches gave us speed — but only if we adopted their invalidation theology.
+The ecosystem answered each wall with _more framework_. GraphQL gave us one request — but demanded a schema you must maintain, resolvers with their own ceremony, and a runtime that owns your HTTP layer. ORMs gave us type safety — but tied us to a database. Caches gave us speed — but only if we adopted their invalidation theology.
 
 Orbit starts from a different truth:
 
@@ -46,21 +47,21 @@ Orbit starts from a different truth:
 
 No magic query planner. No central schema file. No vendored HTTP layer. Just a thin contract — a query language, a hook pipeline, and an adapter interface — that moves intent from client to server in one round-trip and then gets out of the way.
 
-That's why the core has **zero runtime dependencies**: a contract layer should be pure. And it's why everything "smart" lives in things you choose to load: caching is a plugin, auth is a hook, Postgres is an adapter. Swap any of them without touching the protocol.
+That's why the core has **zero runtime dependencies**: a contract layer should be pure. Everything "smart" lives in things you choose to load: caching is a plugin, auth is a hook, and persistence belongs to your repository/ORM behind a `DataAdapter`. Swap any of them without touching the protocol.
 
 ## Philosophy
 
-| Principle | What it means |
-| :--- | :--- |
-| **You are still the developer** | Orbit is not an ORM. Filters are passed *verbatim* to your adapter. `id="123"` is never interpreted as a primary key — it's just a string. |
-| **One request, if you write the resolver to batch** | The core groups sibling requests of the same entity into a single `batch()` call. The N+1 fix is a contract, not magic. |
-| **The client defines the cache** | Cache specs travel with the query (`ttl=300`, `stale=60`) and a plugin enforces them. No hidden global cache to break. |
-| **Runs anywhere** | The handler is a plain `(Request) => Promise<Response>`. Hono, Express, Cloudflare Workers, Bun, Deno, node:http — drop it in. |
-| **Extensible by design** | Want a new data source? Write an adapter. New behavior? Write a hook. New wire format? `onBeforeSerialize`. |
+| Principle                                           | What it means                                                                                                                              |
+| :-------------------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------- |
+| **You are still the developer**                     | Orbit is not an ORM. Filters are passed _verbatim_ to your adapter. `id="123"` is never interpreted as a primary key — it's just a string. |
+| **One request, if you write the resolver to batch** | The core groups sibling requests of the same entity into a single `batch()` call. The N+1 fix is a contract, not magic.                    |
+| **The client defines the cache**                    | Cache specs travel with the query (`ttl=300`, `stale=60`) and a plugin enforces them. No hidden global cache to break.                     |
+| **Runs anywhere**                                   | The handler is a plain `(Request) => Promise<Response>`. Hono, Express, Cloudflare Workers, Bun, Deno, node:http — drop it in.             |
+| **Extensible by design**                            | Want a new data source? Write an adapter. New behavior? Write a hook. New wire format? `onBeforeSerialize`.                                |
 
 ## Features
 
-- **OQS — Orbit Query Syntax.** A minimal, explicit query language: `user(id="123") { name, posts(status="published") { title } }`. Values are passed to resolvers *verbatim*.
+- **OQS — Orbit Query Syntax.** A minimal, explicit query language: `user(id="123") { name, posts(status="published") { title } }`. Values are passed to resolvers _verbatim_.
 - **Hook-based plugin system.** Seven well-defined hooks (`onBeforeParse` → `onBeforeSerialize` + `onError`) with a strict pipeline order.
 - **N+1 batching.** Same-entity siblings collapse into one `batch()` call per level of the graph.
 - **Declarative caching.** TTL and stale-while-revalidate via a cache spec string, enforced by the built-in zero-dependency cache plugin.
@@ -72,7 +73,7 @@ That's why the core has **zero runtime dependencies**: a contract layer should b
 - **Realtime subscriptions.** A zero-dependency WebSocket transport (`createRealtimeServer`) streams adapter `subscribe` events to clients with per-subscription sequence numbers, retention across disconnects, and patch replay on `resume` — 100 clients share one adapter hook.
 - **Frozen contracts.** The `DataAdapter` interface (resolve/batch/mutate/subscribe) and the envelope are canonicalized in [`spec.md`](./spec.md) — realtime is designed into the adapter contract, and the WebSocket transport is shipped in v0.0.1.
 - **Framework-agnostic handler.** Works with `Request`/`Response` runtimes, or call `orbit.execute(envelope, ctx)` directly.
-- **Ecosystem packages.** `@orbit/rest` (fetch-based `DataAdapter`: queries → `GET`, mutations → `POST`/`PATCH`/`DELETE`), `@orbit/postgres` and `@orbit/mongo` (SQL and document-store `DataAdapter`s: parameterized `WHERE` / match documents, `IN`/`$in` batching, `create`/`update`/`delete` — injection-safe by construction), `@orbit/cache` (the cache plugin's dedicated distribution home and the `CacheStore` contract), `@orbit/redis` and `@orbit/kv-cache` (production cache stores for Redis and Cloudflare KV), `@orbit/auth` (authn/authz hooks — caller identity reaches queries **and** mutations), `@orbit/logging` (request-timing observability), `@orbit/rate-limit` (a zero-dep token-bucket plugin gating queries **and** mutations), the server wrappers `@orbit/express`, `@orbit/hono` and `@orbit/cloudflare-workers` (Workers-native WebSocket realtime included), and the two client packages — `@orbit/client` (vanilla: envelope requests, SSE streaming, multipart, WebSocket realtime with reconnect + resume) and `@orbit/react` (cache-aware React/RN bindings: hooks, TTL + SWR cache, protocol-driven invalidation, devtools) — ship alongside the frozen core — see [docs/ecosystem.md](./docs/ecosystem.md). Each package has its own README: [`@orbit/rest`](./packages/rest/README.md), [`@orbit/postgres`](./packages/postgres/README.md), [`@orbit/mongo`](./packages/mongo/README.md), [`@orbit/cache`](./packages/cache/README.md), [`@orbit/redis`](./packages/redis/README.md), [`@orbit/kv-cache`](./packages/kv-cache/README.md), [`@orbit/auth`](./packages/auth/README.md), [`@orbit/logging`](./packages/logging/README.md), [`@orbit/rate-limit`](./packages/rate-limit/README.md), [`@orbit/express`](./packages/express/README.md), [`@orbit/hono`](./packages/hono/README.md), [`@orbit/cloudflare-workers`](./packages/cloudflare-workers/README.md), [`@orbit/client`](./packages/client/README.md) and [`@orbit/react`](./packages/react/README.md).
+- **Ecosystem packages.** `@orbit/rest` (fetch-based `DataAdapter`: queries → `GET`, mutations → `POST`/`PATCH`/`DELETE`), `@orbit/cache` (the cache plugin's dedicated distribution home and the `CacheStore` contract), `@orbit/redis` and `@orbit/kv-cache` (production cache stores for Redis and Cloudflare KV), `@orbit/auth` (authn/authz hooks — caller identity reaches queries **and** mutations), `@orbit/logging` (request-timing observability), `@orbit/rate-limit` (a zero-dep token-bucket plugin gating queries **and** mutations), the server wrappers `@orbit/express`, `@orbit/hono` and `@orbit/cloudflare-workers` (Workers-native WebSocket realtime included), `@orbit/cors` (first-party CORS — allowlist, preflight and credentials as a plugin), and the two client packages — `@orbit/client` (vanilla: envelope requests, SSE streaming, multipart, WebSocket realtime with reconnect + resume) and `@orbit/react` (cache-aware React/RN bindings: hooks, TTL + SWR cache, protocol-driven invalidation, devtools) — ship alongside the frozen core. Database clients and adapters are intentionally not shipped: applications own persistence through their repository/ORM behind `DataAdapter`. See [docs/ecosystem.md](./docs/ecosystem.md). Each package has its own README: [`@orbit/rest`](./packages/rest/README.md), [`@orbit/cache`](./packages/cache/README.md), [`@orbit/redis`](./packages/redis/README.md), [`@orbit/kv-cache`](./packages/kv-cache/README.md), [`@orbit/auth`](./packages/auth/README.md), [`@orbit/logging`](./packages/logging/README.md), [`@orbit/rate-limit`](./packages/rate-limit/README.md), [`@orbit/express`](./packages/express/README.md), [`@orbit/hono`](./packages/hono/README.md), [`@orbit/cloudflare-workers`](./packages/cloudflare-workers/README.md), [`@orbit/cors`](./packages/cors/README.md), [`@orbit/client`](./packages/client/README.md) and [`@orbit/react`](./packages/react/README.md).
 - **Zero runtime dependencies.** `typescript` and `vitest` are dev-only. The whole protocol is a compact, typed ES2022 core — including the MessagePack codec and the WebSocket transport.
 
 ## When to use Orbit — and when not to
@@ -80,8 +81,8 @@ That's why the core has **zero runtime dependencies**: a contract layer should b
 **Use it when:**
 
 - **API gateway / BFF aggregation** — one round-trip for a graph that spans
-  several backends (a REST API behind `@orbit/rest`, Postgres, a queue, a
-  cache), each behind its own adapter.
+  several backends (a REST API behind `@orbit/rest`, your application’s
+  repository/ORM, a queue, a cache), each behind its own adapter.
 - **You're fighting N+1** — same-entity siblings batch into one adapter call
   per level of the graph; deep relations stop costing 1 + N + N×M requests.
 - **You want server-side caching with precise invalidation** — entity-scoped
@@ -94,7 +95,7 @@ That's why the core has **zero runtime dependencies**: a contract layer should b
   activity feeds, live dashboards.
 - **Uniform access to heterogeneous backends** — one endpoint, one query
   language, one error contract in front of many systems.
-- **Auth-gated query layers** — the hook pipeline gates reads *and* mutation
+- **Auth-gated query layers** — the hook pipeline gates reads _and_ mutation
   `return` re-queries the same way (no authorization bypass).
 
 **Don't use it when:**
@@ -108,12 +109,12 @@ That's why the core has **zero runtime dependencies**: a contract layer should b
 - **Complex analytics / OLAP** — there is no query planner, no aggregation, no
   cross-shape joins; heavy aggregation belongs in your database/warehouse, not
   in adapter functions.
-- **High-throughput event streaming *between* services** — Orbit is
+- **High-throughput event streaming _between_ services** — Orbit is
   request/reply (HTTP + client subscriptions); it is not a pub/sub bus and
   does not replace Kafka/NATS for service-to-service streams.
 - **Multi-service transactions / sagas** — mutations are single-adapter
   calls; there is no distributed-transaction story.
-- **Replacing your database or ORM** — it is a contract layer *in front of*
+- **Replacing your database or ORM** — it is a contract layer _in front of_
   them; the adapter is where your SQL/ORM lives.
 - **Simple CRUD on one table** — a plain REST endpoint already does this;
   Orbit's value shows up when you compose graphs, cache, stream or subscribe.
@@ -134,16 +135,16 @@ npm install @orbit/core
 ### 2. Write adapters (the "source of truth")
 
 ```ts
-import { createOrbit, memoryAdapter } from '@orbit/core';
+import { createOrbit, memoryAdapter } from "@orbit/core";
 
 const orbit = createOrbit({
   adapters: memoryAdapter([
     {
-      entity: 'user',
+      entity: "user",
       resolve: ({ id }) => users.find((u) => u.id === id),
     },
     {
-      entity: 'posts',
+      entity: "posts",
       // While resolving a relation, ctx.parent carries the resolved parent.
       resolve: ({ status }, ctx) => {
         let list = posts.filter((p) => p.authorId === ctx.parent?.data.id);
@@ -158,7 +159,7 @@ const orbit = createOrbit({
 ### 3. Mount plugins
 
 ```ts
-import { createCachePlugin } from '@orbit/core';
+import { createCachePlugin } from "@orbit/core";
 
 const orbit = createOrbit({
   adapters,
@@ -169,7 +170,7 @@ const orbit = createOrbit({
 ### 4. Mount the endpoint
 
 ```ts
-app.post('/orbit', (c) => orbit.handler(c.req.raw, c.env)); // Hono
+app.post("/orbit", (c) => orbit.handler(c.req.raw, c.env)); // Hono
 // or:  orbit.handler(req, env) // Workers / Bun / Deno
 // or:  orbit.handler(req)      // node:http (see examples/)
 ```
@@ -186,27 +187,32 @@ curl -s localhost:3000/orbit \
 { "data": { "name": "Ana", "posts": [{ "title": "Why Orbit?" }] } }
 ```
 
-See [examples/node/standalone-server.ts](./examples/node/standalone-server.ts) for a complete zero-dependency server (`pnpm run example`), [examples/starter](./examples/starter/) as the skeleton of a new project (the architecture, folder by folder, in [docs/project-structure.md](./docs/project-structure.md)), the [runnable examples](./docs/examples.md) for one facet each, [docs/benchmarks.md](./docs/benchmarks.md) for the B1–B11 numbers against measured graphql-js (including the real-HTTP wire path, the client/react-layer overhead stories and the cache-vs-DataLoader comparison), [docs/use-cases.md](./docs/use-cases.md) for where Orbit fits, [docs/security.md](./docs/security.md) for the threat model, [docs/ecosystem.md](./docs/ecosystem.md) for the first-party `@orbit/*` package plan, [docs/protocol-audit.md](./docs/protocol-audit.md) for the spec-vs-code verification, and [docs/spec-vision.md](./docs/spec-vision.md) for the north star behind the spec.
+See [examples/node/standalone-server.ts](./examples/node/standalone-server.ts) for a complete zero-dependency server (`pnpm run example`), [examples/starter](./examples/starter/) as the skeleton of a new project (the architecture, folder by folder, in [docs/project-structure.md](./docs/project-structure.md)), the [runnable examples](./docs/examples.md) for one facet each, [docs/comparison.md](./docs/comparison.md) for an honest **Orbit vs GraphQL vs tRPC vs Express** table (including where Orbit is behind), [docs/benchmarks.md](./docs/benchmarks.md) for the B1–B11 numbers against measured graphql-js (including the real-HTTP wire path, the client/react-layer overhead stories and the cache-vs-DataLoader comparison), [docs/use-cases.md](./docs/use-cases.md) for where Orbit fits, [docs/security.md](./docs/security.md) for the threat model, [docs/ecosystem.md](./docs/ecosystem.md) for the first-party `@orbit/*` package plan, [docs/protocol-audit.md](./docs/protocol-audit.md) for the spec-vs-code verification, and [docs/spec-vision.md](./docs/spec-vision.md) for the north star behind the spec.
+
+A **Zig client** for the protocol lives in [`clients/zig/`](./clients/zig/) — zero
+dependencies, `zig build test` green, covering queries, mutations, batch `ops`,
+the error contract and the realtime frame protocol. See its
+[README](./clients/zig/README.md) for the support matrix.
 
 ## Query syntax at a glance
 
-| Construct | Example | Meaning |
-| :--- | :--- | :--- |
-| Entity root | `user(id="123")` | Resolve `user` with filter `{ id: "123" }` |
-| Fields | `{ name, email }` | Project only these leaf fields |
-| Relations | `{ posts(status="published") { title } }` | Resolve `posts` per parent, with its own filters |
-| Bare values | `posts(id=42)` | `"42"` passed verbatim (strings stay strings) |
-| Mutations | `{ "do": "user.update", "args": {...} }` | Adapter `mutate` with `filter`/`payload` |
-| Re-query after mutation | `"return": "user(id=\"123\") { name }"` | Optional sub-graph in the mutation response |
+| Construct               | Example                                   | Meaning                                          |
+| :---------------------- | :---------------------------------------- | :----------------------------------------------- |
+| Entity root             | `user(id="123")`                          | Resolve `user` with filter `{ id: "123" }`       |
+| Fields                  | `{ name, email }`                         | Project only these leaf fields                   |
+| Relations               | `{ posts(status="published") { title } }` | Resolve `posts` per parent, with its own filters |
+| Bare values             | `posts(id=42)`                            | `"42"` passed verbatim (strings stay strings)    |
+| Mutations               | `{ "do": "user.update", "args": {...} }`  | Adapter `mutate` with `filter`/`payload`         |
+| Re-query after mutation | `"return": "user(id=\"123\") { name }"`   | Optional sub-graph in the mutation response      |
 
 ## Caching
 
 Attach a cache spec to any request — in the envelope or the `x-orbit-cache` header — and the cache plugin enforces it:
 
-| Spec | Behavior |
-| :--- | :--- |
-| `ttl=300` | Serve while younger than 300 s, refetch after |
-| `stale=60` | Always serve; refresh in the background past 60 s |
+| Spec               | Behavior                                                               |
+| :----------------- | :--------------------------------------------------------------------- |
+| `ttl=300`          | Serve while younger than 300 s, refetch after                          |
+| `stale=60`         | Always serve; refresh in the background past 60 s                      |
 | `ttl=300,stale=60` | Fresh for 300 s; serve + background refresh until 360 s; refetch after |
 
 ```ts
@@ -235,40 +241,40 @@ semantics the core refuses to own. See [docs/plugins.md](./docs/plugins.md#built
 
 Every failure is an `OrbitError` with a standard code and a correct HTTP status:
 
-| Code | HTTP | Meaning |
-| :--- | :--- | :--- |
-| `ORBIT_INVALID_QUERY` | 400 | OQS syntax or envelope problem |
-| `ORBIT_ENTITY_UNREGISTERED` | 404 | No adapter for the requested entity |
-| `ORBIT_FILTER_INVALID` | 400 | The resolver rejected the filters |
-| `ORBIT_PERMISSION_DENIED` | 403 | Fired by an auth hook |
-| `ORBIT_MAX_DEPTH_EXCEEDED` | 400 | Query nests deeper than the configured maximum |
-| `ORBIT_PAYLOAD_TOO_LARGE` | 413 | Envelope exceeds the configured size limit |
-| `ORBIT_MUTATION_FAILED` | 500 | The mutation could not be executed |
-| `ORBIT_INTERNAL` | 500 | Anything unexpected |
+| Code                        | HTTP | Meaning                                        |
+| :-------------------------- | :--- | :--------------------------------------------- |
+| `ORBIT_INVALID_QUERY`       | 400  | OQS syntax or envelope problem                 |
+| `ORBIT_ENTITY_UNREGISTERED` | 404  | No adapter for the requested entity            |
+| `ORBIT_FILTER_INVALID`      | 400  | The resolver rejected the filters              |
+| `ORBIT_PERMISSION_DENIED`   | 403  | Fired by an auth hook                          |
+| `ORBIT_MAX_DEPTH_EXCEEDED`  | 400  | Query nests deeper than the configured maximum |
+| `ORBIT_PAYLOAD_TOO_LARGE`   | 413  | Envelope exceeds the configured size limit     |
+| `ORBIT_MUTATION_FAILED`     | 500  | The mutation could not be executed             |
+| `ORBIT_INTERNAL`            | 500  | Anything unexpected                            |
 
 ## Documentation
 
-| Doc | What's inside |
-| :--- | :--- |
-| [OQS — Query Syntax](./docs/oqs.md) | Full grammar, examples, error cases |
-| [Plugins](./docs/plugins.md) | Hook reference, the pipeline order, writing plugins, the cache plugin |
-| [Ecosystem](./docs/ecosystem.md) | The `@orbit/*` package blueprint — contracts, scaffolding, build order |
-| [Adapters](./docs/adapters.md) | The frozen adapter contract, batching, mutations, realtime `subscribe` |
-| [Realtime](./docs/realtime.md) | WebSocket subscriptions, resume/delta sync, heartbeats — zero-dep RFC 6455 |
-| [Serialization](./docs/serialization.md) | JSON, MessagePack, SSE streaming, gzip — `Accept`/`Accept-Encoding` negotiation |
-| [Benchmarks](./docs/benchmarks.md) | B1–B11 vs measured graphql-js — latency, round-trips, throughput, payload, streaming, realtime, real-HTTP wire path, client + react-layer overhead, cache-vs-DataLoader |
-| [Security](./docs/security.md) | Threat model: payload/depth limits, prototype-pollution hardening, realtime protocol defenses |
-| [Examples](./docs/examples.md) | The runnable examples, tour and reading order |
-| [Architecture](./docs/architecture.md) | How the engine executes a query, serialization, extension points |
-| [Project structure](./docs/project-structure.md) | How to structure a new Orbit project — the five layers, import rules, growth path |
-| [Server integration](./docs/server.md) | Express, Hono, Cloudflare Workers (fetch handler + native realtime), Bun, Deno, node:http |
-| [Client](./docs/client.md) | `@orbit/client` — the vanilla transport client: queries, mutations, SSE, realtime, uploads |
-| [Errors](./docs/errors.md) | Error reference and the `onError` hook |
-| [Protocol audit](./docs/protocol-audit.md) | Spec-vs-code verification — every inconsistency found and fixed, what remains |
-| [Use cases](./docs/use-cases.md) | Where Orbit fits — social, e-commerce, dashboards, IoT — with real code for each |
-| [Spec vision](./docs/spec-vision.md) | The north star: principles as filters, guardrails against drift, alignment of recent work |
-| [Protocol spec](./spec.md) | The canonical, frozen contract — envelope, errors, adapters, realtime & roadmap |
-| [Changelog](./CHANGELOG.md) | Version history |
+| Doc                                              | What's inside                                                                                                                                                           |
+| :----------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [OQS — Query Syntax](./docs/oqs.md)              | Full grammar, examples, error cases                                                                                                                                     |
+| [Plugins](./docs/plugins.md)                     | Hook reference, the pipeline order, writing plugins, the cache plugin                                                                                                   |
+| [Ecosystem](./docs/ecosystem.md)                 | The `@orbit/*` package blueprint — contracts, scaffolding, build order                                                                                                  |
+| [Adapters](./docs/adapters.md)                   | The frozen adapter contract, batching, mutations, realtime `subscribe`                                                                                                  |
+| [Realtime](./docs/realtime.md)                   | WebSocket subscriptions, resume/delta sync, heartbeats — zero-dep RFC 6455                                                                                              |
+| [Serialization](./docs/serialization.md)         | JSON, MessagePack, SSE streaming, gzip — `Accept`/`Accept-Encoding` negotiation                                                                                         |
+| [Benchmarks](./docs/benchmarks.md)               | B1–B11 vs measured graphql-js — latency, round-trips, throughput, payload, streaming, realtime, real-HTTP wire path, client + react-layer overhead, cache-vs-DataLoader |
+| [Security](./docs/security.md)                   | Threat model: payload/depth limits, prototype-pollution hardening, realtime protocol defenses                                                                           |
+| [Examples](./docs/examples.md)                   | The runnable examples, tour and reading order                                                                                                                           |
+| [Architecture](./docs/architecture.md)           | How the engine executes a query, serialization, extension points                                                                                                        |
+| [Project structure](./docs/project-structure.md) | How to structure a new Orbit project — the five layers, import rules, growth path                                                                                       |
+| [Server integration](./docs/server.md)           | Express, Hono, Cloudflare Workers (fetch handler + native realtime), Bun, Deno, node:http                                                                               |
+| [Client](./docs/client.md)                       | `@orbit/client` — the vanilla transport client: queries, mutations, SSE, realtime, uploads                                                                              |
+| [Errors](./docs/errors.md)                       | Error reference and the `onError` hook                                                                                                                                  |
+| [Protocol audit](./docs/protocol-audit.md)       | Spec-vs-code verification — every inconsistency found and fixed, what remains                                                                                           |
+| [Use cases](./docs/use-cases.md)                 | Where Orbit fits — social, e-commerce, dashboards, IoT — with real code for each                                                                                        |
+| [Spec vision](./docs/spec-vision.md)             | The north star: principles as filters, guardrails against drift, alignment of recent work                                                                               |
+| [Protocol spec](./spec.md)                       | The canonical, frozen contract — envelope, errors, adapters, realtime & roadmap                                                                                         |
+| [Changelog](./CHANGELOG.md)                      | Version history                                                                                                                                                         |
 
 ## Development
 

@@ -37,9 +37,24 @@ export function App() {
 | --- | --- |
 | `useOrbitQuery(key, query, options)` | Read with the cache: fresh → instant, stale → instant + background refresh, missing → fetch. |
 | `useOrbitMutation(spec, options)` | `{ do, args?, return? }`; `invalidates` entities evict the cache automatically; `signal`/`timeoutMs` cancel a hanging mutation. |
-| `useOrbitSubscription(key, query, options)` | Live events over the shared WebSocket (reconnect + `resume` handled by the transport). |
+| `useOrbitSubscription(key, query, options)` | Live events over the shared WebSocket (reconnect + `resume` handled by the transport). Refetches automatically if the stream is detected to have a hole — see below. |
 | `useOrbitStream(key, query, options)` | SSE levels as they arrive (`frames` grows, `isDone` at the end). |
 | `useOrbitClient()` | The imperative cache API from any component. |
+
+### Lost realtime events
+
+A subscription's server-side retention is bounded, so a client that was away
+long enough would otherwise render **silently stale** data: valid-looking rows
+with missing changes. Orbit makes that impossible rather than leaving it to the
+app — `useOrbitSubscription` counts gaps in `state.gaps`, calls `onGap`, and
+**refetches the query** so the rendered data heals. The subscription stays open
+and keeps applying patches while the refetch is in flight.
+
+```tsx
+const { data, gaps } = useOrbitSubscription(['chat'], 'chat { id }', {
+  onGap: () => toast('Resyncing…'),
+});
+```
 
 ## Imperative cache API
 

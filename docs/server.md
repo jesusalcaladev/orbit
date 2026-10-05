@@ -5,8 +5,8 @@ Orbit's handler is a plain `(request: Request, ctx?: OrbitContext) => Promise<Re
 ## node:http (zero dependencies)
 
 ```ts
-import { createServer } from 'node:http';
-import { createOrbit, memoryAdapter, createCachePlugin } from '@orbit/core';
+import { createServer } from "node:http";
+import { createOrbit, memoryAdapter, createCachePlugin } from "@orbit/core";
 
 const orbit = createOrbit({ adapters, plugins: [createCachePlugin()] });
 
@@ -14,13 +14,13 @@ const server = createServer(async (req, res) => {
   const chunks: Buffer[] = [];
   for await (const chunk of req) chunks.push(chunk as Buffer);
   const response = await orbit.handler(
-    new Request('http://localhost:3000/orbit', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: Buffer.concat(chunks).toString('utf8'),
+    new Request("http://localhost:3000/orbit", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: Buffer.concat(chunks).toString("utf8"),
     }),
   );
-  res.writeHead(response.status, { 'content-type': 'application/json' });
+  res.writeHead(response.status, { "content-type": "application/json" });
   res.end(await response.text());
 });
 ```
@@ -30,45 +30,48 @@ A complete version ships in [examples/node/standalone-server.ts](../examples/nod
 ## Hono
 
 ```ts
-import { Hono } from 'hono';
-import { createOrbit, createCachePlugin } from '@orbit/core';
-import { createPostgresAdapter } from '@orbit/postgres'; // any DataAdapter[] or AdapterRegistry
+import { Hono } from "hono";
+import { createOrbit, createCachePlugin } from "@orbit/core";
 
 const orbit = createOrbit({
-  adapters: [createPostgresAdapter({ entity: 'users', client })],
+  adapters: [userRepositoryAdapter], // your DataAdapter
   plugins: [createCachePlugin()],
 });
 
 const app = new Hono();
-app.post('/orbit', (c) => orbit.handler(c.req.raw, c.env));
+app.post("/orbit", (c) => orbit.handler(c.req.raw, c.env));
 ```
 
 Or use the thin wrapper — same thing, one line:
 
 ```ts
-import { createHonoApp } from '@orbit/hono';
-const app = createHonoApp(orbit, { path: '/orbit' });
+import { createHonoApp } from "@orbit/hono";
+const app = createHonoApp(orbit, { path: "/orbit" });
 ```
 
 ## Express
 
 ```ts
-import express from 'express';
-import { createOrbit } from '@orbit/core';
+import express from "express";
+import { createOrbit } from "@orbit/core";
 
-const orbit = createOrbit({ /* adapters, plugins */ });
+const orbit = createOrbit({/* adapters, plugins */});
 const app = express();
 
-app.post('/orbit', async (req, res) => {
-  const body = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+app.post("/orbit", async (req, res) => {
+  const body =
+    typeof req.body === "string" ? req.body : JSON.stringify(req.body);
   const response = await orbit.handler(
     new Request(`http://${req.headers.host}${req.originalUrl}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      method: "POST",
+      headers: { "content-type": "application/json" },
       body,
     }),
   );
-  res.status(response.status).type('application/json').send(await response.text());
+  res
+    .status(response.status)
+    .type("application/json")
+    .send(await response.text());
 });
 ```
 
@@ -76,15 +79,15 @@ Or use the thin wrapper — it reads the raw body itself, so no `express.json()`
 is needed and MessagePack / multipart uploads keep working:
 
 ```ts
-import { createExpressApp } from '@orbit/express';
-const app = createExpressApp(orbit, { path: '/orbit' });
+import { createExpressApp } from "@orbit/express";
+const app = createExpressApp(orbit, { path: "/orbit" });
 ```
 
 Both wrappers (`@orbit/express`, `@orbit/hono`) also mount the realtime
 WebSocket transport on the same http server:
 
 ```ts
-import { attachRealtime } from '@orbit/express';
+import { attachRealtime } from "@orbit/express";
 const server = app.listen(3000);
 const realtime = attachRealtime(server, orbit); // ws://localhost:3000/realtime
 ```
@@ -104,20 +107,23 @@ Zero Node APIs — the engine is a fetch handler, and realtime uses the
 Workers-native `WebSocketPair` upgrade:
 
 ```ts
-import { createOrbit, memoryAdapter } from '@orbit/core';
-import { createWorker } from '@orbit/cloudflare-workers';
+import { createOrbit, memoryAdapter } from "@orbit/core";
+import { createWorker } from "@orbit/cloudflare-workers";
 
 const orbit = createOrbit({
   adapters: memoryAdapter([
-    { entity: 'user', resolve: ({ id }) => users.find((u) => u.id === id) },
+    { entity: "user", resolve: ({ id }) => users.find((u) => u.id === id) },
   ]),
 });
 
 export default createWorker({
   orbit,
-  path: '/api/orbit',
-  realtime: { path: '/realtime', authorize: (request, env) => request.headers.get('x-key') === env.API_KEY },
-  ctx: (request) => ({ state: { viewer: request.headers.get('x-user-id') } }),
+  path: "/api/orbit",
+  realtime: {
+    path: "/realtime",
+    authorize: (request, env) => request.headers.get("x-key") === env.API_KEY,
+  },
+  ctx: (request) => ({ state: { viewer: request.headers.get("x-user-id") } }),
 });
 ```
 
@@ -135,6 +141,51 @@ no cross-connection `resume` (that needs Durable Objects — future work) and
 no application-level heartbeats (the platform keeps connections alive). See
 `docs/realtime.md`.
 
+## Next.js
+
+The handler is a fetch function, so it drops straight into App Router route
+handlers — with **one round-trip per graph** and no extra infrastructure:
+
+```ts
+// app/api/orbit/route.ts
+import { createOrbit, memoryAdapter, createCachePlugin } from "@orbit/core";
+import { createCorsPlugin } from "@orbit/cors";
+
+const orbit = createOrbit({
+  adapters: memoryAdapter([
+    { entity: "user", resolve: ({ id }) => users.find((u) => u.id === id) },
+  ]),
+  plugins: [
+    createCorsPlugin({ origins: ["https://app.example"], credentials: true }),
+    createCachePlugin(),
+  ],
+});
+
+export const POST = (request: Request) => orbit.handler(request);
+export const GET = (request: Request) => orbit.handler(request); // CDN-cacheable reads
+export const OPTIONS = (request: Request) => orbit.handler(request); // CORS preflights → 204
+```
+
+Notes for the Next.js host:
+
+- **Same-origin server-to-server calls skip HTTP entirely** — from a Server
+  Component or a Route Handler, call `orbit.execute({ query: '…' }, ctx)`
+  directly against the same engine instance (no fetch to your own API, no
+  self-request deadlock risk).
+- **Cross-origin browser calls** need CORS: mount `@orbit/cors` (above) or
+  set `Access-Control-*` via `ctx.responseHeaders` — the engine merges them
+  into every response, errors included.
+- **Cookies**: read `request.headers` inside an `authenticate` hook
+  (`@orbit/auth`) or any plugin; write `set-cookie` via `ctx.responseHeaders`.
+- **Streaming (SSE) and MessagePack** negotiate normally from `Accept` —
+  no Next.js-specific configuration needed. Realtime WebSocket subscriptions
+  are not supported on the App Router runtime (no Upgrade hook) — host the
+  core transport (`createRealtimeServer` / `attachRealtime`) on a Node side
+  server or use `@orbit/cloudflare-workers` for Workers-native realtime.
+- The engine must be a **module singleton** (top-level `createOrbit`, as
+  above) so the parse cache, in-memory stores and plugins persist across
+  invocations.
+
 ## Bun
 
 ```ts
@@ -150,11 +201,11 @@ Deno.serve({ port: 3000 }, (req) => orbit.handler(req));
 ## Calling the endpoint
 
 ```ts
-const res = await fetch('http://localhost:3000/orbit', {
-  method: 'POST',
+const res = await fetch("http://localhost:3000/orbit", {
+  method: "POST",
   headers: {
-    'content-type': 'application/json',
-    'x-orbit-cache': 'ttl=60',      // optional cache spec
+    "content-type": "application/json",
+    "x-orbit-cache": "ttl=60", // optional cache spec
   },
   body: JSON.stringify({
     query: 'user(id="123") { name, posts(status="published") { title } }',
@@ -177,12 +228,15 @@ plugin-serialized bodies AND error responses):
 
 ```ts
 const loginPlugin: OrbitPlugin = {
-  name: 'session-cookie',
+  name: "session-cookie",
   hooks: {
     onAfterParse({ ctx }) {
       // A session cookie issued by the protocol itself.
       ctx.responseHeaders = {
-        'set-cookie': ['sid=abc; HttpOnly; Path=/; SameSite=Lax', 'theme=dark; Path=/'],
+        "set-cookie": [
+          "sid=abc; HttpOnly; Path=/; SameSite=Lax",
+          "theme=dark; Path=/",
+        ],
       };
     },
   },
@@ -217,7 +271,7 @@ no-store`, and SSE responses carry `cache-control: no-cache`.
 ```ts
 const result = await orbit.execute(
   { query: 'user(id="1") { name }' },
-  { state: { viewer: 'ana' } }, // your auth context
+  { state: { viewer: "ana" } }, // your auth context
 );
 // result: { status: 200, data: { name: 'Ana' }, fromCache: false, contentType: 'application/json; charset=utf-8' }
 ```
@@ -226,7 +280,7 @@ const result = await orbit.execute(
 
 Orbit supports file uploads **natively in the handler** — no plugin, no
 framework, no new dependency. The frozen envelope contract is untouched:
-files are *context*, never envelope fields.
+files are _context_, never envelope fields.
 
 ### Client side
 
@@ -235,13 +289,16 @@ one field per file:
 
 ```ts
 const form = new FormData();
-form.set('envelope', JSON.stringify({
-  do: 'user.uploadAvatar',
-  args: { filter: { id: '1' } },
-}));
-form.set('avatar', avatarFile, 'me.png');
+form.set(
+  "envelope",
+  JSON.stringify({
+    do: "user.uploadAvatar",
+    args: { filter: { id: "1" } },
+  }),
+);
+form.set("avatar", avatarFile, "me.png");
 
-await fetch('/orbit', { method: 'POST', body: form });
+await fetch("/orbit", { method: "POST", body: form });
 ```
 
 ### Server side
@@ -251,13 +308,16 @@ name) — the adapter reads it in `mutate`:
 
 ```ts
 const adapter: DataAdapter = {
-  entity: 'user',
+  entity: "user",
   async mutate(action, args, ctx) {
-    const file = ctx.files?.['avatar'];   // a File — name, type, size, bytes
-    if (action === 'uploadAvatar' && file) {
-      await s3.putObject({ key: `${ctx.state.viewer}/${file.name}`, body: file });
+    const file = ctx.files?.["avatar"]; // a File — name, type, size, bytes
+    if (action === "uploadAvatar" && file) {
+      await s3.putObject({
+        key: `${ctx.state.viewer}/${file.name}`,
+        body: file,
+      });
     }
-    return { id: '1', invalidates: ['cache:user:1'] };
+    return { id: "1", invalidates: ["cache:user:1"] };
   },
 };
 ```
@@ -277,11 +337,24 @@ const adapter: DataAdapter = {
 - Plugins see `ctx.files` in query hooks (mutations run only `adapter.mutate`,
   no pipeline), e.g. for size/type validation gates.
 
-## Payload and depth configuration
+## Query cost limits
+
+Depth alone does not bound the work a query can ask for: `user { a, b, … ×5000 }`
+is one level deep but fans out into thousands of columns. Two more caps close
+that shape, and they are enforced in the **parser** — so they apply to every
+entry point (`execute`, the `handler`, SSE, and realtime subscriptions).
 
 ```ts
 createOrbit({
-  maxQueryDepth: 8,       // default 10
+  maxQueryDepth: 8, // default 10      — nesting levels
+  maxQueryBreadth: 64, // default 128    — selections on a SINGLE node
+  maxQueryComplexity: 512, // default 1024 — selections in the WHOLE tree
   maxPayloadBytes: 1_000_000, // default 10 MiB
 });
 ```
+
+`maxQueryBreadth` bounds fan-out at one level; `maxQueryComplexity` bounds the
+total, catching the many-mid-width-nodes shape (`a { 100 fields, b { 100 … } }`)
+that a per-node cap alone would admit. Exceeding either throws
+`ORBIT_MAX_BREADTH_EXCEEDED` / `ORBIT_MAX_COMPLEXITY_EXCEEDED` (both 400) with
+`details` naming the entity, field and position at which the budget ran out.

@@ -14,44 +14,46 @@ pnpm add @orbit/rest
 ## Quick start
 
 ```ts
-import { createOrbit } from '@orbit/core';
-import { createRestAdapter } from '@orbit/rest';
+import { createOrbit } from "@orbit/core";
+import { createRestAdapter } from "@orbit/rest";
 
 const orbit = createOrbit({
   adapters: [
-    createRestAdapter({ entity: 'user', baseUrl: 'https://api.example.com/v1' }),
+    createRestAdapter({
+      entity: "user",
+      baseUrl: "https://api.example.com/v1",
+    }),
   ],
 });
 ```
 
-> Naming note: `createRestAdapter` matches the other first-party factories
-> (`createMongoAdapter`, `createPostgresAdapter`). The historical
+> Naming note: `createRestAdapter` is the canonical factory. The historical
 > `restAdapter` name is kept as an alias.
 
 Mapping:
 
-| Orbit | REST |
-| :--- | :--- |
-| `query user(id="42") { name }` | `GET /v1/user/42` |
-| `query user { name }` | `GET /v1/user` |
+| Orbit                                                               | REST                                         |
+| :------------------------------------------------------------------ | :------------------------------------------- |
+| `query user(id="42") { name }`                                      | `GET /v1/user/42`                            |
+| `query user { name }`                                               | `GET /v1/user`                               |
 | `do user.update { filter: { id: "42" }, payload: { name: "Ada" } }` | `PATCH /v1/user/42` with `{ "name": "Ada" }` |
-| `do user.create { payload: { name: "Ada" } }` | `POST /v1/user` |
-| `do user.delete { filter: { id: "42" } }` | `DELETE /v1/user/42` |
+| `do user.create { payload: { name: "Ada" } }`                       | `POST /v1/user`                              |
+| `do user.delete { filter: { id: "42" } }`                           | `DELETE /v1/user/42`                         |
 
 ## Options
 
 ### `createRestAdapter({ entity, baseUrl, path?, headers?, fetchFn?, parentKey?, unwrap?, mutations? })`
 
-| Option | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `entity` | `string` | — | Entity name this adapter serves — must match query roots and relations |
-| `baseUrl` | `string` | — | Base URL of the REST API, e.g. `https://api.example.com/v1` |
-| `path?` | `string` | `entity` | Path segment for this entity, e.g. `users` |
-| `headers?` | `HeadersInit` \| `() => HeadersInit \| Promise<HeadersInit>` | — | Static headers, or a function returning them (e.g. an auth token) |
-| `fetchFn?` | `typeof fetch` | global `fetch` | The fetch implementation — handy in tests and non-standard runtimes |
-| `parentKey?` | `string` | — | When resolving a relation under a parent record, inject a query parameter named `parentKey` whose value is the parent's `id` |
-| `unwrap?` | `(json: unknown) => unknown` | identity | Extract the payload from a JSON response body, e.g. `({ data }) => data` |
-| `mutations?` | `Record<string, RestMutationSpec>` | `create→POST`, `update→PATCH`, `delete→DELETE` | Per-action HTTP mapping; unknown actions reject |
+| Option       | Type                                                         | Default                                        | Description                                                                                                                  |
+| :----------- | :----------------------------------------------------------- | :--------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------- |
+| `entity`     | `string`                                                     | —                                              | Entity name this adapter serves — must match query roots and relations                                                       |
+| `baseUrl`    | `string`                                                     | —                                              | Base URL of the REST API, e.g. `https://api.example.com/v1`                                                                  |
+| `path?`      | `string`                                                     | `entity`                                       | Path segment for this entity, e.g. `users`                                                                                   |
+| `headers?`   | `HeadersInit` \| `() => HeadersInit \| Promise<HeadersInit>` | —                                              | Static headers, or a function returning them (e.g. an auth token)                                                            |
+| `fetchFn?`   | `typeof fetch`                                               | global `fetch`                                 | The fetch implementation — handy in tests and non-standard runtimes                                                          |
+| `parentKey?` | `string`                                                     | —                                              | When resolving a relation under a parent record, inject a query parameter named `parentKey` whose value is the parent's `id` |
+| `unwrap?`    | `(json: unknown) => unknown`                                 | identity                                       | Extract the payload from a JSON response body, e.g. `({ data }) => data`                                                     |
+| `mutations?` | `Record<string, RestMutationSpec>`                           | `create→POST`, `update→PATCH`, `delete→DELETE` | Per-action HTTP mapping; unknown actions reject                                                                              |
 
 ### Relations
 
@@ -60,9 +62,9 @@ nested under `user`:
 
 ```ts
 createRestAdapter({
-  entity: 'posts',
-  baseUrl: 'https://api.example.com/v1',
-  parentKey: 'authorId', // GET /v1/posts?authorId=<parent.id>
+  entity: "posts",
+  baseUrl: "https://api.example.com/v1",
+  parentKey: "authorId", // GET /v1/posts?authorId=<parent.id>
 });
 ```
 
@@ -70,11 +72,11 @@ createRestAdapter({
 
 ```ts
 createRestAdapter({
-  entity: 'user',
-  baseUrl: 'https://api.example.com/v1',
+  entity: "user",
+  baseUrl: "https://api.example.com/v1",
   mutations: {
-    archive: { method: 'POST', path: 'users/archive' },
-    restore: { method: 'POST', path: 'users/restore' },
+    archive: { method: "POST", path: "users/archive" },
+    restore: { method: "POST", path: "users/restore" },
   },
 });
 ```

@@ -44,15 +44,15 @@ my-app/
 
 ## The import matrix — what each layer may import
 
-| Layer | `domain` | `adapters` | `plugins` | `@orbit/*` | HTTP / framework | `process.env` |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| `src/domain/` | — | ❌ | ❌ | ❌ | ❌ | ❌ |
-| `src/adapters/` | ✅ | — | ✅ (errors/roles) | ✅ | ❌ | ❌ |
-| `src/plugins/` | ❌ | ❌ | — | ✅ | ❌ | ❌ |
-| `src/app.ts` | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ (takes `Config`) |
-| `src/server/` | ❌ | ❌ | ✅ (authn) | ✅ | ✅ | ❌ (takes `Config`) |
-| `src/index.ts` | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ (`loadConfig()`) |
-| `test/` | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| Layer           | `domain` | `adapters` |     `plugins`     | `@orbit/*` | HTTP / framework |    `process.env`    |
+| :-------------- | :------: | :--------: | :---------------: | :--------: | :--------------: | :-----------------: |
+| `src/domain/`   |    —     |     ❌     |        ❌         |     ❌     |        ❌        |         ❌          |
+| `src/adapters/` |    ✅    |     —      | ✅ (errors/roles) |     ✅     |        ❌        |         ❌          |
+| `src/plugins/`  |    ❌    |     ❌     |         —         |     ✅     |        ❌        |         ❌          |
+| `src/app.ts`    |    ✅    |     ✅     |        ✅         |     ✅     |        ❌        | ❌ (takes `Config`) |
+| `src/server/`   |    ❌    |     ❌     |    ✅ (authn)     |     ✅     |        ✅        | ❌ (takes `Config`) |
+| `src/index.ts`  |    ❌    |     ❌     |        ❌         |     ✅     |        ✅        | ✅ (`loadConfig()`) |
+| `test/`         |    ❌    |     ❌     |        ❌         |     ✅     |        ❌        |         ❌          |
 
 Two lines matter most: **the domain never imports Orbit** (business logic
 survives any protocol or database swap) and **only `config.ts` reads the
@@ -60,14 +60,14 @@ environment** (everything else is testable as a pure function).
 
 ## Why this shape maps to the protocol
 
-| Orbit idea | Where it lives in the tree |
-| :--- | :--- |
-| "The developer knows how to fetch data" | `domain/` owns queries and validation; adapters pass filters **verbatim** |
-| N+1 batching is a contract | sibling relations collapse into one `batch()` call per level — implement `batch()` (or use `memoryAdapter`) in `adapters/` |
-| Auth is a hook, not a framework feature | `plugins/authz.ts` runs `onBeforeResolve` — enforced for every host and for direct `execute()` calls |
-| The client defines the cache | `createCachePlugin()` in `app.ts`; spec travels on the envelope (`cache: 'ttl=300'`) or `x-orbit-cache` header |
-| One engine, many hosts | `app.ts` returns the engine; `server/` files are disposable adapters around it |
-| Errors are a contract | adapters translate domain `Error`s into `OrbitError` codes (`FILTER_INVALID`, `PERMISSION_DENIED`, …) |
+| Orbit idea                              | Where it lives in the tree                                                                                                 |
+| :-------------------------------------- | :------------------------------------------------------------------------------------------------------------------------- |
+| "The developer knows how to fetch data" | `domain/` owns queries and validation; adapters pass filters **verbatim**                                                  |
+| N+1 batching is a contract              | sibling relations collapse into one `batch()` call per level — implement `batch()` (or use `memoryAdapter`) in `adapters/` |
+| Auth is a hook, not a framework feature | `plugins/authz.ts` runs `onBeforeResolve` — enforced for every host and for direct `execute()` calls                       |
+| The client defines the cache            | `createCachePlugin()` in `app.ts`; spec travels on the envelope (`cache: 'ttl=300'`) or `x-orbit-cache` header             |
+| One engine, many hosts                  | `app.ts` returns the engine; `server/` files are disposable adapters around it                                             |
+| Errors are a contract                   | adapters translate domain `Error`s into `OrbitError` codes (`FILTER_INVALID`, `PERMISSION_DENIED`, …)                      |
 
 ### The authentication / authorization split
 
@@ -83,30 +83,31 @@ the HTTP layer: it works until something else calls the engine.
 Hooks run in registration order (spec §11). Register **policy plugins before
 the cache plugin**: otherwise a cache hit could short-circuit before the
 policy runs and serve gated data to an unauthenticated caller. The cache
-plugin goes last anyway (it must store the *final* payload — anything with
+plugin goes last anyway (it must store the _final_ payload — anything with
 an `onBeforeSerialize` hook registers before it).
 
 ## Where each first-party package lands
 
-| Package | Layer in this architecture |
-| :--- | :--- |
-| `@orbit/postgres`, `@orbit/mongo`, `@orbit/rest` | `adapters/` — they *are* `DataAdapter`s over injected clients |
-| `@orbit/auth`, `@orbit/rate-limit`, `@orbit/logging`, `@orbit/metrics` | `plugins/` — mounted in `app.ts` |
-| `@orbit/cache`, `@orbit/redis`, `@orbit/kv-cache` | `app.ts` — `createCachePlugin({ store })` |
-| `@orbit/express`, `@orbit/hono`, `@orbit/cloudflare-workers` | replace `server/` + `index.ts` (the engine doesn't change) |
-| `@orbit/client`, `@orbit/react` | the frontend — envelope calls, SSE, realtime, hooks + cache |
+| Package                                                                | Layer in this architecture                                          |
+| :--------------------------------------------------------------------- | :------------------------------------------------------------------ |
+| `@orbit/rest`                                                          | `adapters/` — a fetch-based `DataAdapter` for an existing HTTP API  |
+| Application-owned persistence adapters                                 | `adapters/` + `domain/` — wrap the repository, ORM, or database SDK |
+| `@orbit/auth`, `@orbit/rate-limit`, `@orbit/logging`, `@orbit/metrics` | `plugins/` — mounted in `app.ts`                                    |
+| `@orbit/cache`, `@orbit/redis`, `@orbit/kv-cache`                      | `app.ts` — `createCachePlugin({ store })`                           |
+| `@orbit/express`, `@orbit/hono`, `@orbit/cloudflare-workers`           | replace `server/` + `index.ts` (the engine doesn't change)          |
+| `@orbit/client`, `@orbit/react`                                        | the frontend — envelope calls, SSE, realtime, hooks + cache         |
 
 ## Growing the starter — one file per decision
 
-| When you need… | Change | Where |
-| :--- | :--- | :--- |
-| A real database | repository backed by `pg` / `mongodb` (or `@orbit/postgres` / `@orbit/mongo` directly) | `domain/` + `adapters/` |
-| An existing REST backend | `@orbit/rest` fetch adapter | `adapters/index.ts` |
-| Shared cache / multi-instance | `createRedisCacheStore` / `createKvCacheStore` | `app.ts` |
-| Distributed rate limiting | `@orbit/rate-limit` + `createRedisRateLimitStore` | `app.ts` |
-| A framework host | `@orbit/express` / `@orbit/hono` wrapper; authn mapping rides `ctx:` | replace `server/` |
-| Realtime | adapter `subscribe` hook + `attachRealtime(server, orbit)` | `adapters/` + host |
-| Larger payloads on the wire | nothing — msgpack/SSE/gzip are negotiated by `Accept` | — |
+| When you need…                | Change                                                                                                          | Where                   |
+| :---------------------------- | :-------------------------------------------------------------------------------------------------------------- | :---------------------- |
+| A real database               | write an adapter around the application's repository/ORM/SDK; keep the driver and migrations private to the app | `domain/` + `adapters/` |
+| An existing REST backend      | `@orbit/rest` fetch adapter                                                                                     | `adapters/index.ts`     |
+| Shared cache / multi-instance | `createRedisCacheStore` / `createKvCacheStore`                                                                  | `app.ts`                |
+| Distributed rate limiting     | `@orbit/rate-limit` + `createRedisRateLimitStore`                                                               | `app.ts`                |
+| A framework host              | `@orbit/express` / `@orbit/hono` wrapper; authn mapping rides `ctx:`                                            | replace `server/`       |
+| Realtime                      | adapter `subscribe` hook + `attachRealtime(server, orbit)`                                                      | `adapters/` + host      |
+| Larger payloads on the wire   | nothing — msgpack/SSE/gzip are negotiated by `Accept`                                                           | —                       |
 
 Keep scaling **in this order**: domain first, then adapters, then plugins,
 and touch `server/` last — if a change needs a new HTTP framework to exist,
@@ -132,18 +133,18 @@ repositories per `createApp()` call).
 
 ## Common mistakes
 
-| Mistake | Why it hurts | Fix |
-| :--- | :--- | :--- |
-| Business logic inside adapters | the domain becomes untestable without Orbit | validate in `domain/`, translate errors in `adapters/` |
-| Authorization only in the HTTP layer | any direct `execute()` bypasses it | policy plugin in the engine |
-| Cache plugin registered before a serializer hook | caches stale/pre-transform payloads | cache last (spec §11 enforces it) |
-| Interpreting filters (`id` as "the primary key") | the protocol promises filters are verbatim | pass strings through; the repository decides |
-| Reading `process.env` in modules | untestable, implicit global config | `loadConfig()` once, pass `Config` down |
-| Giant "utils" or single-file apps | no place for policy/adapter seams | the five folders above |
+| Mistake                                          | Why it hurts                                | Fix                                                    |
+| :----------------------------------------------- | :------------------------------------------ | :----------------------------------------------------- |
+| Business logic inside adapters                   | the domain becomes untestable without Orbit | validate in `domain/`, translate errors in `adapters/` |
+| Authorization only in the HTTP layer             | any direct `execute()` bypasses it          | policy plugin in the engine                            |
+| Cache plugin registered before a serializer hook | caches stale/pre-transform payloads         | cache last (spec §11 enforces it)                      |
+| Interpreting filters (`id` as "the primary key") | the protocol promises filters are verbatim  | pass strings through; the repository decides           |
+| Reading `process.env` in modules                 | untestable, implicit global config          | `loadConfig()` once, pass `Config` down                |
+| Giant "utils" or single-file apps                | no place for policy/adapter seams           | the five folders above                                 |
 
 ## Result types today
 
-The protocol is *intent, not schema*: results are untyped at the wire level
+The protocol is _intent, not schema_: results are untyped at the wire level
 (deliberately — see [spec.md](../spec.md) §2). Until `adapter.schema`-based
 type generation lands (top of the [ROADMAP](../ROADMAP.md) P1 queue), type
 results **at the boundary you own**: declare the shape next to the call

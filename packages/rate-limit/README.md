@@ -113,8 +113,10 @@ rejects duplicate plugin names, and duplicate provider names fail at boot too).
 | `windowMs` | — (required) | Window length in ms — the bucket's refill period. |
 | `limit` | — (required) | Max requests per key within the window (bucket capacity). |
 | `store` | in-memory | `RateLimitBucketStore` — the atomic bucket store. `createMemoryRateLimitStore()` (default, per-instance) or `@orbit/redis`'s `createRedisRateLimitStore` (shared). |
+| `maxBuckets` | `10,000` | Maximum buckets retained by the default in-memory store; least-recently-seen buckets are evicted. Ignored when `store` is supplied. |
 | `provideAs` | `'rateLimiter'` | Expose the limiter on `ctx.providers` (🧪). Custom name, or `false` to disable. |
 | `keyOf` | IP-derived | Bucket key from the context: the first `x-forwarded-for` entry, else `x-real-ip`, else a shared `anonymous` bucket. Provide your own (e.g. a user id stamped by an auth plugin) for per-user limits. |
+| `trustProxyHeaders` | `true` | Whether the default key extractor may trust `x-forwarded-for` and `x-real-ip`. Set `false` to ignore both and use the shared `anonymous` bucket when a trusted proxy does not replace client-supplied values. Ignored when `keyOf` is set. |
 | `onExceeded` | 429 | Build the rejection. Default: `ORBIT_PERMISSION_DENIED` with HTTP **429** and `details: { limit, windowMs, retryAfterMs }`. Throw an `OrbitError` for a precise client-facing code; a plain `Error` is sanitized to `ORBIT_INTERNAL` by the engine. |
 | `now` | `Date.now` | Injectable clock (tests). |
 
@@ -145,8 +147,11 @@ export interface RateLimitBucketStore {
 
 - **Token bucket with lazy refill** — tokens accumulate at `limit / windowMs`
   per ms, capped at capacity; each request costs one token. No timers, no
-  cleanup loops; buckets are created on demand (Redis keys get a server-side
-  `EXPIRE` so dead buckets can't grow the keyspace).
+  cleanup loops; buckets are created on demand. The in-memory store retains at
+  most 10,000 buckets by default and evicts the least-recently-seen entry;
+  configure this with `createMemoryRateLimitStore({ maxBuckets })`. Eviction
+  resets that key's budget, so size the cap above the expected number of
+  legitimate identities. Redis keys instead get a server-side `EXPIRE`.
 - **Queries AND mutations** — the single `onBeforeParse` hook fires for both
   (spec §11 additive rule), so a mutation storm cannot bypass the limit.
 - **429, not 403** — the frozen error-code set has no rate-limit code, so the

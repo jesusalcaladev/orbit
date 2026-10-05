@@ -19,13 +19,9 @@ every package follows.
 packages/
   core/      @orbit/core            ✅ shipped — engine, hooks, OQS, envelope,
                                     memory adapter, cache plugin, realtime WS
-  adapters/             @orbit/postgres        ✅ DataAdapter over an injected `pg` client
-                                    (parameterized WHERE, IN batching, CRUD)
-             @orbit/mongo           ✅ DataAdapter over an injected `mongodb`
-                                    client (filters→$match, $in batching,
-                                    CRUD, ObjectId via toId/fromId)
-             @orbit/sqlite          ⬜ DataAdapter over `node:sqlite` (optional)
-             @orbit/rest            ✅ shipped — fetch-based DataAdapter
+  adapters/             @orbit/rest            ✅ shipped — fetch-based DataAdapter
+             (user-owned)           Persistence adapters are application code
+                                    (repository/ORM/SDK), not Orbit packages
   caches/             @orbit/redis           ✅ shipped — CacheStore over Redis + distributed
                                     rate-limit bucket store (atomic Lua EVAL)
              @orbit/kv-cache        ✅ shipped — CacheStore over Cloudflare KV
@@ -63,13 +59,12 @@ packages/
    code.
 3. **Zero-dependency unless the job requires it.** `@orbit/redis` and
    `@orbit/kv-cache` inject the client/namespace, so they need nothing beyond
-   `@orbit/core`; `@orbit/postgres` and `@orbit/mongo` inject the driver too
-   (the user installs `pg` / `mongodb`; the packages depend only on
-   `@orbit/core` and typecheck against the real driver via devDependencies).
-   A *plugin* like `@orbit/auth` should need nothing beyond `@orbit/core`.
+   `@orbit/core`. A _plugin_ like `@orbit/auth` should need nothing beyond
+   `@orbit/core`. Persistence belongs to the application: its repositories or
+   private adapter packages own the database driver and query translation.
 4. **Tests** in `packages/<name>/test/`, Vitest, exercising the real frozen
-   contract against a fake/embedded dependency (an in-process Redis, a stub
-   `pg` pool) — no network in CI.
+   contract against a fake/embedded dependency (an in-process cache or a
+   repository double) — no external database in CI.
 5. **Docs + CHANGELOG** at the root: one row in `docs/ecosystem.md`, a
    section in `docs/plugins.md` or `docs/adapters.md`, ROADMAP status flip
    ⬜ → ✅, and a CHANGELOG entry.
@@ -101,7 +96,7 @@ Key facts for implementers:
   A Redis store can `JSON.stringify`; a KV store can store the string.
 - **TTL is the store's job AND the plugin's.** The plugin enforces
   `ttl`/`stale` semantics by reading `createdAt`; the store may additionally
-  expire keys server-side, but must never *remove* the plugin's ability to
+  expire keys server-side, but must never _remove_ the plugin's ability to
   read `createdAt` (store the whole entry).
 - **`keys()` is optional** but recommended: it powers
   `invalidatePrefix` — the main cache-busting tool after a mutation.
@@ -109,8 +104,8 @@ Key facts for implementers:
   after every miss, and `await`s both — an async store's latency lands on the
   hot path, so keep round-trips tight.
 - **Failures fail closed, corruption fails open.** A store that throws on
-  `get`/`set` rejects the request (sanitized `ORBIT_INTERNAL`); a *corrupted
-  value* is a miss. The shipped stores implement exactly that split.
+  `get`/`set` rejects the request (sanitized `ORBIT_INTERNAL`); a _corrupted
+  value_ is a miss. The shipped stores implement exactly that split.
 
 Status: **`@orbit/redis`** and **`@orbit/kv-cache`** are **shipped** — the
 first two production backends. `memoryAdapter`'s sibling,
@@ -123,35 +118,49 @@ export interface DataAdapter {
   entity: string;
   resolve(filters: Filters, ctx: OrbitContext): unknown;
   batch?(requests: BatchRequest[], ctx: OrbitContext): unknown[];
-  mutate?(action: string, args: MutationArgs, ctx: OrbitContext): MutationResult;
-  subscribe?(filters: Filters, handler: (event: SubscriptionEvent) => void): () => void;
+  mutate?(
+    action: string,
+    args: MutationArgs,
+    ctx: OrbitContext,
+  ): MutationResult;
+  subscribe?(
+    filters: Filters,
+    handler: (event: SubscriptionEvent) => void,
+  ): () => void;
 }
 ```
 
-Database packages translate **verbatim string filters** into their query
-language and implement `batch` (the N+1 fix: one query per level via
-`WHERE … IN` / `$in`). **`@orbit/postgres` and `@orbit/mongo` are shipped**
-— parameterized SQL (quoted identifiers, no injection) and match documents
-(charset-validated field names + recursively-safe payload values, so `$`-keyed
-client objects can never become query operators; `toId`/`fromId` handle
-ObjectId ids), each with `create`/`update`/`delete` mutations and
-`parentKey` relation scoping. **`@orbit/sqlite`** stays ⬜ (optional).
-`@orbit/rest` is shipped too: queries become `GET` calls (filters as query
-params, `/:id` when an `id` filter is present), mutations become
-`POST`/`PATCH`/`DELETE` — see [docs/adapters.md](./adapters.md).
+Persistence adapters are application-owned. They translate **verbatim string
+filters** into the query language of the user's repository, ORM, or data service
+and may implement `batch` as the N+1 fix. Orbit does not prescribe SQL syntax,
+document operators, identifiers, transaction policy, or a database driver.
+
+`@orbit/rest` is the one convenience adapter shipped by Orbit: queries become
+`GET` calls (filters as query params, `/:id` when an `id` filter is present),
+and mutations become `POST`/`PATCH`/`DELETE` — see
+[docs/adapters.md](./adapters.md). For a database, wrap the application's
+existing repository or query builder in the frozen `DataAdapter` contract.
 
 ### `RateLimitBucketStore` (shipped — `@orbit/rate-limit`, first-party)
 
 ```ts
 export type ConsumeResult =
   | { ok: true; remaining?: number; resetAfterMs?: number }
-  | { ok: false; retryAfterMs: number; remaining?: number; resetAfterMs?: number };
+  | {
+      ok: false;
+      retryAfterMs: number;
+      remaining?: number;
+      resetAfterMs?: number;
+    };
 
 export interface RateLimitBucketStore {
-  consume(key: string, params: { limit: number; rate: number; windowMs: number }, now: number):
-    ConsumeResult | Promise<ConsumeResult>;
-  readonly bucketCount?: number;   // optional — monitoring/tests
-  reset?(): void | Promise<void>;  // optional — key rotation/tests
+  consume(
+    key: string,
+    params: { limit: number; rate: number; windowMs: number },
+    now: number,
+  ): ConsumeResult | Promise<ConsumeResult>;
+  readonly bucketCount?: number; // optional — monitoring/tests
+  reset?(): void | Promise<void>; // optional — key rotation/tests
 }
 ```
 
@@ -172,7 +181,7 @@ imperatively.
 
 ```ts
 export interface OrbitPlugin {
-  name: string;                       // unique
+  name: string; // unique
   hooks: Partial<Record<HookName, (input: never) => unknown>>;
   provides?: Record<string, unknown>; // 🧪 boot-time services → ctx.providers
 }
@@ -189,7 +198,7 @@ names and reserved prototype names throw at `createOrbit`).
 ### The handler (frozen — `(Request, ctx?) => Promise<Response>`)
 
 Server wrappers wrap the handler for a specific framework. **`@orbit/hono`
-and `@orbit/express` are shipped** as *thin raw bridges*: the framework's
+and `@orbit/express` are shipped** as _thin raw bridges_: the framework's
 original request (raw body + headers) goes straight to the engine's handler,
 and the engine's response — status, every header, and the body including SSE
 streams — comes back untouched. That keeps the full protocol intact
@@ -231,22 +240,13 @@ Workers-native `WebSocketPair` upgrade over the same runtime-agnostic
    for `@orbit/rate-limit`, atomic via Lua `EVAL` — against in-memory fakes,
    no network in CI). `@orbit/rate-limit` shipped its pluggable atomic
    `RateLimitBucketStore` + the `ctx.providers.rateLimiter` handle (21 tests).
-5. **`@orbit/postgres`** ✅ + **`@orbit/mongo`** ✅ — the two flagship
-   database adapters, both over injected clients (no driver dependency in
-   the package). Postgres turns verbatim string filters into
-   **parameterized** `WHERE` clauses (operator overrides, `limit`
-   validation, `parentKey` relation scoping), batches siblings into one
-   `IN (...)` query and maps mutations to `INSERT`/`UPDATE`/`DELETE …
-   RETURNING`; identifiers are validated and quoted, so neither a filter
-   value nor a filter key can inject SQL (30 tests). Mongo translates the
-   same filters into **match documents** (`eq`/`ne`/`gt`/`gte`/`lt`/`lte`/
-   `regex`), batches into `$in`, maps mutations to `insertOne`/`updateOne`/
-   `deleteOne`, converts ids through `toId`/`fromId` (ObjectId support),
-   and guarantees no operator injection — field names are
-   charset-validated and payload values are walked recursively, so a `$`-keyed
-   object value can never become a query operator. 40 tests against an
-   in-memory fake plus a compile-time assertion that the real `mongodb`
-   driver satisfies the injected-client contract — no network in CI.
+5. **Application-owned persistence adapters** — a deliberate boundary, not a
+   package roadmap item. The application chooses its database and owns driver
+   versions, query generation, migrations, transactions, and tests. It exposes
+   that layer through `DataAdapter`; Orbit continues to provide the protocol,
+   cache, auth hooks, and transport around it. Redis remains available as an
+   optional cache and distributed-rate-limit backend, and the repository's
+   Docker Compose file provides Redis for local simulation.
 6. **Server wrappers** ✅ (`@orbit/hono`, `@orbit/express` — thin raw
    bridges, shipped with real end-to-end tests; `@orbit/cloudflare-workers`
    — fetch handler + Workers-native realtime, also shipped with end-to-end

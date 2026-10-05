@@ -9,29 +9,26 @@ Adapters answer filters. That's the whole contract — the core knows nothing of
 ## The contract
 
 ```ts
-import type { DataAdapter } from '@orbit/core';
+import type { DataAdapter } from "@orbit/core";
 
-const postgresUserAdapter: DataAdapter = {
-  entity: 'user',
+const userRepositoryAdapter: DataAdapter = {
+  entity: "user",
 
   async resolve(filters, ctx) {
-    const where = toWhere(filters); // your SQL builder
-    return pool.query(`SELECT * FROM users ${where}`).rows;
+    // Your repository, ORM, or query builder interprets the verbatim filters.
+    return usersRepository.find(filters);
   },
 
   async batch(requests, ctx) {
-    // requests: [{ filters, parent }, ...] — results must align by index.
-    // The N+1 fix: ONE query for all siblings.
-    const ids = requests.map((r) => r.parent?.data.id).filter(Boolean);
-    const rows = await pool.query(`SELECT * FROM posts WHERE author_id = ANY($1)`, [ids]);
-    return requests.map((r) => rows.filter((row) => row.author_id === r.parent?.data.id));
+    // Optional: collapse sibling requests into one backend operation.
+    return usersRepository.findMany(requests.map((request) => request.filters));
   },
 
   async mutate(action, args, ctx) {
     // action: 'update' | 'create' | 'delete' | anything you define
     const { filter, payload } = args;
     return {
-      id: '123',
+      id: "123",
       invalidates: [`cache:user:123`],
     };
   },
@@ -57,7 +54,7 @@ Invoked by the `do` envelope. `action` is the verb after the dot (`user.update` 
 The realtime hook. Register a listener for changes on this adapter's entity; it returns an **unsubscribe** function.
 
 ```ts
-const unsubscribe = adapter.subscribe({ status: 'online' }, (event) => {
+const unsubscribe = adapter.subscribe({ status: "online" }, (event) => {
   // { type: 'created' | 'updated' | 'deleted', id?, data?, patch? }
 });
 unsubscribe();
@@ -72,15 +69,15 @@ Entity-scoped by construction, so there is no `subscribeToEntity` — an empty f
 Perfect for demos, tests, and local development. Zero I/O, zero dependencies.
 
 ```ts
-import { memoryAdapter } from '@orbit/core';
+import { memoryAdapter } from "@orbit/core";
 
 const adapters = memoryAdapter([
   {
-    entity: 'user',
+    entity: "user",
     resolve: ({ id }) => users.find((u) => u.id === id),
     mutate: (action, { filter, payload }) => {
       const user = users.find((u) => u.id === filter?.id);
-      if (action === 'update' && payload) Object.assign(user, payload);
+      if (action === "update" && payload) Object.assign(user, payload);
       return { id: user?.id, invalidates: [`cache:user:${user?.id}`] };
     },
   },
@@ -95,27 +92,27 @@ The first ecosystem package: a fetch-based adapter that speaks the frozen
 `DataAdapter` contract to a plain REST API.
 
 ```ts
-import { createOrbit } from '@orbit/core';
-import { restAdapter } from '@orbit/rest';
+import { createOrbit } from "@orbit/core";
+import { restAdapter } from "@orbit/rest";
 
 const orbit = createOrbit({
   adapters: [
     restAdapter({
-      entity: 'user',
-      baseUrl: 'https://api.example.com/v1',
-      parentKey: 'authorId', // relation scoping: posts under a user → ?authorId=7
+      entity: "user",
+      baseUrl: "https://api.example.com/v1",
+      parentKey: "authorId", // relation scoping: posts under a user → ?authorId=7
     }),
   ],
 });
 ```
 
-| Orbit concept | REST translation |
-| :--- | :--- |
-| `user(id="42") { name }` | `GET /user/42` (an `id` filter becomes the path segment) |
-| `users(role="admin")` | `GET /users?role=admin` (other filters become query params) |
-| Relation under a parent | `parentKey` injects the parent id as a query param |
+| Orbit concept                             | REST translation                                                     |
+| :---------------------------------------- | :------------------------------------------------------------------- |
+| `user(id="42") { name }`                  | `GET /user/42` (an `id` filter becomes the path segment)             |
+| `users(role="admin")`                     | `GET /users?role=admin` (other filters become query params)          |
+| Relation under a parent                   | `parentKey` injects the parent id as a query param                   |
 | `do: user.create` / `.update` / `.delete` | `POST` / `PATCH` / `DELETE` (per-action overridable via `mutations`) |
-| Response body shape | `unwrap` extracts the payload (e.g. `({ data }) => data`) |
+| Response body shape                       | `unwrap` extracts the payload (e.g. `({ data }) => data`)            |
 
 Behavior notes:
 
@@ -133,59 +130,60 @@ Behavior notes:
 
 See [`docs/ecosystem.md`](./ecosystem.md) for the package's roadmap context.
 
-### `createPostgresAdapter` — PostgreSQL behind the contract (`@orbit/postgres`)
+## Bringing your own data layer
 
-The flagship SQL adapter: verbatim string filters become **parameterized**
-`WHERE` clauses over a `pg` client you inject, siblings batch into one
-`IN (...)` query, and mutations map to `INSERT`/`UPDATE`/`DELETE … RETURNING`.
+Orbit deliberately does **not** ship database packages or database drivers.
+The application owns its persistence boundary: choose the database, ORM,
+repository, query builder, or remote service that fits the product, then expose
+it through one or more `DataAdapter` implementations. Orbit only transports
+intent and applies the cross-cutting cache and auth behavior around it.
+
+A user-owned adapter can wrap SQL, a document store, a repository, or any other
+backend without changing the protocol:
 
 ```ts
-import { createOrbit } from '@orbit/core';
-import { Pool } from 'pg';
-import { createPostgresAdapter } from '@orbit/postgres';
+import { createOrbit } from "@orbit/core";
 
 const orbit = createOrbit({
   adapters: [
-    createPostgresAdapter({
-      entity: 'user',
-      client: new Pool({ connectionString: process.env.DATABASE_URL }),
-      table: 'users',
-      idColumn: 'user_id',
-      columns: { name: 'full_name' }, // OQS name → SQL column
-    }),
+    {
+      entity: "user",
+      async resolve(filters, ctx) {
+        // Your repository/query builder interprets the verbatim filters.
+        return usersRepository.find(filters);
+      },
+      async batch(requests, ctx) {
+        // Optional: collapse sibling requests into one backend operation.
+        return usersRepository.findMany(
+          requests.map((request) => request.filters),
+        );
+      },
+      async mutate(action, args, ctx) {
+        const result = await usersRepository.mutate(action, args);
+        return { id: result.id, invalidates: ["user"] };
+      },
+    },
   ],
 });
 ```
 
-| Orbit concept | SQL translation |
-| :--- | :--- |
-| `user(id="42") { name }` | `SELECT * FROM "users" WHERE "user_id" = $1` (single record or `null`) |
-| `user(status="active")` | `SELECT * FROM "users" WHERE "status" = $1` (array) |
-| `posts(limit=20)` | `SELECT * FROM "posts" LIMIT $1` (`limit` validated `1..maxLimit`) |
-| Relation under a parent | `parentKey` scopes with `WHERE <parentKey> = <parent.id>` |
-| `do: user.create` / `.update` / `.delete` | `INSERT … RETURNING *` / `UPDATE … SET … RETURNING *` / `DELETE … RETURNING id` |
-| N sibling requests at one level | one `WHERE col IN ($1, $2, …)` query via `batch` |
+Keep these concerns in the application adapter/repository:
 
-Behavior notes:
+- validation and safe parameter binding for the selected persistence engine;
+- mapping rows/documents to the fields projected by the query;
+- relation scoping and batch semantics;
+- transaction and mutation error policy; and
+- emitting `invalidates` when a mutation changes cacheable data.
 
-- **Values travel only as bind parameters** — a payload like
-  `x'; DROP TABLE users; --` never enters the SQL text. Identifier positions
-  (`table`, `idColumn`, `columns`, `parentKey`, resolved filter columns) are
-  validated against a strict charset and quoted, so a malicious filter *key*
-  fails with `ORBIT_FILTER_INVALID` instead of injecting.
-- **An `id` filter means "one record"**; any other filter set means "many".
-- **`cursor` is not supported by default** (`ORBIT_FILTER_INVALID`) — keyset
-  pagination is app-specific. `limit` is the supported page-size convention
-  and is validated per the [pagination convention](#pagination-convention).
-- **`columns` re-keys rows** so field projection finds your OQS names, and the
-  primary key is exposed under `id`. The core projects requested fields
-  server-side, so unrequested columns never reach the wire.
-- **Mutations return `invalidates: [entity]`** for entity-scoped eviction.
-- Config typos fail fast (plain `Error` at construction); client-triggered
-  problems throw standard `OrbitError`s.
+Orbit deliberately leaves the filter language open-ended. A repository can
+interpret `id`, `limit`, `cursor`, or application-specific filters in its own
+way. It must still return a record for a single-result node, an array for a
+collection, and preserve the index order of a `batch()` response.
 
-See `packages/postgres/README.md` for the full option surface
-(`filters` operator overrides, `maxLimit`, custom `mutations` aliases).
+`@orbit/rest` is the one convenience adapter shipped by Orbit. It is useful
+when an existing HTTP API is the data source; it is not a persistence client.
+For any database, ORM, or data service, write and maintain the adapter in the
+application (or in a private package outside this repository).
 
 ## Writing your own in 5 minutes
 
@@ -195,7 +193,9 @@ See `packages/postgres/README.md` for the full option surface
 4. Register it.
 
 ```ts
-createOrbit({ adapters: [{ entity: 'inventory', resolve: myInventoryLookup }] });
+createOrbit({
+  adapters: [{ entity: "inventory", resolve: myInventoryLookup }],
+});
 ```
 
 ## Pagination convention
@@ -204,10 +204,10 @@ Orbit adds **no new syntax** for pagination — filters are verbatim by design
 (spec §4), so a list is just a node whose filters the adapter interprets. The
 convention is two reserved filter keys:
 
-| Filter | Meaning |
-| :--- | :--- |
-| `limit` | Max records to return, e.g. `posts(status="live", limit=20)`. Values are strings on the wire (`"20"`); the adapter coerces and validates them. |
-| `cursor` | Opaque continuation token from the previous page, e.g. `posts(cursor="eyJvZmZzZXQiOjQwfQ")`. |
+| Filter   | Meaning                                                                                                                                        |
+| :------- | :--------------------------------------------------------------------------------------------------------------------------------------------- |
+| `limit`  | Max records to return, e.g. `posts(status="live", limit=20)`. Values are strings on the wire (`"20"`); the adapter coerces and validates them. |
+| `cursor` | Opaque continuation token from the previous page, e.g. `posts(cursor="eyJvZmZzZXQiOjQwfQ")`.                                                   |
 
 ```ts
 posts(status="live", limit=20) { id, title }

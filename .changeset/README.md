@@ -14,11 +14,11 @@ through [Changesets](https://github.com/changesets/changesets).
 
 - The protocol core (`@orbit/core`) keeps its **zero-dependency** rule. A
   changeset for `@orbit/core` must be `minor` or `major` only when the change is
-  *additive* (spec §11 / §13 allow additive extensions without a major bump);
+  _additive_ (spec §11 / §13 allow additive extensions without a major bump);
   any subtractive or re-shaping change is a `major` and must update `spec.md`
   and the frozen contract tests in the same change.
 - Companion packages (`@orbit/auth`, `@orbit/client`, `@orbit/react`,
-  `@orbit/redis`, `@orbit/postgres`, `@orbit/mongo`, `@orbit/rest`,
+  `@orbit/redis`, `@orbit/rest`,
   `@orbit/kv-cache`, `@orbit/cache`, `@orbit/rate-limit`, `@orbit/logging`,
   `@orbit/express`, `@orbit/hono`, `@orbit/cloudflare-workers`) bump freely with
   their own changelogs.

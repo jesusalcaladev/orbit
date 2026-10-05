@@ -9,12 +9,12 @@ included), and ends with the cases where a simpler tool is the right answer.
 
 The short version:
 
-| Case | Why Orbit | Real proof in this repo |
-| --- | --- | --- |
-| Social / feeds | one round-trip for the whole graph + realtime + cache | `examples/web/06-tiktok-feed`, `examples/web/chat-realtime` |
-| E-commerce | product = `product { variants, stock, reviews }` in one query; stock live | `packages/mongo`, `packages/client` (contract shown below) |
-| Dashboards / SaaS | 15 fetches per render → one; KPIs push over WS | `examples/node/stack/13-fullstack-mongo`, `packages/auth` |
-| IoT / telemetry | subscribe + `resume` replay for flaky field connections; commands over the same socket | `packages/core` realtime hub, `packages/client` realtime |
+| Case              | Why Orbit                                                                              | Real proof in this repo                                                 |
+| ----------------- | -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| Social / feeds    | one round-trip for the whole graph + realtime + cache                                  | `examples/web/06-tiktok-feed`, `examples/web/chat-realtime`             |
+| E-commerce        | product = `product { variants, stock, reviews }` in one query; stock live              | `examples/web/06-tiktok-feed`, `packages/client` (contract shown below) |
+| Dashboards / SaaS | 15 fetches per render → one; KPIs push over WS                                         | `examples/node/book`, `packages/auth`                                   |
+| IoT / telemetry   | subscribe + `resume` replay for flaky field connections; commands over the same socket | `packages/core` realtime hub, `packages/client` realtime                |
 
 ---
 
@@ -36,18 +36,18 @@ adapters that resolve from `ctx.parent`:
 ```ts
 // examples/web/server.ts — the clips world (excerpt)
 const clipsAdapter: DataAdapter = {
-  entity: 'clips',
+  entity: "clips",
   resolve: (filters) => {
     if (filters.id) return clips.find((c) => c.id === filters.id) ?? null;
     return [...clips].reverse(); // a feed, not an archive
   },
   mutate: (action, args, ctx) => {
-    if (action === 'like') {
+    if (action === "like") {
       const clip = clips.find((c) => c.id === args.filter?.id);
       const liked = clip.likedBy.includes(voter);
       // … toggle like, then broadcast the updated record to every subscriber:
       emitClip({
-        type: 'updated',
+        type: "updated",
         id: clip.id,
         data: clip,
         patch: { id: clip.id, likes: clip.likes, likedBy: clip.likedBy },
@@ -63,10 +63,12 @@ const clipsAdapter: DataAdapter = {
 
 // Resolves the `creator { … }` relation of a clip — a role-shaped adapter.
 const creatorAdapter: DataAdapter = {
-  entity: 'creator',
+  entity: "creator",
   resolve: (_filters, ctx) => {
     const clip = ctx.parent?.data;
-    return clip ? { id: clip.creatorId, name: clip.creatorName, handle: clip.handle } : null;
+    return clip
+      ? { id: clip.creatorId, name: clip.creatorName, handle: clip.handle }
+      : null;
   },
 };
 ```
@@ -76,21 +78,22 @@ comments included — and the like is a single mutation whose result comes back
 over the WebSocket to every tab (`examples/web/06-tiktok-feed/app.js`):
 
 ```ts
-import { createClient } from '@orbit/client';
+import { createClient } from "@orbit/client";
 
-const client = createClient({ baseUrl: '/orbit' });
+const client = createClient({ baseUrl: "/orbit" });
 
 // The whole relational feed in ONE request:
 // clips → creator, comments — resolved per level, batched server-side.
 const FEED_QUERY =
-  'clips { id, caption, emoji, likes, likedBy, ts, creator { name, handle }, comments { id, author, text, ts } }';
+  "clips { id, caption, emoji, likes, likedBy, ts, creator { name, handle }, comments { id, author, text, ts } }";
 
-const { data, fromCache } = await client.query(FEED_QUERY, { cache: 'ttl=15' });
+const { data, fromCache } = await client.query(FEED_QUERY, { cache: "ttl=15" });
 
 // Likes/comments/create broadcast to every tab as WS events — the card
 // re-renders from the event payload, no refetch, no optimistic guess.
 client.subscribe(FEED_QUERY, (event) => {
-  if (event.data?.id) upsert(viewOf(event.data), { prepend: event.type === 'created' });
+  if (event.data?.id)
+    upsert(viewOf(event.data), { prepend: event.type === "created" });
 });
 ```
 
@@ -114,28 +117,25 @@ reviews, seller }`. Orbit renders the whole page in one round-trip, keeps hot
 catalog reads in a Redis-backed cache, and streams stock changes to open carts
 over the WebSocket.
 
-The adapter contract is the shipped one — this wiring is exactly
-`createMongoAdapter` from `@orbit/mongo` (see `examples/node/stack/13-fullstack-mongo.ts`
-for the full mount), with a `parentKey` declaring the relation so sibling
-variants batch into a single `$in` query:
+The adapter contract is the shipped one. Wrap the catalog repository behind
+`DataAdapter`, then add Redis for caching and rate limiting:
 
 ```ts
-import { createOrbit, createCachePlugin } from '@orbit/core';
-import { createMongoAdapter } from '@orbit/mongo';
-import { createRedisCacheStore } from '@orbit/redis';
+import { createOrbit, createCachePlugin } from "@orbit/core";
+import { createRedisCacheStore } from "@orbit/redis";
 
 const orbit = createOrbit({
   adapters: [
-    createMongoAdapter({ entity: 'product', client, collection: 'products' }),
-    createMongoAdapter({
-      entity: 'variant',
-      client,
-      collection: 'variants',
-      parentKey: 'product_id',   // N+1 fix: one $in batch per level
-    }),
-    createMongoAdapter({ entity: 'review', client, collection: 'reviews', parentKey: 'product_id' }),
+    productRepositoryAdapter,
+    variantRepositoryAdapter,
+    reviewRepositoryAdapter,
   ],
-  plugins: [createCachePlugin({ store: createRedisCacheStore({ client: redis }), defaultTtl: 60 })],
+  plugins: [
+    createCachePlugin({
+      store: createRedisCacheStore({ client: redis }),
+      defaultTtl: 60,
+    }),
+  ],
 });
 ```
 
@@ -145,7 +145,7 @@ The client reads the page in one request and subscribes to inventory deltas:
 // One round-trip for the whole PDP — no waterfall of fetches.
 const { data } = await client.query(
   'product(slug="orbit-hoodie") { name, price, variants { size, color }, reviews { rating, text } }',
-  { cache: 'ttl=60' }, // hot product → Redis-backed warm replays (B9: 0.17 ms, 0 DB calls)
+  { cache: "ttl=60" }, // hot product → Redis-backed warm replays (B9: 0.17 ms, 0 DB calls)
 );
 
 // Live stock: carts update the instant someone buys.
@@ -156,7 +156,7 @@ client.subscribe('variant(id="v-42") { stock }', (event) => {
 
 Stock mutations flow through the same contract — `do: 'variant.update'` with a
 `filter` and `payload` — and the cache plugin auto-evicts the affected
-queries server-side, so the *next* product read is cold and truthful, no
+queries server-side, so the _next_ product read is cold and truthful, no
 client coordination.
 
 ---
@@ -175,8 +175,17 @@ The production stack is the full first-party plugin set, mounted once
 ```ts
 const orbit = createOrbit({
   adapters: [
-    createMongoAdapter({ entity: 'user', client: counted, collection: 'users' }),
-    createMongoAdapter({ entity: 'posts', client: counted, collection: 'posts', parentKey: 'author_id' }),
+    createMongoAdapter({
+      entity: "user",
+      client: counted,
+      collection: "users",
+    }),
+    createMongoAdapter({
+      entity: "posts",
+      client: counted,
+      collection: "posts",
+      parentKey: "author_id",
+    }),
   ],
   plugins: [
     createLoggingPlugin({ logger: (entry) => collected.push(entry) }),
@@ -184,13 +193,17 @@ const orbit = createOrbit({
       authenticate: apiKeyAuth(API_KEYS),
       // Read gate: runs BEFORE any adapter query touches Mongo.
       authorize: ({ parsed, caller }) => {
-        if (parsed.entity === 'user' && caller.role !== 'admin') {
-          throw new OrbitError(ErrorCode.PERMISSION_DENIED, `Role '${caller.role}' cannot query users`);
+        if (parsed.entity === "user" && caller.role !== "admin") {
+          throw new OrbitError(
+            ErrorCode.PERMISSION_DENIED,
+            `Role '${caller.role}' cannot query users`,
+          );
         }
       },
       // Row-level scope: members only ever see their own rows.
       scope: ({ entity, filters, caller }) => {
-        if (entity === 'posts' && caller.role !== 'admin') return { ...filters, author_id: String(caller.id) };
+        if (entity === "posts" && caller.role !== "admin")
+          return { ...filters, author_id: String(caller.id) };
       },
     }),
     createRateLimitPlugin({
@@ -198,7 +211,10 @@ const orbit = createOrbit({
       limit: 14,
       store: createRedisRateLimitStore({ client: redis }),
     }),
-    createCachePlugin({ store: createRedisCacheStore({ client: redis }), defaultTtl: 60 }),
+    createCachePlugin({
+      store: createRedisCacheStore({ client: redis }),
+      defaultTtl: 60,
+    }),
   ],
 });
 ```
@@ -207,11 +223,11 @@ Served by any host — Express, Hono or Workers — with one line of transport
 (`examples/node/frameworks/10-express.ts`):
 
 ```ts
-import { attachRealtime, createExpressApp } from '@orbit/express';
+import { attachRealtime, createExpressApp } from "@orbit/express";
 
 const app = createExpressApp(orbit, {
-  path: '/api/orbit',
-  ctx: (req) => ({ state: { caller: identifyApiKey(req.get('x-api-key')) } }),
+  path: "/api/orbit",
+  ctx: (req) => ({ state: { caller: identifyApiKey(req.get("x-api-key")) } }),
 });
 const server = app.listen(3100);
 attachRealtime(server, orbit); // WS subscriptions on the SAME http server
@@ -227,10 +243,14 @@ const { data } = await client.query(
   'dashboard(id="d-1") { kpis { revenue, activeUsers }, alerts { severity, message }, quota }',
 );
 
-client.subscribe('kpi { revenue, activeUsers }', (event) => animateKpis(event.data));
+client.subscribe("kpi { revenue, activeUsers }", (event) =>
+  animateKpis(event.data),
+);
 
-for await (const frame of client.stream('analytics(last="24h") { series { t, value } }')) {
-  if (frame.level !== 'done') renderSeries(frame.data); // paints progressively
+for await (const frame of client.stream(
+  'analytics(last="24h") { series { t, value } }',
+)) {
+  if (frame.level !== "done") renderSeries(frame.data); // paints progressively
 }
 ```
 
@@ -254,7 +274,7 @@ often behind NAT. Two Orbit properties matter here:
    telemetry in and commands out.
 
 ```ts
-const client = createClient({ baseUrl: 'https://api.example.com/orbit' });
+const client = createClient({ baseUrl: "https://api.example.com/orbit" });
 
 // Telemetry: the handle's `seq` is the resume cursor — a drop in the field
 // reconnects and replays the missed samples automatically.
@@ -266,8 +286,8 @@ sub.onStatus((state) => log(state)); // connecting → live → reconnecting…
 
 // Command path: envelope request/response over the SAME socket.
 await client.socket().request({
-  do: 'device.setValve',
-  args: { filter: { id: 'pump-7' }, payload: { open: 35 } },
+  do: "device.setValve",
+  args: { filter: { id: "pump-7" }, payload: { open: 35 } },
 });
 ```
 
@@ -286,11 +306,11 @@ world. Skip it for:
   store, or "get me this one row by id" API. REST or gRPC is less machinery.
 - **CRUD admin screens** with no relations and no live updates — Orbit's
   envelope adds ceremony without benefit.
-- **Schema-first teams** — Orbit is *intent-first*: the contract is the
+- **Schema-first teams** — Orbit is _intent-first_: the contract is the
   envelope + OQS, not a declared SDL with shared client/server types. If your
   organization's whole workflow is schema-driven codegen, GraphQL fits that
   process better.
-- **OLAP / massive scans** — Orbit batches per *level* of the graph, not
+- **OLAP / massive scans** — Orbit batches per _level_ of the graph, not
   across billion-row aggregations; push those to a warehouse query engine.
 
 ## Decision rule

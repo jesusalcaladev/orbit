@@ -15,10 +15,10 @@ parse → onBeforeParse → onAfterParse → onBeforeResolve
 ## The plugin contract
 
 ```ts
-import type { OrbitPlugin, OrbitError, ErrorCode } from '@orbit/core';
+import type { OrbitPlugin, OrbitError, ErrorCode } from "@orbit/core";
 
 const myPlugin: OrbitPlugin = {
-  name: 'my-plugin',          // unique, non-empty
+  name: "my-plugin", // unique, non-empty
   hooks: {
     // ...
   },
@@ -50,7 +50,7 @@ hooks: {
 
 **Mutations run `onBeforeParse` too** (spec §5/§11 additive rule): the engine
 invokes it once before the adapter's `mutate`. The return value is ignored for
-mutations (there is no query to rewrite) — the hook's *side effects* are the
+mutations (there is no query to rewrite) — the hook's _side effects_ are the
 point: an auth plugin that stamps `ctx.state.caller` here covers writes as
 well as reads, and a gate that throws (e.g. `ORBIT_PERMISSION_DENIED`)
 rejects the mutation. This is also why the first-party
@@ -58,6 +58,18 @@ rejects the mutation. This is also why the first-party
 needs only this one hook to rate-limit queries **and** mutations, and why
 [`@orbit/auth`](../packages/auth/README.md) stamps `ctx.state.caller` here —
 so identity reaches queries, mutations and a mutation's `return` re-query.
+
+A plugin that inspects the string must be able to tell a query from a mutation
+action: for mutations the engine passes the ACTION (`user.update`) as `query`.
+`ctx.envelope` is always set before any hook runs, so comparing against the
+envelope's declared `do`/`ops` distinguishes them reliably — see
+`createQueryAllowlistPlugin` below for the reference implementation.
+
+**A batch fires this hook per op, and `onBeforeResolve` once for the whole
+envelope.** `ops` executes sequentially and fail-fast, so a gate that only
+inspects each op as it runs could reject op N *after* ops 1..N-1 had already
+committed. Use `onBeforeResolve` for anything that must refuse a batch
+atomically.
 
 ### `onAfterParse` — enrich or replace the parsed tree
 
@@ -149,13 +161,13 @@ All hooks receive `ctx`, an `OrbitContext` that is shared across the whole execu
 - `ctx.parent` — parent entity/data while resolving a relation.
 - `ctx.state` — plugin scratch space (`state ??= {}`).
 - `ctx.providers` — **read-only services injected by plugins at boot**
-  (`OrbitPlugin.provides`) — see *Injecting services below*.
+  (`OrbitPlugin.provides`) — see _Injecting services below_.
 - `ctx.orbit` — the engine (for background work, as the cache plugin does).
 - `ctx.rawQuery` — the final raw query after `onBeforeParse`.
 - `ctx.responseHeaders` — **write channel**: set response headers (e.g.
   `set-cookie`, CORS, custom `cache-control`) and the handler merges them
   into the response. Array values append one header line per item. See
-  `docs/server.md` → *Response headers & cookies*.
+  `docs/server.md` → _Response headers & cookies_.
 
 ### Injecting services into the context (`provides`)
 
@@ -165,20 +177,20 @@ resources (a Redis client, a config object, a service instance) into every
 hook AND every adapter, with no ordering games:
 
 ```ts
-import { createRedisCacheStore } from '@orbit/redis';
-import type { OrbitPlugin } from '@orbit/core';
+import { createRedisCacheStore } from "@orbit/redis";
+import type { OrbitPlugin } from "@orbit/core";
 
 const redisPlugin: OrbitPlugin = {
-  name: 'redis',
+  name: "redis",
   // Declared at boot; injected into every request's ctx.providers before
   // ANY hook runs, in registration order (duplicate names throw at boot).
   provides: { cacheStore: createRedisCacheStore({ client }) },
-  hooks: { /* … */ },
+  hooks: {/* … */},
 };
 
 // …and an adapter consumes it straight off the context:
 const userAdapter = {
-  entity: 'user',
+  entity: "user",
   async resolve(filters, ctx) {
     const store = ctx.providers?.cacheStore as CacheStore | undefined;
     // …use the injected store
@@ -224,9 +236,9 @@ responses already carry `vary: accept, accept-encoding`; errors carry
 ## Built-in: the cache plugin
 
 ```ts
-import { createCachePlugin } from '@orbit/core';
+import { createCachePlugin } from "@orbit/core";
 
-const cache = createCachePlugin();           // in-memory store
+const cache = createCachePlugin(); // in-memory store
 // or: createCachePlugin({ store: myRedisStore })  // any CacheStore
 ```
 
@@ -246,10 +258,10 @@ failed request cacheable.
 
 Reads the cache spec from `envelope.cache` or the `x-orbit-cache` header:
 
-| Spec | Behavior |
-| :--- | :--- |
-| `ttl=N` | Serve while younger than N s; refetch after |
-| `stale=N` | Always serve; background refresh past N s |
+| Spec            | Behavior                                                             |
+| :-------------- | :------------------------------------------------------------------- |
+| `ttl=N`         | Serve while younger than N s; refetch after                          |
+| `stale=N`       | Always serve; background refresh past N s                            |
 | `ttl=N,stale=M` | Fresh for N s; serve + background refresh until N+M s; refetch after |
 
 A spec with neither value falls back to `defaultTtl` (300 s).
@@ -259,8 +271,8 @@ A spec with neither value falls back to `defaultTtl` (300 s).
 Cache hits are served **as-is** — the engine does not re-run `onBeforeSerialize` on short-circuited data. Register the cache plugin **after** any plugin that transforms data in `onBeforeSerialize` (masking, projection, wrapping), so the stored value is the final payload:
 
 ```ts
-plugins: [maskPlugin, createCachePlugin()]  // ✓ cached value is final
-plugins: [createCachePlugin(), maskPlugin]  // ✗ cached value is pre-transform
+plugins: [maskPlugin, createCachePlugin()]; // ✓ cached value is final
+plugins: [createCachePlugin(), maskPlugin]; // ✗ cached value is pre-transform
 ```
 
 This rule is **enforced at `createOrbit` time**: mounting a cache plugin before
@@ -283,10 +295,10 @@ of scope — it would require data semantics the core refuses to own.
 The imperative surface remains for app-driven eviction:
 
 ```ts
-cache.invalidateEntity('user');               // evict every entry reading 'user'
-cache.invalidate(cache.keyFor(parsedNode));   // one exact store key
-cache.invalidatePrefix('orbit:');             // by prefix
-cache.clear();                                // everything
+cache.invalidateEntity("user"); // evict every entry reading 'user'
+cache.invalidate(cache.keyFor(parsedNode)); // one exact store key
+cache.invalidatePrefix("orbit:"); // by prefix
+cache.clear(); // everything
 ```
 
 ### Bring your own store
@@ -306,15 +318,62 @@ export interface CacheStore {
 `@orbit/redis` and `@orbit/kv-cache` are the first two production backends
 (see `docs/ecosystem.md`); `createMemoryCacheStore` stays the reference.
 
+## Built-in: the query allowlist
+
+Orbit is intent-first: the server parses whatever OQS the client sends. A
+production deployment needs to say *these* queries and no others, and
+`createQueryAllowlistPlugin` is that switch. It runs at `onBeforeParse` — the
+earliest point where the raw string is known — so an unknown query never reaches
+the parser, an adapter, or your database.
+
+```ts
+import { createOrbit, createQueryAllowlistPlugin } from '@orbit/core';
+
+const orbit = createOrbit({
+  adapters: [userAdapter],
+  plugins: [
+    createQueryAllowlistPlugin({
+      queries: [
+        'user(id="1") { name, posts { title } }',
+        'posts(status="live") { id, title }',
+      ],
+    }),
+  ],
+});
+```
+
+A miss throws `ORBIT_PERMISSION_DENIED` (403) carrying the query's **digest**,
+never its text — a rejected query can carry caller-controlled values, and the
+error body reaches both the client and your logs.
+
+**Two matching modes from one list.** Each entry matches the raw string exactly
+*and* its `fnv1a64` digest, so a client may ship a persisted query id while the
+server still recognises it without the allowlist leaking query text.
+
+**Audit before you enforce.** Roll out with `enforce: false` and an `onMiss`
+callback to see what a stricter policy *would* have rejected, then turn it on:
+
+```ts
+createQueryAllowlistPlugin({
+  queries: KNOWN,
+  enforce: false,
+  onMiss: (query, digest) => metrics.increment('orbit.query.unlisted', { digest }),
+});
+```
+
+**Mutations are opt-in.** A read allowlist cannot express "and only these
+writes", so this plugin governs reads only — mounting it never starts rejecting
+`do`/`ops`. Pass `mutations` to gate writes as well; every action in a batch is
+then checked *before the first op runs*, so a batch is refused atomically rather
+than half-applied.
+
 ## The plugin ecosystem
 
 The core ships one built-in plugin (cache) and one reference example
 (`examples/node/authentication/03-auth-plugin.ts`). The first-party **`@orbit/*` plugin and
 adapter packages** — `@orbit/auth`, `@orbit/logging`, `@orbit/rate-limit`,
-`@orbit/redis`, `@orbit/kv-cache` (shipped) and `@orbit/postgres`, … — are
-blueprinted in
+`@orbit/redis`, `@orbit/kv-cache` (shipped) and the application-owned persistence adapters — are blueprinted in
 [docs/ecosystem.md](./ecosystem.md): which frozen contract each one
 implements, the monorepo scaffolding conventions, and the build order.
 Every package is a separate workspace under `packages/` that depends on
 `@orbit/core` as a peer — the core never grows.
-

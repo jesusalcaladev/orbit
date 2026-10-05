@@ -22,13 +22,13 @@ test/
 ## The rules
 
 1. **The domain never imports Orbit.** `src/domain/` is plain business
-   logic — swap the in-memory repositories for Postgres and nothing else
-   changes shape. (Try it: `grep -r "@orbit" src/domain` → nothing.)
+   logic — swap the in-memory repositories for your application's persistence
+   implementation and nothing else changes shape. (Try it: `grep -r "@orbit" src/domain` → nothing.)
 2. **Adapters are the only bridge.** Filters arrive verbatim from the query
    (`id="1"`), relations resolve through `ctx.parent`, mutations map domain
    errors onto protocol errors and declare what they invalidate.
 3. **Plugins own cross-cutting behavior.** The authz policy gates reads in
-   the engine, so it holds for *every* host — HTTP, Workers, or a direct
+   the engine, so it holds for _every_ host — HTTP, Workers, or a direct
    `orbit.execute()` call. Register policy plugins **before** the cache
    plugin: hooks run in registration order, so a cache hit can never bypass
    authorization.
@@ -42,10 +42,10 @@ test/
 
 ## Authentication vs authorization (why they live in different files)
 
-| Concern | Where | In this starter |
-| :--- | :--- | :--- |
-| Authentication — *who is calling* | the host (`server/`, `index.ts` never sees keys) | `x-api-key` → `identifyCaller()` → `ctx.state.caller` |
-| Authorization — *what may they do* | the engine (`plugins/`, `adapters/`) | `authzPlugin()` gates reads, `requireCaller()` gates writes |
+| Concern                            | Where                                            | In this starter                                             |
+| :--------------------------------- | :----------------------------------------------- | :---------------------------------------------------------- |
+| Authentication — _who is calling_  | the host (`server/`, `index.ts` never sees keys) | `x-api-key` → `identifyCaller()` → `ctx.state.caller`       |
+| Authorization — _what may they do_ | the engine (`plugins/`, `adapters/`)             | `authzPlugin()` gates reads, `requireCaller()` gates writes |
 
 ## Run it
 
@@ -78,16 +78,16 @@ API keys for the demo: `starter-admin-1` (admin) · `starter-member-2` (member).
 
 ## Growing it — one file per decision
 
-| When you need… | Change | Where |
-| :--- | :--- | :--- |
-| A real database | swap the repository for `@orbit/postgres` / `@orbit/mongo` | `adapters/` (+ `domain/`) |
-| An existing REST API as a source | `@orbit/rest` | `adapters/index.ts` |
-| Shared cache / multi-instance | `createRedisCacheStore` / `createKvCacheStore` | `app.ts` |
-| Rate limiting | `@orbit/rate-limit` (+ Redis store) | `app.ts` plugins |
-| Request logging / metrics | `@orbit/logging` / `@orbit/metrics` | `app.ts` plugins |
-| Framework host | `@orbit/express` / `@orbit/hono` / `@orbit/cloudflare-workers` | replace `server/` + `index.ts` |
-| Realtime subscriptions | add `subscribe` to an adapter + `attachRealtime` | `adapters/` + host |
-| Frontend | `@orbit/client` (vanilla) or `@orbit/react` (hooks + cache) | your app |
+| When you need…                   | Change                                                         | Where                          |
+| :------------------------------- | :------------------------------------------------------------- | :----------------------------- |
+| A real database                  | wrap the application's repository/ORM behind a `DataAdapter`   | `adapters/` (+ `domain/`)      |
+| An existing REST API as a source | `@orbit/rest`                                                  | `adapters/index.ts`            |
+| Shared cache / multi-instance    | `createRedisCacheStore` / `createKvCacheStore`                 | `app.ts`                       |
+| Rate limiting                    | `@orbit/rate-limit` (+ Redis store)                            | `app.ts` plugins               |
+| Request logging / metrics        | `@orbit/logging` / `@orbit/metrics`                            | `app.ts` plugins               |
+| Framework host                   | `@orbit/express` / `@orbit/hono` / `@orbit/cloudflare-workers` | replace `server/` + `index.ts` |
+| Realtime subscriptions           | add `subscribe` to an adapter + `attachRealtime`               | `adapters/` + host             |
+| Frontend                         | `@orbit/client` (vanilla) or `@orbit/react` (hooks + cache)    | your app                       |
 
 ## Read next
 

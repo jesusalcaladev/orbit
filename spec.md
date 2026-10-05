@@ -5,7 +5,7 @@
 > **Snapshot status:** this document is the **canonical, frozen contract** of
 > the Orbit protocol. The current implementation is **v0.1.0** (see
 > `CHANGELOG.md`). Every section carries an explicit status badge — ✅
-> *implemented* or 🔜 *planned*. The 🔮 v2.0 vision is the long-term target;
+> _implemented_ or 🔜 _planned_. The 🔮 v2.0 vision is the long-term target;
 > nothing in this spec is lost between versions.
 
 ---
@@ -21,34 +21,34 @@ each one shipped its own cost:
   per child (1 + 10 + 100 = 1111 queries for a 5-level graph).
 - **Fat payloads** — clients received wide JSON they had to filter on the
   other side of a slow mobile connection.
-- **Slow first bytes** — the client waited for the *whole* graph before seeing
-  *any* of it, even when the root record was ready in 5 ms.
+- **Slow first bytes** — the client waited for the _whole_ graph before seeing
+  _any_ of it, even when the root record was ready in 5 ms.
 - **Locked-in client stacks** — every server framework dragged its own client,
   its own cache, its own transport.
 - **Reconnects that refetch everything** — mobile apps re-downloaded entire
   graphs for a change they could have received as a patch.
 
 Orbit is the answer to that repeated choreography: a **zero-dependency
-contract layer** that transports *intent* from client to server — not a
+contract layer** that transports _intent_ from client to server — not a
 schema, not an ORM, not a runtime. The envelope is the only schema the
 protocol owns. Databases, resolvers, auth, caching, serializers and realtime
-transports are all just *adapters* and *plugins* you mount.
+transports are all just _adapters_ and _plugins_ you mount.
 
 ---
 
 ## 1. Status legend
 
-| Badge | Meaning |
-| --- | --- |
-| ✅ | Implemented and frozen in v0.0.1 |
-| 🔜 | Planned — design is fixed here so it is never lost |
-| 🧪 | Experimental — shape may change before v1.0 |
+| Badge | Meaning                                            |
+| ----- | -------------------------------------------------- |
+| ✅    | Implemented and frozen in v0.0.1                   |
+| 🔜    | Planned — design is fixed here so it is never lost |
+| 🧪    | Experimental — shape may change before v1.0        |
 
 ---
 
 ## 2. Core principles
 
-1. **Intent, not schema.** The client says *what* it wants (`user(id="1") { name, posts { title } }`); the server figures out *how*.
+1. **Intent, not schema.** The client says _what_ it wants (`user(id="1") { name, posts { title } }`); the server figures out _how_.
 2. **The envelope is the only schema the protocol owns.** Every request is one tiny JSON (or MessagePack) object. ✅
 3. **The core knows no databases.** Data sources implement the `DataAdapter` contract; nothing else leaks in. ✅
 4. **Everything else is a plugin.** Auth, cache, logging, custom serializers — hooks, in order, no magic. ✅
@@ -66,25 +66,33 @@ of `query`, `do`, or `ops` must be present.
 ```jsonc
 {
   "query": "user(id=\"1\") { name, posts { title } }", // or…
-  "do": "user.update",                                // …a mutation action
+  "do": "user.update", // …a mutation action
   "args": { "filter": { "id": "1" }, "payload": { "name": "Ana" } },
   "return": "user(id=\"1\") { id, name, posts { id } }", // optional re-query
-  "cache": "ttl=300",                                   // optional cache spec
-  "ops": [                                              // …or batch mutations
-    { "do": "user.update", "args": { "filter": { "id": "1" }, "payload": { "name": "Ana" } } },
-    { "do": "post.create", "args": { "payload": { "title": "Hello" } }, "return": "post { id }" }
-  ]
+  "cache": "ttl=300", // optional cache spec
+  "ops": [
+    // …or batch mutations
+    {
+      "do": "user.update",
+      "args": { "filter": { "id": "1" }, "payload": { "name": "Ana" } },
+    },
+    {
+      "do": "post.create",
+      "args": { "payload": { "title": "Hello" } },
+      "return": "post { id }",
+    },
+  ],
 }
 ```
 
-| Field | Type | Rule |
-| --- | --- | --- |
-| `query` | `string` | OQS (below). Mutually exclusive with `do` and `ops`. |
-| `do` | `string` | Mutation action, form `entity.action` (e.g. `user.update`). Mutually exclusive with `query` and `ops`. |
-| `ops` | `array` | Batch mutations: array of `{ do, args?, return? }` objects. Mutually exclusive with `query` and `do`. Executes sequentially; stops on first error. Response `data` is a per-op array; `invalidates` is the deduplicated union. |
-| `args` | `object` | Passed verbatim to the adapter's `mutate`. Used with `do` or within `ops` entries. |
-| `return` | `string` | OQS re-query of the affected sub-graph, returned after a successful mutation. Used with `do` or within `ops` entries. |
-| `cache` | `string` | Cache spec, e.g. `ttl=300`, `stale=60`. Used with `query`. |
+| Field    | Type     | Rule                                                                                                                                                                                                                           |
+| -------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `query`  | `string` | OQS (below). Mutually exclusive with `do` and `ops`.                                                                                                                                                                           |
+| `do`     | `string` | Mutation action, form `entity.action` (e.g. `user.update`). Mutually exclusive with `query` and `ops`.                                                                                                                         |
+| `ops`    | `array`  | Batch mutations: array of `{ do, args?, return? }` objects. Mutually exclusive with `query` and `do`. Executes sequentially; stops on first error. Response `data` is a per-op array; `invalidates` is the deduplicated union. |
+| `args`   | `object` | Passed verbatim to the adapter's `mutate`. Used with `do` or within `ops` entries.                                                                                                                                             |
+| `return` | `string` | OQS re-query of the affected sub-graph, returned after a successful mutation. Used with `do` or within `ops` entries.                                                                                                          |
+| `cache`  | `string` | Cache spec, e.g. `ttl=300`, `stale=60`. Used with `query`.                                                                                                                                                                     |
 
 Limits: envelope size defaults to **10 MiB** (`maxPayloadBytes`, configurable);
 query depth defaults to **10 levels** (`maxQueryDepth`, configurable); batch
@@ -106,10 +114,10 @@ GET /orbit?query=user(id=%221%22)%20%7B%20name%20%7D&cache=ttl=300
 Accept: application/json
 ```
 
-| Parameter / Header | Source |
-| --- | --- |
-| `query` | URL query parameter (primary) or `X-Orbit-Query` header |
-| `cache` | URL query parameter (`cache`) or `X-Orbit-Cache` header |
+| Parameter / Header | Source                                                  |
+| ------------------ | ------------------------------------------------------- |
+| `query`            | URL query parameter (primary) or `X-Orbit-Query` header |
+| `cache`            | URL query parameter (`cache`) or `X-Orbit-Cache` header |
 
 - Only `{ query }` envelopes are allowed via GET — mutations (`do`/`ops`) must
   use POST.
@@ -119,22 +127,22 @@ Accept: application/json
 
 ### Envelope validation
 
-| Condition | Error |
-| --- | --- |
-| Not a JSON object | `ORBIT_INVALID_QUERY` (400) |
-| Neither `query`, `do`, nor `ops` | `ORBIT_INVALID_QUERY` (400) |
-| More than one of `query`, `do`, `ops` | `ORBIT_INVALID_QUERY` (400) |
-| `args` not an object | `ORBIT_INVALID_QUERY` (400) |
-| `return` / `cache` not strings | `ORBIT_INVALID_QUERY` (400) |
-| Body larger than `maxPayloadBytes` | `ORBIT_PAYLOAD_TOO_LARGE` (413) |
-| Body not valid JSON / MessagePack | `ORBIT_INVALID_QUERY` (400) |
-| `ops` longer than `maxOps` (default 64) | `ORBIT_INVALID_QUERY` (400) |
+| Condition                               | Error                           |
+| --------------------------------------- | ------------------------------- |
+| Not a JSON object                       | `ORBIT_INVALID_QUERY` (400)     |
+| Neither `query`, `do`, nor `ops`        | `ORBIT_INVALID_QUERY` (400)     |
+| More than one of `query`, `do`, `ops`   | `ORBIT_INVALID_QUERY` (400)     |
+| `args` not an object                    | `ORBIT_INVALID_QUERY` (400)     |
+| `return` / `cache` not strings          | `ORBIT_INVALID_QUERY` (400)     |
+| Body larger than `maxPayloadBytes`      | `ORBIT_PAYLOAD_TOO_LARGE` (413) |
+| Body not valid JSON / MessagePack       | `ORBIT_INVALID_QUERY` (400)     |
+| `ops` longer than `maxOps` (default 64) | `ORBIT_INVALID_QUERY` (400)     |
 
 ---
 
 ## 4. Orbit Query Syntax (OQS) ✅
 
-A compact, GraphQL-inspired syntax that is *intent*, not schema.
+A compact, GraphQL-inspired syntax that is _intent_, not schema.
 
 ```text
 query        := node
@@ -177,7 +185,7 @@ posts(status="published", limit="10") { title, author { name } }
 {
   "do": "user.update",
   "args": { "filter": { "id": "1" }, "payload": { "name": "Ana" } },
-  "return": "user(id=\"1\") { id, name }"
+  "return": "user(id=\"1\") { id, name }",
 }
 ```
 
@@ -219,24 +227,24 @@ Error — always the same machine-readable shape:
   "error": {
     "code": "ORBIT_ENTITY_UNREGISTERED",
     "message": "No adapter is registered for entity 'user'",
-    "details": { "entity": "user" }   // optional, adapter-defined
-  }
+    "details": { "entity": "user" }, // optional, adapter-defined
+  },
 }
 ```
 
 ### Standard error codes (frozen)
 
-| Code | HTTP | Meaning |
-| --- | --- | --- |
-| `ORBIT_INVALID_QUERY` | 400 | Malformed OQS or envelope. |
-| `ORBIT_ENTITY_UNREGISTERED` | 404 | No adapter for the entity. |
-| `ORBIT_FILTER_INVALID` | 400 | Resolver rejected the filters (e.g. bad UUID). |
-| `ORBIT_PERMISSION_DENIED` | 403 | Auth/authorization failure (usually thrown by a plugin). |
-| `ORBIT_MAX_DEPTH_EXCEEDED` | 400 | Query nests deeper than `maxQueryDepth`. |
-| `ORBIT_PAYLOAD_TOO_LARGE` | 413 | Envelope exceeds `maxPayloadBytes`. |
-| `ORBIT_MUTATION_FAILED` | 500 | Adapter mutation rejected. |
-| `ORBIT_SUBSCRIPTION_FAILED` | 500 | A realtime subscription could not be established or serviced. *(added with the realtime transport — additive)* |
-| `ORBIT_INTERNAL` | 500 | Anything unexpected — normalized from plain `Error`s. |
+| Code                        | HTTP | Meaning                                                                                                        |
+| --------------------------- | ---- | -------------------------------------------------------------------------------------------------------------- |
+| `ORBIT_INVALID_QUERY`       | 400  | Malformed OQS or envelope.                                                                                     |
+| `ORBIT_ENTITY_UNREGISTERED` | 404  | No adapter for the entity.                                                                                     |
+| `ORBIT_FILTER_INVALID`      | 400  | Resolver rejected the filters (e.g. bad UUID).                                                                 |
+| `ORBIT_PERMISSION_DENIED`   | 403  | Auth/authorization failure (usually thrown by a plugin).                                                       |
+| `ORBIT_MAX_DEPTH_EXCEEDED`  | 400  | Query nests deeper than `maxQueryDepth`.                                                                       |
+| `ORBIT_PAYLOAD_TOO_LARGE`   | 413  | Envelope exceeds `maxPayloadBytes`.                                                                            |
+| `ORBIT_MUTATION_FAILED`     | 500  | Adapter mutation rejected.                                                                                     |
+| `ORBIT_SUBSCRIPTION_FAILED` | 500  | A realtime subscription could not be established or serviced. _(added with the realtime transport — additive)_ |
+| `ORBIT_INTERNAL`            | 500  | Anything unexpected — normalized from plain `Error`s.                                                          |
 
 Plugins may translate errors via the `onError` hook; a failing error handler
 never masks the original error.
@@ -267,13 +275,13 @@ DoS outright — the byte cap bounds the body, the count cap bounds the parse
 
 ### Response — negotiated from `Accept`
 
-| `Accept` | Response |
-| --- | --- |
-| (anything) | JSON — `application/json; charset=utf-8` (default). |
-| `application/x-msgpack` | MessagePack — binary, ~20–40% smaller than JSON. |
-| `text/event-stream` | SSE — the graph streams level by level as it resolves. |
-| `application/*`, `*/*` | JSON (safe default — the client may not have a binary decoder). |
-| `text/*` | SSE (a client narrowing to text formats wants streaming). |
+| `Accept`                | Response                                                        |
+| ----------------------- | --------------------------------------------------------------- |
+| (anything)              | JSON — `application/json; charset=utf-8` (default).             |
+| `application/x-msgpack` | MessagePack — binary, ~20–40% smaller than JSON.                |
+| `text/event-stream`     | SSE — the graph streams level by level as it resolves.          |
+| `application/*`, `*/*`  | JSON (safe default — the client may not have a binary decoder). |
+| `text/*`                | SSE (a client narrowing to text formats wants streaming).       |
 
 Explicit types always beat wildcards; highest `q`-value wins. At equal
 `q`-values, ties resolve in favor of the most specific format:
@@ -314,12 +322,26 @@ resolution failure.
 
 The handler stamps an **`etag`** (a 64-bit FNV-1a of the exact response
 bytes, quoted) on successful JSON responses and honors conditional requests:
-`if-none-match` matching the current etag answers **`304 Not Modified`** —
-no body, no serialization work, no compression — with the stored `etag`
-echoed back. A non-matching or absent `if-none-match` is answered normally
-with the `etag` attached. MessagePack, SSE and error responses are not
-etagged (a CDN should not replay a mutation envelope or a half-stream), and
-a `no-store` error contract never carries one.
+`if-none-match` matching the current etag answers **`304 Not Modified`** — no
+body sent and no compression applied — with the stored `etag` echoed back. A
+non-matching or absent `if-none-match` is answered normally with the `etag`
+attached. MessagePack, SSE and error responses are not etagged (a CDN should not
+replay a mutation envelope or a half-stream), and a `no-store` error contract
+never carries one.
+
+**What this actually saves.** An earlier draft of this section claimed a
+matching validator avoids serialization work. It does not: the body **is**
+serialized (and the digest computed over those bytes) before `if-none-match` is
+evaluated, because the validator is a function of the bytes. The saving is the
+**response body and its compression** — not the serialize step. A cache hit
+still costs a full resolution and encode; `304` here is a bandwidth saving, not
+a compute one. (Content negotiation for `accept-encoding` is likewise resolved
+before the digest, since the etag is weak and computed over uncompressed bytes.)
+
+The validator is deliberately **weak** (`W/"…"`): the same resource has several
+byte-level representations (identity, gzip, Brotli) and the digest covers the
+uncompressed bytes, so a strong validator would falsely claim byte equality
+across them.
 
 ### Cross-origin requests (CORS)
 
@@ -359,16 +381,20 @@ data: {"level":"done","data":{…complete graph…}}
 ## 8. Caching ✅
 
 The client opts in per request with the `cache` field (or the `x-orbit-cache`
-header) — a comma- or space-separated spec, or a JSON object:
+header) — a **comma- or space-separated string spec**. The envelope field is
+typed `string`; only this form is accepted.
 
-| Spec | Meaning |
-| --- | --- |
-| `ttl=300` | Fresh for 300 s. |
-| `stale=60` | Serve stale up to 60 s while revalidating in the background (stale-while-revalidate). |
-| `ttl=300,stale=60` | Fresh for 300 s, then serve stale + background revalidation for 60 s. |
-| `ttl=300,email=600` | Field TTL — the `email` top-level field may go stale after 600 s while the entry stays fresh for 300 s (fields past their own TTL are dropped on serve). |
-| `{"ttl":300,"stale":60}` | JSON object form — equivalent to the comma-separated spec above. |
-| `{"ttl":300,"email":600}` | JSON object form of the field TTL. |
+| Spec               | Meaning                                                                                             |
+| ------------------ | --------------------------------------------------------------------------------------------------- |
+| `ttl=300`          | Fresh for 300 s.                                                                                    |
+| `stale=60`         | Serve stale up to 60 s while revalidating in the background (stale-while-revalidate).                |
+| `ttl=300,stale=60` | Fresh for 300 s, then serve stale + background revalidation for 60 s.                                |
+| `ttl=300,email=600` | **Ignored.** Field TTLs are not implemented — see the note below. Unrecognised keys are not errors. |
+
+**JSON object form — NOT IMPLEMENTED ⬜.** An earlier draft accepted
+`{"ttl":300,"stale":60}` as equivalent to the string spec. The shipped
+`parseCacheSpec` accepts **only the string form**; a JSON object in the `cache`
+field is not parsed as a spec.
 
 Cache hits are marked `fromCache: true`. **Server-side eviction is automatic
 and precise at the entity level**: the cache plugin indexes every stored entry
@@ -392,16 +418,18 @@ max-age=0, stale-while-revalidate=<remaining window>` when serving stale) so
 a CDN/proxy caches Orbit's answers for exactly as long as Orbit itself would
 — and revalidates in the background the same way.
 
-**Field-level TTLs (additive, opt-in).** A `<field>=<seconds>` pair — any
-name other than `ttl`/`stale` in either spec form — gives one top-level
-field of the cached payload its own freshness clock, stored alongside the
-entry. On a **fresh serve**, a field past its own TTL is dropped (its key
-removed) before the response leaves the engine, so sensitive or fast-aging
-fields disappear without shortening the whole entry's life; the store's
-entry-level TTL and the §7 `cache-control` hint stay untouched. `fromCache`
-still marks the response. Field TTLs only inspect the top level of `data`
-(the common envelope shape); non-object data and per-branch pruning are out
-of scope for the core.
+**Field-level TTLs — NOT IMPLEMENTED ⬜ (design reserved).** An earlier draft of
+this section specified a `<field>=<seconds>` pair giving one top-level field of
+the cached payload its own freshness clock. **The shipped `CachePlugin` does not
+support it**: `CacheEntry` carries only `value`, `createdAt` and `query`, there
+are no per-field clocks, and only `ttl`/`stale` are recognised in a cache spec.
+Anything else in a spec string is ignored, not rejected.
+
+The shape above is kept as the reserved design so the two spellings cannot
+diverge if it lands, but treat it as **unshipped**: do not rely on a
+`user.email=60`-style spec doing anything today. Until it is implemented, a
+field that must not outlive the entry belongs in a separate query (its own cache
+key), not in a field spec.
 
 ---
 
@@ -415,35 +443,48 @@ source.
 interface DataAdapter {
   entity: string;
 
-  resolve(filters: Record<string, string>, ctx: OrbitContext): unknown | Promise<unknown>;
-  batch?(requests: { filters: Filters; parent?: ParentContext }[], ctx: OrbitContext): Promise<unknown[]>;
-  mutate?(action: string, args: MutationArgs, ctx: OrbitContext): MutationResult | Promise<MutationResult>;
-  subscribe?(filters: Filters, handler: (event: SubscriptionEvent) => void): () => void;
+  resolve(
+    filters: Record<string, string>,
+    ctx: OrbitContext,
+  ): unknown | Promise<unknown>;
+  batch?(
+    requests: { filters: Filters; parent?: ParentContext }[],
+    ctx: OrbitContext,
+  ): Promise<unknown[]>;
+  mutate?(
+    action: string,
+    args: MutationArgs,
+    ctx: OrbitContext,
+  ): MutationResult | Promise<MutationResult>;
+  subscribe?(
+    filters: Filters,
+    handler: (event: SubscriptionEvent) => void,
+  ): () => void;
 }
 ```
 
-| Method | Required | Role |
-| --- | --- | --- |
-| `resolve` | ✅ | Answer a filter set: one record (object) or many (array). Relations scope via `ctx.parent`. |
-| `batch` | optional | The N+1 fix: the engine groups sibling requests of one entity into a single call; results align by index. |
-| `mutate` | optional | Writes via the `do` envelope. Returns `{ id?, invalidates? }`. |
-| `subscribe` | optional | Realtime: register a change listener; returns an unsubscribe function. |
+| Method      | Required | Role                                                                                                      |
+| ----------- | -------- | --------------------------------------------------------------------------------------------------------- |
+| `resolve`   | ✅       | Answer a filter set: one record (object) or many (array). Relations scope via `ctx.parent`.               |
+| `batch`     | optional | The N+1 fix: the engine groups sibling requests of one entity into a single call; results align by index. |
+| `mutate`    | optional | Writes via the `do` envelope. Returns `{ id?, invalidates? }`.                                            |
+| `subscribe` | optional | Realtime: register a change listener; returns an unsubscribe function.                                    |
 
 ### Design decisions (frozen)
 
-| Proposal | Decision | Why |
-| --- | --- | --- |
-| `delete` method | **No** | The envelope's `do: 'entity.delete'` + `mutate('delete', …)` already covers deletion. A separate method would duplicate the mutation path. |
-| `subscribeToEntity` | **No** | Redundant — an adapter is already entity-scoped (`adapter.entity`); `subscribe({}, handler)` means "every record of this entity". |
-| `subscribe(filters, handler)` | **Yes** | One realtime primitive for the whole protocol; the transport layer feeds it. |
+| Proposal                      | Decision | Why                                                                                                                                        |
+| ----------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `delete` method               | **No**   | The envelope's `do: 'entity.delete'` + `mutate('delete', …)` already covers deletion. A separate method would duplicate the mutation path. |
+| `subscribeToEntity`           | **No**   | Redundant — an adapter is already entity-scoped (`adapter.entity`); `subscribe({}, handler)` means "every record of this entity".          |
+| `subscribe(filters, handler)` | **Yes**  | One realtime primitive for the whole protocol; the transport layer feeds it.                                                               |
 
 ### Events
 
 ```ts
 interface SubscriptionEvent {
-  type: 'created' | 'updated' | 'deleted';
+  type: "created" | "updated" | "deleted";
   id?: string | number;
-  data?: unknown;              // full record after the change
+  data?: unknown; // full record after the change
   patch?: Record<string, unknown>; // minimal delta, for cheap sync
 }
 ```
@@ -489,7 +530,7 @@ forwards `mutate`/`subscribe` when provided.
   the frozen envelope (§3) drops unknown fields, so the transport reads `id`
   itself and echoes it back verbatim. Omit it for fire-and-forget.
 - Success replies mirror the HTTP JSON payload: `{ id?, status, data,
-  contentType?, fromCache?, invalidates? }` — `contentType` appears when a
+contentType?, fromCache?, invalidates? }` — `contentType` appears when a
   plugin serialized the payload to a string (binary plugin bodies and SSE
   streaming stay HTTP-only, `data: null`); failures use the standard
   `{ id?, status, error: { code, message, details? } }` contract.
@@ -517,8 +558,25 @@ forwards `mutate`/`subscribe` when provided.
 - On reconnect, the client sends `{ "resume": "sub-1", "after": 42 }`.
 - The server replays **only the patches with `seq > after`** (target: < 200 ms)
   instead of refetching the whole graph (Apollo baseline: 2 s).
-- Deliveries are ordered per subscription; the sequence number lets the client
-  detect gaps.
+- Deliveries are ordered per subscription, and the sequence numbers are
+  **dense**, which is what makes a lost event provable rather than guessed.
+
+**Gap detection (shipped).** Retention is bounded: the server keeps a
+`RESUME_LOG_MAX` (512) event ring per subscription and drops anything older. A
+client that was away longer than that window could therefore receive a
+*silently incomplete* stream. Two mechanisms prevent that:
+
+- **Server-side.** `SubscriptionHub.resume` only honours a resume it can serve
+  **completely**. If `after` predates the oldest retained event — or is ahead of
+  the server, so nothing could be replayed for it — it returns `null` and the
+  driver rejects with `ORBIT_SUBSCRIPTION_FAILED`. The client then re-subscribes
+  from scratch. A partial replay is never presented as a successful one.
+- **Client-side.** The client treats any `seq > cursor + 1` as a hole and
+  reports it through `onGap` (`{ from, to? }`); `useOrbitSubscription` refetches
+  the query so the rendered data heals. `to` is omitted when the extent is
+  unknowable (a rejected resume loses an unbounded range).
+
+So a client never applies patches across a hole without being told.
 
 ### Heartbeats & lifecycle
 
@@ -546,17 +604,17 @@ parse → onBeforeParse → onAfterParse → onBeforeResolve → (per node, per 
        onBeforeSerialize → serialize
 ```
 
-| Hook | Role |
-| --- | --- |
-| `onBeforeParse` | Rewrite the raw query string (e.g. alias expansion). |
-| `onAfterParse` | Enrich or replace the parsed tree (e.g. inject filters). |
-| `onBeforeResolve` | Short-circuit (`{ shortCircuit }`) — cache hits, mocks, auth gates. |
-| `onBeforeExecute` | Per-node/per-level adjustment of filters and context (tenant scoping). |
-| `onAfterResolve` | Transform a resolved value before projection (field masking). |
+| Hook                | Role                                                                                            |
+| ------------------- | ----------------------------------------------------------------------------------------------- |
+| `onBeforeParse`     | Rewrite the raw query string (e.g. alias expansion).                                            |
+| `onAfterParse`      | Enrich or replace the parsed tree (e.g. inject filters).                                        |
+| `onBeforeResolve`   | Short-circuit (`{ shortCircuit }`) — cache hits, mocks, auth gates.                             |
+| `onBeforeExecute`   | Per-node/per-level adjustment of filters and context (tenant scoping).                          |
+| `onAfterResolve`    | Transform a resolved value before projection (field masking).                                   |
 | `onBeforeSerialize` | Replace the payload with a `SerializedPayload { body, contentType }` (msgpack, SSE, protobuf…). |
-| `onError` | Translate/annotate errors. |
+| `onError`           | Translate/annotate errors.                                                                      |
 
-Short-circuited data is served as-is: the cache plugin stores the *final*
+Short-circuited data is served as-is: the cache plugin stores the _final_
 serialized value, so register cache plugins **after** transformers.
 
 ### The parsed query tree (QueryNode) — FROZEN
@@ -565,21 +623,21 @@ Every plugin that receives `parsed` (or a `node`) gets this exact shape:
 
 ```ts
 interface QueryNode {
-  entity: string;                       // entity name as written, e.g. "user"
-  filters: Record<string, string>;      // verbatim, adapter-interpreted
-  fields: string[];                     // requested leaf fields
+  entity: string; // entity name as written, e.g. "user"
+  filters: Record<string, string>; // verbatim, adapter-interpreted
+  fields: string[]; // requested leaf fields
   relations: Record<string, QueryNode>; // nested relations, keyed by relation name
-  origin: 'client' | 'mutate';          // client query vs a mutation's `return` re-query
+  origin: "client" | "mutate"; // client query vs a mutation's `return` re-query
 }
 ```
 
 Decisions (frozen):
 
-| Proposal | Decision | Why |
-| --- | --- | --- |
-| `_origin` (underscore prefix) | **No** — the field is `origin` | It is a public plugin-facing field, not an internal detail. |
-| `_cacheSpec` on the node | **No** — cache specs never live on the node | The node is pure query structure; caching is request context (`ctx.envelope.cache` or the `x-orbit-cache` header), read by the cache plugin. |
-| Mutation `return` nodes | stamped `origin: 'mutate'` | The re-query runs the full pipeline (§5) but is semantically server-initiated — plugins can distinguish it. |
+| Proposal                      | Decision                                    | Why                                                                                                                                          |
+| ----------------------------- | ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `_origin` (underscore prefix) | **No** — the field is `origin`              | It is a public plugin-facing field, not an internal detail.                                                                                  |
+| `_cacheSpec` on the node      | **No** — cache specs never live on the node | The node is pure query structure; caching is request context (`ctx.envelope.cache` or the `x-orbit-cache` header), read by the cache plugin. |
+| Mutation `return` nodes       | stamped `origin: 'mutate'`                  | The re-query runs the full pipeline (§5) but is semantically server-initiated — plugins can distinguish it.                                  |
 
 ### Injecting services into the pipeline (`provides`) — 🧪 ADDITIVE
 
@@ -623,13 +681,30 @@ shape may evolve before 1.0. Pinned by `test/providers.test.ts`.
 ```ts
 interface OrbitHooks {
   onBeforeParse(input: { query: string; ctx: OrbitContext }): string | void;
-  onAfterParse(input: { parsed: QueryNode; ctx: OrbitContext }): QueryNode | void;
-  onBeforeResolve(input: { parsed: QueryNode; ctx: OrbitContext }): { shortCircuit: unknown } | void;
-  onBeforeExecute(input: { entity: string; filters: Filters; node: QueryNode; ctx: OrbitContext }):
-    { filters?: Filters; ctx?: OrbitContext } | void;
-  onAfterResolve(input: { result: unknown; node: QueryNode; ctx: OrbitContext }): unknown | void;
-  onBeforeSerialize(input: { data: unknown; node: QueryNode; ctx: OrbitContext }):
-    unknown | { body: string | Uint8Array; contentType: string } | void;
+  onAfterParse(input: {
+    parsed: QueryNode;
+    ctx: OrbitContext;
+  }): QueryNode | void;
+  onBeforeResolve(input: {
+    parsed: QueryNode;
+    ctx: OrbitContext;
+  }): { shortCircuit: unknown } | void;
+  onBeforeExecute(input: {
+    entity: string;
+    filters: Filters;
+    node: QueryNode;
+    ctx: OrbitContext;
+  }): { filters?: Filters; ctx?: OrbitContext } | void;
+  onAfterResolve(input: {
+    result: unknown;
+    node: QueryNode;
+    ctx: OrbitContext;
+  }): unknown | void;
+  onBeforeSerialize(input: {
+    data: unknown;
+    node: QueryNode;
+    ctx: OrbitContext;
+  }): unknown | { body: string | Uint8Array; contentType: string } | void;
   onError(input: { error: OrbitError; ctx: OrbitContext }): OrbitError | void;
 }
 ```
@@ -637,7 +712,7 @@ interface OrbitHooks {
 Every hook may also return a `Promise` of its return type. Rules (frozen):
 
 - Returning `undefined` (or nothing) always keeps the current value.
-- A short-circuit is *any* object carrying a `shortCircuit` key — plugins must
+- A short-circuit is _any_ object carrying a `shortCircuit` key — plugins must
   not return data objects with that key unless they intend to short-circuit.
 - A failing `onError` handler never masks the original error.
 - `onBeforeParse`, `onAfterParse` and `onBeforeResolve` run once per query (on
@@ -657,19 +732,19 @@ Pinned by `test/contract.test.ts` in the core package.
 
 Measured on real hardware by `npm run bench` (see `docs/benchmarks.md`).
 
-| ID | Scenario | Key metric | Competition | Orbit goal |
-| --- | --- | --- | --- | --- |
-| B1 | Simple query (user by id) | P99 latency | REST 5 ms (ref), graphql-js 0.118 ms cached-doc / 1.83 ms naive (measured) | < 3 ms — ✅ 0.11 ms |
-| B2 | Deep nest (5 levels) | DB round-trips | graphql-js: 1112 resolver calls (measured) | ≤ 5 (1 batch/level) — ✅ 5 |
-| B3 | Throughput | RPS (engine core) | graphql-js 20,528 cached-doc / ~1.6k naive (measured) | ~30k — ✅ 74,843 core; full wire path is undici-bound (~10k) |
-| B4 | 20-post feed payload | KB transmitted | graphql-js JSON: 446 KB (measured; 19.1 KB gzipped) | ~120 KB (msgpack + compression) — ✅ 19 KB |
-| B5 | TTFB in streaming | Time to first byte | REST 400 ms (ref, waits for all) | < 50 ms (user first, posts later) — ✅ 5 ms |
-| B6 | Mobile reconnect | Sync time | Apollo refetch: 2 s (ref) | < 200 ms (patch replay) — ✅ 0.2 ms warm · ~587 µs resume |
-| B7 | Realtime HTTP (WebSocket fan-out) | Fan-out latency (200 sockets) | spec goal 200 ms | < 200 ms — ✅ 11.1 ms (write path ~7.6 ms) · resume 500 patches ~3.3 ms |
-| B8 | Wire path · real HTTP (node:http + keep-alive) | Requests/sec over HTTP | graphql-js measured on the same server | ✅ ~1.5× graphql-js (1,571 vs 1,029 RPS) — same client, same machine |
-| B9 | Deep nest · warm cache replay vs DataLoader | Warm replay P99 latency | graphql-js + DataLoader: 5 DB batches/request (measured) | < 200 ms — ✅ 0.17 ms · 0 DB calls warm (DataLoader still pays all 5 per request) |
-| B10 | Client overhead · real HTTP round-trip | P99 round-trip latency | raw fetch 1.993 ms (measured) | ≤ 15% added — ✅ 1.886 ms (≈0% overhead) |
-| B11 | React layer (hooks + cache) · warm hit vs raw fetch | P99 latency (warm cache hit) | raw fetch 1.821 ms (measured) | < 0.5 ms warm — ✅ 0.003 ms (0 HTTP); miss overhead vs bare client +7.7% |
+| ID  | Scenario                                            | Key metric                    | Competition                                                                | Orbit goal                                                                        |
+| --- | --------------------------------------------------- | ----------------------------- | -------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| B1  | Simple query (user by id)                           | P99 latency                   | REST 5 ms (ref), graphql-js 0.118 ms cached-doc / 1.83 ms naive (measured) | < 3 ms — ✅ 0.11 ms                                                               |
+| B2  | Deep nest (5 levels)                                | DB round-trips                | graphql-js: 1112 resolver calls (measured)                                 | ≤ 5 (1 batch/level) — ✅ 5                                                        |
+| B3  | Throughput                                          | RPS (engine core)             | graphql-js 20,528 cached-doc / ~1.6k naive (measured)                      | ~30k — ✅ 74,843 core; full wire path is undici-bound (~10k)                      |
+| B4  | 20-post feed payload                                | KB transmitted                | graphql-js JSON: 446 KB (measured; 19.1 KB gzipped)                        | ~120 KB (msgpack + compression) — ✅ 19 KB                                        |
+| B5  | TTFB in streaming                                   | Time to first byte            | REST 400 ms (ref, waits for all)                                           | < 50 ms (user first, posts later) — ✅ 5 ms                                       |
+| B6  | Mobile reconnect                                    | Sync time                     | Apollo refetch: 2 s (ref)                                                  | < 200 ms (patch replay) — ✅ 0.2 ms warm · ~587 µs resume                         |
+| B7  | Realtime HTTP (WebSocket fan-out)                   | Fan-out latency (200 sockets) | spec goal 200 ms                                                           | < 200 ms — ✅ 11.1 ms (write path ~7.6 ms) · resume 500 patches ~3.3 ms           |
+| B8  | Wire path · real HTTP (node:http + keep-alive)      | Requests/sec over HTTP        | graphql-js measured on the same server                                     | ✅ ~1.5× graphql-js (1,571 vs 1,029 RPS) — same client, same machine              |
+| B9  | Deep nest · warm cache replay vs DataLoader         | Warm replay P99 latency       | graphql-js + DataLoader: 5 DB batches/request (measured)                   | < 200 ms — ✅ 0.17 ms · 0 DB calls warm (DataLoader still pays all 5 per request) |
+| B10 | Client overhead · real HTTP round-trip              | P99 round-trip latency        | raw fetch 1.993 ms (measured)                                              | ≤ 15% added — ✅ 1.886 ms (≈0% overhead)                                          |
+| B11 | React layer (hooks + cache) · warm hit vs raw fetch | P99 latency (warm cache hit)  | raw fetch 1.821 ms (measured)                                              | < 0.5 ms warm — ✅ 0.003 ms (0 HTTP); miss overhead vs bare client +7.7%          |
 
 > Competition column note: graphql-js and dataloader numbers are MEASURED on
 > the benchmark machine (both are devDependencies of the bench harness only —
@@ -680,12 +755,12 @@ Measured on real hardware by `npm run bench` (see `docs/benchmarks.md`).
 
 ## 13. Versioning & roadmap
 
-| Version | Contents | Status |
-| --- | --- | --- |
-| **0.0.1** | Core engine, OQS, envelope, errors, JSON/msgpack/SSE, gzip, caching, plugin pipeline, frozen `DataAdapter` + envelope, memoryAdapter, WebSocket realtime transport + security suite, prototype-pollution hardening, 12 node examples + 5 interactive web demos + the layered book API, benchmark suite (B1–B11) incl. real-HTTP wire path + cache-vs-DataLoader head-to-heads + client/react-layer overhead head-to-heads, CI (GitHub Actions matrix), frozen public API surface (spec §13), spec. | ✅ shipped |
-| **0.1.x** | First real adapters (Postgres, Redis cache store), federation-friendly relation semantics. | 🔜 |
-| **1.0** | Envelope & error codes locked for backwards compatibility; audit of every section in this spec. | 🔜 |
-| **2.0 🔮** | Federated Orbit servers, native (WASM/C++) parsers to close the B3 wire-path gap (engine core already exceeds the goal), first-party client SDKs. | 🔜 |
+| Version    | Contents                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Status     |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| **0.0.1**  | Core engine, OQS, envelope, errors, JSON/msgpack/SSE, gzip, caching, plugin pipeline, frozen `DataAdapter` + envelope, memoryAdapter, WebSocket realtime transport + security suite, prototype-pollution hardening, 12 node examples + 5 interactive web demos + the layered book API, benchmark suite (B1–B11) incl. real-HTTP wire path + cache-vs-DataLoader head-to-heads + client/react-layer overhead head-to-heads, CI (GitHub Actions matrix), frozen public API surface (spec §13), spec. | ✅ shipped |
+| **0.1.x**  | Redis cache store, application-owned persistence adapters, federation-friendly relation semantics.                                                                                                                                                                                                                                                                                                                                                                                                 | 🔜         |
+| **1.0**    | Envelope & error codes locked for backwards compatibility; audit of every section in this spec.                                                                                                                                                                                                                                                                                                                                                                                                    | 🔜         |
+| **2.0 🔮** | Federated Orbit servers, native (WASM/C++) parsers to close the B3 wire-path gap (engine core already exceeds the goal), first-party client SDKs.                                                                                                                                                                                                                                                                                                                                                  | 🔜         |
 
 **Compat rule:** nothing marked ✅ may change shape in a breaking way without
 a major version bump; additive extensions are always allowed.
@@ -700,7 +775,6 @@ removing or silently adding an export fails CI. Anything that moves a frozen
 shape or renames a frozen export is a breaking change.
 
 ---
-
 
 ## 14. Non-goals
 

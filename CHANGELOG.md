@@ -5,11 +5,12 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
 ## [Unreleased]
 
 ### Added
+
 - **Project starter + architecture guide** — `examples/starter/` is the
   canonical skeleton of a new Orbit project (domain → adapters → plugins →
   composition root → host, with a `node --test` suite driven through
-  `orbit.execute()` and a growth table: memory → Postgres, TTL → Redis,
-  node:http → Express/Hono/Workers), registered as example 00 in
+  `orbit.execute()` and a growth table: memory → application persistence,
+  TTL → Redis, node:http → Express/Hono/Workers), registered as example 00 in
   `run-all.ts` and covered by `pnpm run test:starter` in CI (Node ≥ 22).
   `docs/project-structure.md` is the full reference — the five layers, the
   import matrix, the authn/authz split, plugin order as a security control,
@@ -47,17 +48,13 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
 - **`useOrbitMutation` cancellation** (`@orbit/react`) — `signal` and
   `timeoutMs` options now ride through to the transport, so a hanging
   mutation can be aborted or timed out like a query.
-- **Full-stack example (`examples/node/stack/13-fullstack-mongo.ts`)** —
-  one Orbit engine with the whole first-party ecosystem mounted and proven
-  live: `@orbit/mongo` adapters (relations + `$in` batching, mutations),
-  the Redis `CacheStore` with entity-precise eviction, Redis-backed
-  distributed rate-limit buckets with standard `RateLimit-*` headers,
-  `@orbit/auth` read gates + row scoping, and per-request `@orbit/logging`
-  — 20 live assertions, runnable with zero infra (in-memory Mongo/Redis
-  stand-ins) or against real drivers via `MONGODB_URI`. Registered as
-  example 13 in `run-all.ts`; docs updated (`examples/README.md`,
-  `docs/examples.md`). Root devDependencies: `mongodb` + the five
-  `@orbit/*` workspace packages.
+- **Persistence is application-owned** — removed the first-party PostgreSQL and
+  MongoDB adapter packages, their drivers, the Mongo full-stack example, and
+  their Docker services. Applications now implement `DataAdapter` over their
+  own repository, ORM, or database SDK. Redis remains available for cache and
+  distributed rate-limit storage; the repository's Docker Compose file keeps a
+  Redis service for local simulation. Documentation, roadmap, and ecosystem
+  guidance now describe this boundary explicitly.
 - **Coverage ≥90% everywhere (all packages)** — every package now ships a
   `vitest.config.ts` with v8 coverage thresholds (≥90% stmts/funcs/lines,
   ≥85% branch — most at or over 90% branch) and a `test:coverage` script;
@@ -83,7 +80,7 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
   clobbering headers another plugin set. The `ConsumeResult` contract gained
   optional `remaining`/`resetAfterMs` (both first-party stores report them;
   the Redis Lua script returns `{allowed, retryAfterMs, resetAfterMs,
-  remaining}`). Tests: rate-limit 15 → 18.
+remaining}`). Tests: rate-limit 15 → 18.
 - **Distributed rate limiting (`@orbit/rate-limit` + `@orbit/redis`)** —
   `createRateLimitPlugin` now accepts a **pluggable atomic bucket store**
   (`RateLimitBucketStore`): the single `consume(key, params, now)` method
@@ -116,8 +113,8 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
 - **Age-aware cache HTTP headers** (spec §7/§8, additive) — when a cache
   spec is applied, the cache plugin now emits `x-orbit-cache: hit|miss` and
   `cache-control` via the `responseHeaders` channel: `public, max-age=<remaining
-  freshness>` on a fresh serve and `public, max-age=0,
-  stale-while-revalidate=<remaining window>` when serving stale, so a
+freshness>` on a fresh serve and `public, max-age=0,
+stale-while-revalidate=<remaining window>` when serving stale, so a
   CDN/proxy caches Orbit's answers for exactly as long as Orbit itself
   would. Neither header is emitted without a spec, and the error contract's
   `cache-control: no-store` is now enforced AFTER pipeline headers are
@@ -152,41 +149,9 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
   injected KV binding: entries stored as JSON, optional `expirationTtl`,
   prefix invalidation + `clear()` paging through `list()`. 8 tests against an
   in-memory fake. README + `docs/ecosystem.md`.
-- **`@orbit/postgres`** — production PostgreSQL `DataAdapter`
-  (`createPostgresAdapter({ entity, client, table?, idColumn?, columns?,
-  filters?, parentKey?, maxLimit?, mutations? })`) over an injected `pg`
-  client: verbatim string filters become **parameterized** `WHERE` clauses
-  (`eq`/`ne`/`gt`/`gte`/`lt`/`lte`/`like` operator overrides), sibling
-  requests batch into one `IN (...)` query (the N+1 fix), `limit` is
-  validated, relations scope via `parentKey`, and mutations map to
-  `INSERT`/`UPDATE`/`DELETE … RETURNING` (`create`/`update`/`delete` + custom
-  aliases). Values travel only as bind parameters and identifier positions
-  are validated + quoted, so neither a filter value nor a filter key can
-  inject SQL. 30 tests against an in-memory fake — no database in CI.
-  README + `docs/adapters.md` + `docs/ecosystem.md` + ROADMAP §4/§7/§9/§10.
-
-- **`@orbit/mongo`** — production MongoDB `DataAdapter`
-  (`createMongoAdapter({ entity, client, collection?, idField?, columns?,
-  filters?, parentKey?, maxLimit?, mutations?, toId?, fromId? })`) over an
-  injected `mongodb` client (the driver's `Db` satisfies the contract as-is,
-  pinned by a compile-time assertion): verbatim string filters become match
-  documents (`eq`/`ne`/`gt`/`gte`/`lt`/`lte`/`regex` operator overrides),
-  sibling requests batch into one `$in` query (the N+1 fix), `limit` is
-  validated, relations scope via `parentKey`, mutations map to
-  `insertOne`/`updateOne`/`deleteOne` (`create`/`update`/`delete` + custom
-  aliases), and `toId`/`fromId` convert client ids at every boundary
-  (ObjectId support; default identity, so 24-hex `_id` strings work through
-  the driver's native coercion). **No operator injection**: field names are
-  charset-validated (a filter/payload key can never start with `$` or
-  contain `.`) and payload values are walked recursively, so a `$`-keyed
-  object value fails with `ORBIT_MUTATION_FAILED` instead of becoming a
-  query operator — Mongo's counterpart of the postgres parameterization
-  guarantee. Read results alias the primary key under `id` and re-key
-  mapped columns. 38 tests against an in-memory fake — no database in CI.
-  README + `docs/ecosystem.md` + ROADMAP §4/§7/§9/§10 (0.1.x milestone
-  complete).
 
 ### Changed
+
 - **`CacheStore` widened to sync-or-async** — every method may now return a
   `Promise` (`get`/`set`/`delete`/`clear`) and `keys()` may be a sync or
   async iterable, which is what lets Redis/KV stores exist. The cache plugin
@@ -199,6 +164,7 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
   `docs/ecosystem.md` and the cache READMEs updated.
 
 ### Docs
+
 - **Living-doc drift cleanup** — ROADMAP now reflects reality: `@orbit/client`
   and `@orbit/react` shipped (§7 tree, §9 step 7, recap, P1 #4), plus
   `@orbit/rate-limit`/`@orbit/metrics` and the full B1–B11 benchmark set
@@ -222,6 +188,7 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
   refreshed.
 
 ### Added
+
 - **Response headers channel** — plugins and adapters can now set
   `ctx.responseHeaders` (a `Record<string, string | string[]>`) anywhere in
   the pipeline and the handler merges it into every response format (JSON,
@@ -233,7 +200,7 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
   context it received. Documented in `docs/server.md`, `docs/plugins.md`,
   spec §7.
 - **Negotiation metadata on every response** — `vary: accept,
-  accept-encoding` (CDN/proxy caches key on both dimensions and can never
+accept-encoding` (CDN/proxy caches key on both dimensions and can never
   serve the wrong format), `cache-control: no-store` on error responses
   (SSE already had `no-cache`).
 - **Shared realtime session driver** — `createSessionDriver` (exported by
@@ -247,7 +214,7 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
   the `, `-joined `Headers` iteration (which corrupts cookie attributes).
 - **`@orbit/cloudflare-workers`** — run the full protocol on the edge from a
   single `fetch` handler. `createWorker({ orbit, path, realtime, ctx,
-  onError, fallback })` returns the exact `{ fetch(request, env, ctx) }`
+onError, fallback })` returns the exact `{ fetch(request, env, ctx) }`
   shape workerd expects; `handleOrbit` serves one request inside an existing
   worker. The Workers bindings ride the OrbitContext as `ctx.env` (plus
   `ctx.waitUntil` when the execution context provides one), so adapters can
@@ -279,11 +246,12 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
     on one server, simultaneous sends and batched rounds, end-to-end
     round-trip latencies (send → mutation → shared bus → subscription →
     tab), p50/p95/p99/max, payload bytes and a comparative chart.
-  The GraphQL side runs `graphql-js` + `ws` + `graphql-ws` as devDependencies
-  of the example harness only — `@orbit/core` stays zero-dependency.
-  Documented in `docs/examples.md`.
+    The GraphQL side runs `graphql-js` + `ws` + `graphql-ws` as devDependencies
+    of the example harness only — `@orbit/core` stays zero-dependency.
+    Documented in `docs/examples.md`.
 
 ### Added
+
 - **Native file uploads** — the handler now accepts `multipart/form-data`
   requests: the `envelope` field carries the JSON envelope, every other
   field whose value is a `File` lands in `ctx.files` (keyed by field name)
@@ -317,6 +285,7 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
   **324 tests** (307 core + 13 rest + 4 cache).
 
 ### Docs
+
 - **Package READMEs completed** — new `packages/cache/README.md` and
   `packages/rest/README.md` (the two shipped ecosystem packages that lacked
   one): quick start, options tables, behavior notes, the `CacheStore`
@@ -344,6 +313,7 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
   the shipped implementation (zero references remained).
 
 ### Security
+
 - **Prototype-pollution hardening** — attacker-controlled keys (`__proto__`,
   `constructor`) in OQS filters/relations, projected fields and decoded
   MessagePack maps are now stored as OWN properties via `setOwn`
@@ -361,6 +331,7 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
   rate limiting, auth, HTTP-layer hygiene).
 
 ### Changed
+
 - **Public API surface frozen (spec §13)** — every export of `src/index.ts`
   (runtime values AND type names) is now pinned exact-set by
   `test/api-surface.test.ts`: renaming, removing or silently adding an export
@@ -368,6 +339,7 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
   `test/contract.test.ts`, the import surface pinned by the new test.
 
 ### Security
+
 - **`ORBIT_INTERNAL` is sanitized** — `toOrbitError` no longer echoes a plain
   `Error`'s message to the client: unexpected failures answer the generic
   `"Internal server error"` and the original error (which may embed tokens,
@@ -377,6 +349,7 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
   same way. Tests assert the wire shape never contains the original text.
 
 ### Changed
+
 - **Plain mutation rejections are `ORBIT_MUTATION_FAILED` (spec §5)** — an
   adapter `mutate` that throws a plain `Error` is wrapped as a sanitized
   `ORBIT_MUTATION_FAILED` (original preserved as `cause`) instead of leaking
@@ -392,6 +365,7 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
   preserved) instead of `ORBIT_INTERNAL`.
 
 ### Docs
+
 - **Spec truthfulness** — §2 principle 7 badge corrected (`🔜 (transport)` →
   `✅`, realtime shipped in v0.0.1); §7 pins the equal-`q` tie-break
   (MessagePack > SSE > JSON, already covered by `negotiate.test.ts`); §13
@@ -400,6 +374,7 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
   payload/status behavior; README coverage figures refreshed (~90% branch).
 
 ### Added
+
 - **B9 · Deep-nest warm replay vs DataLoader** — the same 5-level graph from
   B2 through graphql-js + DataLoader (devDependency of the bench harness
   only): batchers collapse the 1,112 resolver calls to **5 DB batches per
@@ -431,18 +406,21 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
     gzip equalizes both protocols at 19.1 KB; MessagePack alone trims ~1% on
     text-heavy payloads, so the protocol's edge is round-trips, throughput
     and streaming (B2/B3/B5), not compressed size.
-  Spec §12 and `docs/benchmarks.md` updated with the measured methodology.
+    Spec §12 and `docs/benchmarks.md` updated with the measured methodology.
 
 ### Fixed
+
 - **Mutation `return` re-queries now run the full hook pipeline** — `onBeforeParse`, `onAfterParse` and `onBeforeResolve` did not previously run on the post-mutation re-query, so authorization gates (e.g. the `onBeforeResolve` role check in example 03) could be bypassed with `{ do, return }`. The sub-query is now executed exactly like a client query (spec §5: "hooks included"); plugins see the sub-envelope `{ query }`, and no envelope-level `cache` spec applies, so the re-query is fresh unless the client explicitly sends the `x-orbit-cache` header. Regression test in `test/engine.test.ts`.
 - **`RealtimeServer.close()` now terminates sessions' sockets** — it sent a close frame and released hub state but never closed the upgraded TCP sockets, so a following `http.Server.close()` waited forever and the process hung (reproduced in examples 08/09). Every close path now `destroy()`s the socket after writing the close frame (Node keeps upgraded sockets half-open after `end()`); examples 08/09 exit cleanly. Regression test in `test/realtime.test.ts`.
 
 ### Changed
+
 - **Contract freeze (spec §3/§6/§9/§11)** — the `QueryNode` shape and hook signatures are now pinned in the spec and enforced by `test/contract.test.ts`. Decisions: the node field stays `origin` (no `_origin`); cache specs never live on the node (`_cacheSpec` rejected — caching is request context); mutation `return` nodes are stamped `origin: 'mutate'` again, restoring the documented metadata (`docs/oqs.md`, `docs/architecture.md`).
 - **Monorepo (pnpm workspaces)** — the repository is now a multi-package workspace: `packages/core` hosts `@orbit/core` (src, tests, build, vitest config); root examples and benchmarks consume the built package via `@orbit/core`; docs and spec live at the root. `package-lock.json` replaced by `pnpm-lock.yaml`.
 - **Example lifecycle** — 08/09 flush and exit explicitly when run standalone (Node's undici `WebSocket` keeps its client-side socket handle alive after a clean close — a platform behavior, not an Orbit leak); `run-all` flushes the summary and exits once every example is done.
 
 ### Added
+
 - **B8 · Wire-path benchmark (real HTTP)** — `bench/http-bench.ts`: both
   engines behind an identical `node:http` server, a single keep-alive
   connection reused by `node:http`'s own client, the same query, the same
@@ -459,10 +437,12 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
 - **`examples/09-speed.ts`** — the speed showcase: engine core µs/op + RPS, full fetch handler, deep 5-level graph, payload shaving, realtime fan-out — measured live on the running machine.
 
 ### Changed
+
 - **Realtime security fixes** — (1) a fresh data frame during a fragmented message is now a 1002 close (RFC 6455 §5.4; previously silently discarded); (2) close frames with 1-byte payloads or invalid codes (< 1000, 1004/1005/1006/1015) are a 1002; (3) `authorize()` that **throws synchronously or rejects asynchronously** now answers 403 instead of crashing the process or hanging (it is invoked inside the promise chain); (4) handshake rejections use `socket.end()` so the status line always reaches the client; (5) `FrameDecoder` validates RSV/masking/control-frame rules from the 2-byte header before buffering payload (fail-fast anti-DoS — an unmasked huge frame is a 1002, not a buffered 1009); (6) `socket.setNoDelay(true)` on upgrade (many small frames); (7) **fragment-count cap** (1000) — the byte cap bounds payload, the count cap bounds the per-fragment Buffer objects, closing a 1-byte-fragment flood with a 1009.
 - **Bench harness hardening** — event-driven frame waits (no `sleep(0)` polling), fan-out warm-up, resume measured by counting the frames actually received (with a units bug in the first version caught and fixed).
 
 ### Added
+
 - **WebSocket realtime transport** — zero-dependency RFC 6455 (`src/realtime/`): handshake + frame codec (`frames.ts`), a `SubscriptionHub` that dedupes N clients onto one shared adapter `subscribe` hook with per-subscription sequence numbers and a bounded resume log (`hub.ts`), and `createRealtimeServer` (`server.ts`) with subscribe/unsubscribe/resume frames, retention across disconnects, heartbeats, auth/origin gates, and JSON or MessagePack frames. New error code `ORBIT_SUBSCRIPTION_FAILED`. Spec §10 flips 🔜 → ✅.
 - **`examples/08-realtime.ts`** — a runnable demo: subscribe → mutations stream events → disconnect → resume replays the missed patches.
 - **B6 realtime benchmark** — 100 clients on one shared hook: fan-out and resume replay measured in microseconds (goal < 200 ms).
@@ -470,12 +450,14 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
 - **B3 benchmark reworked** — measures three honest numbers: engine core (headline, ~103k RPS vs the ~30k goal), server-side handler work (~21k), and the full fetch path (undici client cost included). All six goals ✅.
 
 ### Changed
+
 - **Frozen contracts** — canonical [`spec.md`](./spec.md) is now the single source of truth: envelope, error codes, serialization, the `DataAdapter` contract, realtime/subscriptions design, and the v2.0 roadmap. Every section is marked ✅ implemented or 🔜 planned.
 - **`DataAdapter` contract finalized**: added `subscribe(filters, handler)` (+ `SubscriptionEvent`) for realtime; `delete` and `subscribeToEntity` were explicitly **rejected** (the `do: 'entity.delete'` mutation path and per-adapter entity scoping already cover them). `memoryAdapter` forwards `subscribe` when defined.
 - **Removed `fetchAdapter`** (REST via global `fetch`) — adapters are a 20-line hand-written contract; example 04 now exercises the full frozen contract (`resolve`/`batch`/`mutate`/`subscribe`) against a `Map`.
 - **Engine hot path**: bytes-aware envelope reading (`readEnvelopeBytes`) and a non-async `memoryAdapter` resolve shaved `execute()` from ~20µs to ~12.7µs/op.
 
 ### Added
+
 - **7 runnable examples** (`examples/01-hello.ts` → `07-serializer-custom.ts` + `run-all.ts`) covering hello-world, relations & batching, auth plugins, adapters by hand, MessagePack, SSE streaming, and custom serializers.
 - **Benchmark suite B1–B6** (`bench/run.ts`, `npm run bench`) measuring P99 latency, deep-nest DB round-trips, throughput, payload size, streaming TTFB and reconnect replay against the spec's reference figures — with a generated SVG chart (`bench/results/chart.svg`) and machine-readable JSON.
 - **Zero-dependency MessagePack codec** — `encodeMsgpack` / `decodeMsgpack` (full integer/string/bin/array/map coverage, JSON-compatible `undefined` handling).
@@ -487,6 +469,7 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
 - Engine fixes from review: negative-integer double-encoding in the msgpack codec, pre-buffer `content-length` check for early 413s, wildcard `Accept` maps to JSON.
 
 ### Security — P0 hardening (all seven items closed)
+
 - **Auth context into WebSocket subscriptions & socket envelopes** (spec §10
   🔜 → ✅) — the transport's `authorize` may now return an `OrbitContext`
   that seeds the session: it rides into every `{ query }`/`{ do }` envelope
@@ -537,6 +520,7 @@ All notable changes to `@orbit/core` are documented here. The format follows [Ke
 ## [0.0.1] — 2026-08-11
 
 ### Added
+
 - **OQS — Orbit Query Syntax**: entity roots with verbatim filters, field projection, nested relations, depth limits.
 - **Hook-based plugin system**: `onBeforeParse`, `onAfterParse`, `onBeforeResolve` (short-circuit), `onBeforeExecute`, `onAfterResolve`, `onBeforeSerialize`, `onError` — with `PluginRegistry` (duplicate-name rejection).
 - **BFS resolution with per-entity batching** — sibling requests of an entity collapse into one `batch()` call per level (the N+1 fix).

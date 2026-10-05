@@ -14,16 +14,16 @@ pnpm install
 
 ## Commands
 
-| Command | What it does |
-| :--- | :--- |
-| `pnpm test` | Run the full Vitest suite across every workspace (635 tests: 400 core + 18 express + 13 hono + 24 rest + 4 cache + 35 cloudflare-workers + 21 rate-limit + 15 auth + 9 logging + 17 redis + 9 kv-cache + 30 postgres + 40 mongo) |
-| `pnpm run test:watch` | Watch mode (core) |
+| Command                  | What it does                                                                                                        |
+| :----------------------- | :------------------------------------------------------------------------------------------------------------------ |
+| `pnpm test`              | Run the full Vitest suite across every workspace                                                                    |
+| `pnpm run test:watch`    | Watch mode (core)                                                                                                   |
 | `pnpm run test:coverage` | Coverage per package with v8 thresholds (≥90% stmts / funcs / lines, ≥85% branch) — run `pnpm -r run test:coverage` |
-| `pnpm run typecheck` | Strict TypeScript check (builds all packages, then checks examples/bench) |
-| `pnpm run build` | Emit ESM + `.d.ts` to `dist/` in every package |
-| `pnpm run example` | Run the zero-dependency demo server |
-| `pnpm run examples` | Run all eleven runnable examples |
-| `pnpm run bench` | Run the B1–B11 benchmarks and regenerate the chart |
+| `pnpm run typecheck`     | Strict TypeScript check (builds all packages, then checks examples/bench)                                           |
+| `pnpm run build`         | Emit ESM + `.d.ts` to `dist/` in every package                                                                      |
+| `pnpm run example`       | Run the zero-dependency demo server                                                                                 |
+| `pnpm run examples`      | Run the runnable examples (starter plus 01–12)                                                                      |
+| `pnpm run bench`         | Run the B1–B11 benchmarks and regenerate the chart                                                                  |
 
 ## Running the benchmarks
 

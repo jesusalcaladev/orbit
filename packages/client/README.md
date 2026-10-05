@@ -72,6 +72,15 @@ const sub = client.subscribe('posts(status="live") { id }', (event, meta) => {
 });
 sub.onStatus((status) => console.log('socket:', status)); // connecting → live
 
+// A lost event is REPORTED, never applied silently. The server's retention
+// window is bounded, so after a long disconnection it refuses the resume
+// rather than replaying an incomplete stream; the client then re-subscribes and
+// fires onGap. Refetch the query when it does — the local state has a hole.
+sub.onGap(({ from, to }) => {
+  console.warn(`missed events ${from + 1}..${to ?? '?'} — refetching`);
+  void client.query('posts(status="live") { id }', { invalidate: true });
+});
+
 // Errors are typed: OrbitError (protocol) vs OrbitNetworkError (transport)
 try {
   await client.query('ghost { id }');
@@ -90,7 +99,7 @@ try {
 | `batchMutate(ops, options?)` | sugar for `execute({ ops })` — batch mutations in one request |
 | `stream(query, options?)` | SSE async iterable of graph levels (spec §7) |
 | `upload(action, args, files, options?)` | multipart mutation (spec §7) |
-| `subscribe(query, handler, options?)` | realtime subscription handle (`id`, `seq`, `close`, `onStatus`, `onError`, `onAck`) |
+| `subscribe(query, handler, options?)` | realtime subscription handle (`id`, `seq`, `close`, `onStatus`, `onError`, `onAck`, `onGap`) |
 | `socket().request(envelope, options?)` | envelope request/response over the same socket (spec §10) |
 | `client.realtimeStatus` | the shared socket's state (`connecting`/`live`/`reconnecting`/`closed`) — for app-level connection indicators |
 | `client.activeSubscriptions` | how many subscriptions are attached to the shared socket right now |
