@@ -11,6 +11,20 @@ export const DEFAULT_MAX_KEY_LENGTH = 128;
 /** Default maximum length of a filter value (quoted or bare). */
 export const DEFAULT_MAX_VALUE_LENGTH = 1024;
 
+/**
+ * Default maximum number of selections (fields + relations) on a **single**
+ * node. Depth alone does not bound cost: `user { a, b, … ×5000 }` is one level
+ * deep but fans out into thousands of adapter columns. Spec §4 cost limits.
+ */
+export const DEFAULT_MAX_BREADTH = 128;
+
+/**
+ * Default maximum number of selections across the **whole** tree — the total
+ * work one query can ask for. Bounds the "many mid-width nodes" shape that a
+ * per-node breadth cap alone would let through (`a { 100 fields, b { 100 … } }`).
+ */
+export const DEFAULT_MAX_COMPLEXITY = 1024;
+
 export interface ParseOptions {
   /** Maximum relation nesting depth. Defaults to 10. */
   maxDepth?: number;
@@ -18,6 +32,15 @@ export interface ParseOptions {
   maxKeyLength?: number;
   /** Maximum filter-value length (quoted or bare). Defaults to 1024. */
   maxValueLength?: number;
+  /**
+   * Maximum selections (fields + relations) on any single node.
+   * Defaults to 128.
+   */
+  maxBreadth?: number;
+  /**
+   * Maximum selections across the entire query tree. Defaults to 1024.
+   */
+  maxComplexity?: number;
   /** Origin stamped on every node. Defaults to `'client'`. */
   origin?: NodeOrigin;
 }
@@ -51,8 +74,11 @@ const BARE_STOP = /[\s,(){}="']/;
  * item   := IDENT [ "(" args ")" ] [ "{" fields "}" ]
  * ```
  *
- * Throws `ORBIT_INVALID_QUERY` on syntax errors and `ORBIT_MAX_DEPTH_EXCEEDED`
- * when the tree nests deeper than `maxDepth`.
+ * Throws `ORBIT_INVALID_QUERY` on syntax errors, `ORBIT_MAX_DEPTH_EXCEEDED`
+ * when the tree nests deeper than `maxDepth`, `ORBIT_MAX_BREADTH_EXCEEDED`
+ * when a single node selects more than `maxBreadth` items, and
+ * `ORBIT_MAX_COMPLEXITY_EXCEEDED` when the whole tree selects more than
+ * `maxComplexity`.
  */
 export function parseOQS(query: string, options: ParseOptions = {}): QueryNode {
   const parser = new Parser(query, options);
@@ -65,14 +91,44 @@ class Parser {
   private readonly maxDepth: number;
   private readonly maxKeyLength: number;
   private readonly maxValueLength: number;
+  private readonly maxBreadth: number;
+  private readonly maxComplexity: number;
   private readonly origin: NodeOrigin;
+  /** Selections counted so far across the whole tree (complexity budget). */
+  private complexity = 0;
 
   constructor(input: string, options: ParseOptions) {
     this.input = input;
     this.maxDepth = options.maxDepth ?? DEFAULT_MAX_DEPTH;
     this.maxKeyLength = options.maxKeyLength ?? DEFAULT_MAX_KEY_LENGTH;
     this.maxValueLength = options.maxValueLength ?? DEFAULT_MAX_VALUE_LENGTH;
+    this.maxBreadth = options.maxBreadth ?? DEFAULT_MAX_BREADTH;
+    this.maxComplexity = options.maxComplexity ?? DEFAULT_MAX_COMPLEXITY;
     this.origin = options.origin ?? 'client';
+  }
+
+  /**
+   * Charge one selection against the per-node breadth cap and the whole-tree
+   * complexity budget. Called for every field and every relation, before it is
+   * parsed, so an over-budget query fails on the offending selection instead of
+   * after building the whole tree.
+   */
+  private charge(entity: string, name: string, at: number, breadth: number): void {
+    if (breadth > this.maxBreadth) {
+      throw new OrbitError(
+        ErrorCode.MAX_BREADTH_EXCEEDED,
+        `Selection of '${entity}' exceeds the maximum breadth of ${this.maxBreadth} fields`,
+        { details: { entity, field: name, breadth, maxBreadth: this.maxBreadth, at } },
+      );
+    }
+    this.complexity += 1;
+    if (this.complexity > this.maxComplexity) {
+      throw new OrbitError(
+        ErrorCode.MAX_COMPLEXITY_EXCEEDED,
+        `Query exceeds the maximum complexity of ${this.maxComplexity} selections`,
+        { details: { complexity: this.complexity, maxComplexity: this.maxComplexity, at } },
+      );
+    }
   }
 
   /** Reject identifiers longer than `maxKeyLength` (spec §4 length validation). */
@@ -172,6 +228,8 @@ class Parser {
     if (this.peek() === '{') {
       this.pos += 1;
       this.skipWs();
+      // Selections seen on THIS node — the per-node breadth fan-out.
+      let breadth = 0;
       while (this.peek() !== '}') {
         if (this.pos >= this.input.length) {
           this.fail(`Unterminated '{' block for '${entity}'`);
@@ -199,6 +257,8 @@ class Parser {
           );
         }
         selection.add(name);
+        breadth += 1;
+        this.charge(entity, name, nameStart, breadth);
         if (isRelation) {
           const childDepth = depth + 1;
           if (childDepth > this.maxDepth) {

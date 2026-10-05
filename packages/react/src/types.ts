@@ -6,6 +6,7 @@ import type {
   OrbitError,
   OrbitStreamEvent,
   RealtimeStatus,
+  SubscriptionGap,
   SubscriptionEvent,
 } from '@orbit/client';
 import type { MutationArgs } from '@orbit/core';
@@ -162,6 +163,13 @@ export interface SubscriptionOptions {
   onEvent?: (event: SubscriptionEvent, meta: { seq: number }) => void;
   onStatus?: (status: RealtimeStatus) => void;
   onError?: (error: OrbitError) => void;
+  /**
+   * Called when the event stream is detected to have a hole — the server's
+   * retention window rolled over, so events were lost and the rendered data is
+   * now incomplete. The hook already refetches the query to heal it; this is
+   * for apps that want to react (e.g. show a "resyncing" hint).
+   */
+  onGap?: (gap: SubscriptionGap) => void;
 }
 
 export interface SubscriptionState<T = unknown> {
@@ -174,6 +182,11 @@ export interface SubscriptionState<T = unknown> {
   count: number;
   status: RealtimeStatus | 'idle' | 'error';
   error: OrbitError | undefined;
+  /**
+   * How many gaps (lost event ranges) were detected since mount. Non-zero
+   * means the data was refetched because events were missed.
+   */
+  gaps: number;
 }
 
 export interface StreamOptions {

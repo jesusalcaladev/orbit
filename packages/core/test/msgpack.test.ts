@@ -50,40 +50,67 @@ describe('encodeMsgpack — scaling budgets', () => {
   // 5 s timeout under full parallel load. The growable-writer codec encodes
   // the same value in ~5-10 ms.
   //
-  // Budgets are RELATIVE (time(70k) vs time(5k) of the same shape) instead of
-  // absolute wall-clock: instrumentation (`vitest --coverage`) and slow CI
-  // hardware multiply both sides equally, so the ratio cancels environment
-  // overhead — while still separating linear encoding (ratio ≈ 14-20×) from
-  // the old quadratic/spreading signature (ratio ≈ 200-350×). Threshold 60×
-  // keeps a ≥3× margin to both sides.
-  const BIG = 70_000;
-  const SMALL = 5_000;
-  const RATIO_BUDGET = 60;
+  // Budgets are RELATIVE (time(BIG) vs time(SMALL) of the same shape) instead
+  // of absolute wall-clock: instrumentation (`vitest --coverage`) and slow CI
+  // hardware multiply both sides, so the ratio cancels most environment
+  // overhead.
+  //
+  // The size gap is deliberately WIDE (40×) because the ratio's tolerance
+  // under CPU contention is roughly multiplicative noise: on a loaded machine a
+  // narrow gap (70k vs 5k = 14×) leaves only ~3× of headroom above the linear
+  // result and the budget fails for a perfectly linear codec. At 40× the
+  // signatures are far apart — linear ≈ 40×, quadratic ≈ 1600× — so a 200×
+  // budget sits 5× above linear and ~8× below quadratic, and survives
+  // contention while still failing loudly on the regression it guards.
+  const BIG = 80_000;
+  const SMALL = 2_000;
+  const RATIO_BUDGET = 200;
+
+  /**
+   * Best (fastest) per-iteration encode time, measured over enough iterations
+   * that the measurement itself spans a meaningful window.
+   *
+   * `min` of N runs alone is not enough on a loaded machine: the SMALL input
+   * encodes in well under a millisecond, so a single scheduler preemption
+   * (vitest runs test files in parallel) inflates the DENOMINATOR of the ratio
+   * by an order of magnitude and the budget fails for a codec that is perfectly
+   * linear. Repeating each measurement until it covers `MIN_WINDOW_MS` makes
+   * the noise a small fraction of the sample, and `min` then discards the rest.
+   */
+  const MIN_WINDOW_MS = 100;
 
   function bestOf(value: unknown, runs: number = 3): number {
+    // Calibrate the per-iteration cost, then batch enough iterations to fill
+    // the measurement window (capped so a slow iteration cannot explode the
+    // test into a minute-long loop).
+    const calibrate = performance.now();
+    encodeMsgpack(value);
+    const single = Math.max(performance.now() - calibrate, 0.001);
+    const reps = Math.max(1, Math.min(200, Math.ceil(MIN_WINDOW_MS / single)));
+
     let best = Number.POSITIVE_INFINITY;
     for (let i = 0; i < runs; i += 1) {
       const t0 = performance.now();
-      encodeMsgpack(value);
-      best = Math.min(best, performance.now() - t0);
+      for (let k = 0; k < reps; k += 1) encodeMsgpack(value);
+      best = Math.min(best, (performance.now() - t0) / reps);
     }
     return best;
   }
 
-  it('encodes numeric arrays linearly (70k vs 5k ratio budget)', () => {
+  it(`encodes numeric arrays linearly (${BIG} vs ${SMALL} ratio budget)`, () => {
     const big = Array.from({ length: BIG }, (_, i) => i % 256);
     const small = Array.from({ length: SMALL }, (_, i) => i % 256);
     expect(bestOf(big) / bestOf(small)).toBeLessThan(RATIO_BUDGET);
   });
 
-  it('encodes binary payloads linearly (70k vs 5k ratio budget)', () => {
+  it(`encodes binary payloads linearly (${BIG} vs ${SMALL} ratio budget)`, () => {
     expect(
       bestOf(new Uint8Array(BIG).fill(7) as Uint8Array<ArrayBuffer>) /
         bestOf(new Uint8Array(SMALL).fill(7) as Uint8Array<ArrayBuffer>),
     ).toBeLessThan(RATIO_BUDGET);
   });
 
-  it('encodes long strings linearly (70k vs 5k ratio budget)', () => {
+  it(`encodes long strings linearly (${BIG} vs ${SMALL} ratio budget)`, () => {
     expect(bestOf('x'.repeat(BIG)) / bestOf('x'.repeat(SMALL))).toBeLessThan(RATIO_BUDGET);
   });
 });

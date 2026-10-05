@@ -161,7 +161,7 @@ export function useOrbitMutation<TData = unknown, TVars extends MutationArgs = M
 
   const mutate = useCallback(
     (variables?: TVars, mutateOptions?: UseMutationOptions<TData, TVars>) => {
-      void mutateAsync(variables, mutateOptions);
+      void mutateAsync(variables, mutateOptions).catch(() => undefined);
     },
     [mutateAsync],
   );
@@ -198,6 +198,11 @@ function resolveInvalidate<TData>(
  * the last `seq` automatically (that is `@orbit/client`'s job); the hook only
  * listens and re-renders on events. The server's raw `SubscriptionEvent`
  * arrives as `event`, its data as `data`, and `seq` is the resume cursor.
+ *
+ * If the stream is ever detected to have a hole (the server's retention window
+ * rolled over, so events were lost), the hook **refetches the query** to heal
+ * the rendered data and reports the gap via `options.onGap` / `state.gaps` —
+ * without that refetch a subscription would silently render stale data.
  */
 export function useOrbitSubscription<T = unknown>(
   key: QueryKey,
@@ -215,6 +220,7 @@ export function useOrbitSubscription<T = unknown>(
     count: 0,
     status: 'idle',
     error: undefined,
+    gaps: 0,
   });
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-subscribing on key/query identity would loop; cacheKey tracks their content.
@@ -243,6 +249,16 @@ export function useOrbitSubscription<T = unknown>(
           if (!active) return;
           opts.onError?.(error);
           setState((s) => ({ ...s, error, status: 'error' as const }));
+        },
+        // Events were missed: the stream is no longer a complete picture, so
+        // refetch the same query (refresh, ignoring the cache) to restore a
+        // correct baseline, and tell the app a hole happened. The subscription
+        // stays open — patches keep applying while the refetch is in flight.
+        onGap: (gap) => {
+          if (!active) return;
+          opts.onGap?.(gap);
+          setState((s) => ({ ...s, gaps: s.gaps + 1 }));
+          void client.ensureQuery(key, query, { refresh: true });
         },
       },
     );

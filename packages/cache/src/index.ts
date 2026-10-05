@@ -26,7 +26,12 @@
  * prefix invalidation — and is **sync-or-async**, so Redis and Cloudflare KV
  * stores plug in unchanged. Keys are opaque `orbit:<hash>` strings (`fnv1a64`).
  */
-export { createCachePlugin, createMemoryCacheStore, parseCacheSpec } from '@orbit/core';
+export {
+  createCachePlugin,
+  createMemoryCacheStore,
+  createQueryAllowlistPlugin,
+  parseCacheSpec,
+} from '@orbit/core';
 export type {
   CachePlugin,
   CachePluginOptions,

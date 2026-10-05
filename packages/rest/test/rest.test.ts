@@ -74,13 +74,21 @@ describe('restAdapter.resolve', () => {
 
   it('returns null on upstream 404 (no record)', async () => {
     const fetchFn = async () => new Response('{"message":"nope"}', { status: 404 });
-    const adapter = restAdapter({ entity: 'user', baseUrl: 'https://api.example.com', fetchFn });
+    const adapter = restAdapter({
+      entity: 'user',
+      baseUrl: 'https://api.example.com',
+      fetchFn,
+    });
     expect(await adapter.resolve({ id: 'missing' }, {})).toBeNull();
   });
 
   it('throws INTERNAL on upstream 5xx (status preserved)', async () => {
     const fetchFn = async () => new Response('boom', { status: 500 });
-    const adapter = restAdapter({ entity: 'user', baseUrl: 'https://api.example.com', fetchFn });
+    const adapter = restAdapter({
+      entity: 'user',
+      baseUrl: 'https://api.example.com',
+      fetchFn,
+    });
     await expect(adapter.resolve({}, {})).rejects.toMatchObject({
       code: ErrorCode.INTERNAL,
       status: 500,
@@ -110,7 +118,11 @@ describe('restAdapter.resolve', () => {
 
   it('passes the upstream status through on other 4xx (no flattening to 400)', async () => {
     const fetchFn = async () => new Response('slow down', { status: 429 });
-    const adapter = restAdapter({ entity: 'user', baseUrl: 'https://api.example.com', fetchFn });
+    const adapter = restAdapter({
+      entity: 'user',
+      baseUrl: 'https://api.example.com',
+      fetchFn,
+    });
     await expect(adapter.resolve({}, {})).rejects.toMatchObject({
       code: ErrorCode.INTERNAL,
       status: 429,
@@ -134,7 +146,10 @@ describe('restAdapter.resolve', () => {
     expect(calls[0]?.url).toBe('https://api.example.com/v1/post?authorId=7');
   });
 
-  it('skips the parent key when the parent record carries no id', async () => {
+  it('returns nothing (and issues no request) when the parent has no id', async () => {
+    // Fail-CLOSED regression: an unidentifiable parent cannot be scoped, and
+    // dropping the parent filter would issue an UNSCOPED collection GET that
+    // returns every record in the upstream collection — a data-exposure bug.
     const calls: FetchCall[] = [];
     const adapter = restAdapter({
       entity: 'post',
@@ -144,8 +159,9 @@ describe('restAdapter.resolve', () => {
     });
 
     const result = await adapter.resolve({}, { parent: { entity: 'user', data: { name: 'Ada' } } });
-    expect(result).toEqual([{ id: 'p1' }]);
-    expect(calls[0]?.url).toBe('https://api.example.com/v1/post');
+    expect(result).toEqual([]);
+    // Crucially: no unscoped request is ever made.
+    expect(calls).toHaveLength(0);
   });
 
   it('resolves headers as a function (e.g. a live auth token)', async () => {
@@ -273,7 +289,10 @@ describe('restAdapter.mutate', () => {
   });
 
   it('rejects unknown actions with MUTATION_FAILED', async () => {
-    const adapter = restAdapter({ entity: 'user', baseUrl: 'https://api.example.com' });
+    const adapter = restAdapter({
+      entity: 'user',
+      baseUrl: 'https://api.example.com',
+    });
     await expect(adapter.mutate!('user.explode', {}, {})).rejects.toMatchObject({
       code: ErrorCode.MUTATION_FAILED,
     });
@@ -332,7 +351,11 @@ describe('restAdapter.mutate', () => {
 
   it('throws MUTATION_FAILED on upstream failure (status preserved)', async () => {
     const fetchFn = async () => new Response('teapot', { status: 418 });
-    const adapter = restAdapter({ entity: 'user', baseUrl: 'https://api.example.com', fetchFn });
+    const adapter = restAdapter({
+      entity: 'user',
+      baseUrl: 'https://api.example.com',
+      fetchFn,
+    });
     await expect(adapter.mutate!('user.create', { payload: {} }, {})).rejects.toMatchObject({
       code: ErrorCode.MUTATION_FAILED,
       status: 418,
@@ -414,7 +437,9 @@ describe('restAdapter end-to-end through createOrbit', () => {
       ],
     });
 
-    const result = await orbit.execute({ query: 'users(role="admin") { id, name }' });
+    const result = await orbit.execute({
+      query: 'users(role="admin") { id, name }',
+    });
     expect(result.status).toBe(200);
     expect(result.data).toEqual([
       { id: '1', name: 'Ada' },

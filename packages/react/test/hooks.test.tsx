@@ -274,6 +274,24 @@ describe('useOrbitMutation', () => {
     expect(onError).toHaveBeenCalledWith(error);
   });
 
+  it('handles failed fire-and-forget mutations without an unhandled rejection', async () => {
+    const { transport } = fakeTransport();
+    const error = new OrbitError(ErrorCode.MUTATION_FAILED, 'boom');
+    transport.mutate.mockRejectedValue(error);
+    const client = reactClientOf(transport);
+    const onError = vi.fn();
+    const { result } = renderHook(() => useOrbitMutation({ do: 'x.y' }, { onError }), {
+      wrapper: wrap(client),
+    });
+
+    act(() => {
+      result.current.mutate();
+    });
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error).toBe(error);
+    expect(onError).toHaveBeenCalledWith(error);
+  });
+
   it('supports per-call options: onSuccess, onError and invalidate', async () => {
     const { transport } = fakeTransport();
     transport.mutate.mockResolvedValue(okResponse({ id: '1' }));
@@ -361,6 +379,49 @@ describe('useOrbitSubscription', () => {
     unmount();
     expect(sub.handle.close).toHaveBeenCalled();
     expect(client.getSubscriptions()).toHaveLength(0);
+  });
+
+  it('refetches and reports when the event stream is detected to have a gap', async () => {
+    const { transport } = fakeTransport();
+    transport.query.mockResolvedValue(okResponse({ id: '1', text: 'resynced' }));
+    const client = reactClientOf(transport);
+    const onGap = vi.fn();
+    const { result } = renderHook(
+      () => useOrbitSubscription(['chat'], 'chat { id }', { onGap }),
+      { wrapper: wrap(client) },
+    );
+    await waitFor(() => expect(transport.subs).toHaveLength(1));
+    const sub = transport.subs[0]!;
+    transport.query.mockClear();
+
+    act(() => sub.emitGap({ from: 7, to: 9 }));
+
+    // The app is told, the state records it, and — the important part — the
+    // hook refetches so the rendered data is not silently stale.
+    expect(onGap).toHaveBeenCalledWith({ from: 7, to: 9 });
+    expect(result.current.gaps).toBe(1);
+    await waitFor(() => expect(transport.query).toHaveBeenCalledTimes(1));
+    expect(transport.query).toHaveBeenCalledWith('chat { id }', expect.anything());
+    // The subscription stays open — patches keep flowing after the refetch.
+    expect(sub.handle.close).not.toHaveBeenCalled();
+  });
+
+  it('ignores gaps after unmount (no refetch for a dead subscription)', async () => {
+    const { transport } = fakeTransport();
+    transport.query.mockResolvedValue(okResponse({ id: '1' }));
+    const client = reactClientOf(transport);
+    const onGap = vi.fn();
+    const { unmount } = renderHook(
+      () => useOrbitSubscription(['chat'], 'chat { id }', { onGap }),
+      { wrapper: wrap(client) },
+    );
+    await waitFor(() => expect(transport.subs).toHaveLength(1));
+    const sub = transport.subs[0]!;
+    unmount();
+    transport.query.mockClear();
+    act(() => sub.emitGap({ from: 2 }));
+    expect(onGap).not.toHaveBeenCalled();
+    expect(transport.query).not.toHaveBeenCalled();
   });
 
   it('passes an explicit subscription id through', () => {

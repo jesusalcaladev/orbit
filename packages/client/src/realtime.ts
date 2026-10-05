@@ -19,6 +19,32 @@ export interface SubscribeOptions {
   onError?: (error: OrbitError) => void;
   /** Called once the server established the subscription (`ack`/`resumed`). */
   onAck?: (id: string, kind: 'subscribe' | 'resume', seq: number) => void;
+  /**
+   * Called when the event stream is detected to have a hole (spec §10).
+   *
+   * Event sequence numbers are dense, so receiving `seq > cursor + 1` proves
+   * events were missed — the server's retention window rolled over, or the
+   * subscription was re-established from scratch. Orbit applies the patch
+   * anyway (it is valid data) but the local state now has a silent hole, so
+   * this fires with the missed range and the app should **refetch** the query.
+   */
+  onGap?: (gap: SubscriptionGap) => void;
+}
+
+/**
+ * A detected hole in a subscription's event stream: the events with sequence
+ * numbers in `(from, to]` were never delivered.
+ */
+export interface SubscriptionGap {
+  /** The last sequence number applied before the hole (the resume cursor). */
+  from: number;
+  /**
+   * The last missed sequence number — one before the event actually received.
+   * Omitted when the extent is unknown: a rejected resume means the server
+   * dropped an unbounded range (its retention window rolled over), so only the
+   * boundary is knowable.
+   */
+  to?: number;
 }
 
 /** A live subscription; the handle the caller holds to control it. */
@@ -35,6 +61,11 @@ export interface SubscriptionHandle {
   onError(cb: (error: OrbitError) => void): void;
   /** Watch the server's subscription confirmation (`ack`/`resumed`). */
   onAck(cb: (id: string, kind: 'subscribe' | 'resume', seq: number) => void): void;
+  /**
+   * Watch for holes in the event stream. When it fires, refetch the
+   * subscription's query — the local state missed one or more events.
+   */
+  onGap(cb: (gap: SubscriptionGap) => void): void;
 }
 
 interface SubEntry {
@@ -45,6 +76,7 @@ interface SubEntry {
   onErrors: Set<(error: OrbitError) => void>;
   statusCbs: Set<(status: RealtimeStatus) => void>;
   ackCbs: Set<(id: string, kind: 'subscribe' | 'resume', seq: number) => void>;
+  gapCbs: Set<(gap: SubscriptionGap) => void>;
 }
 
 interface PendingRequest {
@@ -57,9 +89,15 @@ interface PendingRequest {
 /**
  * The multiplexed realtime transport (spec §10): all subscriptions of one
  * client share a single WebSocket. Reconnects automatically with bounded
- * exponential backoff, `resume`s from the last `seq` (the server replays the
- * gap from its retention log), and falls back to a fresh `subscribe` when the
- * retention window expired (`ORBIT_SUBSCRIPTION_FAILED`).
+ * exponential backoff and `resume`s from the last `seq` (the server replays the
+ * gap from its retention log).
+ *
+ * Resume is only ever honoured when the server can prove the replay is
+ * complete. If its retention window rolled over, the server rejects the resume
+ * (`ORBIT_SUBSCRIPTION_FAILED`) and this client falls back to a fresh
+ * subscribe. Either way the local state may be missing events, so a gap is
+ * reported through `onGap` (subscribe option or handle) — **refetch the query
+ * when it fires.** A gapless stream keeps `seq` dense and never reports one.
  */
 export class RealtimeClient {
   readonly #url: string;
@@ -75,7 +113,7 @@ export class RealtimeClient {
   #status: RealtimeStatus = 'closed';
   #subSeq = 0;
   #requestSeq = 0;
-  #openResolvers: Array<() => void> = [];
+  #openResolvers = new Set<() => void>();
 
   constructor(url: string, WebSocketImpl: typeof WebSocket) {
     this.#url = url;
@@ -121,10 +159,12 @@ export class RealtimeClient {
       onErrors: new Set(),
       statusCbs: new Set(),
       ackCbs: new Set(),
+      gapCbs: new Set(),
     };
     this.#subs.set(id, entry);
     if (options.onError !== undefined) entry.onErrors.add(options.onError);
     if (options.onAck !== undefined) entry.ackCbs.add(options.onAck);
+    if (options.onGap !== undefined) entry.gapCbs.add(options.onGap);
 
     // Attach as soon as the socket is (re)connected; if it is already open,
     // send the subscribe immediately.
@@ -150,6 +190,9 @@ export class RealtimeClient {
       },
       onAck: (cb) => {
         entry.ackCbs.add(cb);
+      },
+      onGap: (cb) => {
+        entry.gapCbs.add(cb);
       },
     };
     return handle;
@@ -252,8 +295,9 @@ export class RealtimeClient {
       this.#connecting = false;
       this.#attempts = 0;
       this.#setStatus('live');
-      for (const resolver of this.#openResolvers) resolver();
-      this.#openResolvers = [];
+      const openResolvers = [...this.#openResolvers];
+      this.#openResolvers.clear();
+      for (const resolver of openResolvers) resolver();
       // (Re)attach every subscription — `resume` after the first attach so
       // missed events replay from the server's retention log.
       for (const [id, entry] of this.#subs) {
@@ -298,14 +342,29 @@ export class RealtimeClient {
     if (this.#closed) throw new OrbitNetworkError('Client is closed');
     this.#connect();
     await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(
-        () => reject(new OrbitNetworkError('Realtime socket did not connect')),
-        CONNECT_TIMEOUT_MS,
-      );
-      this.#openResolvers.push(() => {
+      let settled = false;
+      let resolver: () => void;
+      // Both arms below re-check `settled` defensively: the resolver is removed
+      // from `#openResolvers` and the timer is cleared on the first settle, so
+      // in practice neither can fire twice. The guard makes that an invariant
+      // of the code rather than of every caller's bookkeeping, and keeps a
+      // late duplicate settle from rejecting an already-resolved promise.
+      const timer = setTimeout(() => {
+        /* v8 ignore next — see above: the timer is cleared on the first settle */
+        if (settled) return;
+        settled = true;
+        this.#openResolvers.delete(resolver);
+        reject(new OrbitNetworkError('Realtime socket did not connect'));
+      }, CONNECT_TIMEOUT_MS);
+      resolver = () => {
+        /* v8 ignore next — see above: removed from the set on the first settle */
+        if (settled) return;
+        settled = true;
+        this.#openResolvers.delete(resolver);
         clearTimeout(timer);
         resolve();
-      });
+      };
+      this.#openResolvers.add(resolver);
     });
   }
 
@@ -383,7 +442,18 @@ export class RealtimeClient {
     if (typeof message.id === 'string' && isRecord(message.event)) {
       const entry = this.#subs.get(message.id);
       if (entry === undefined) return;
-      if (typeof message.seq === 'number' && message.seq > entry.seq) entry.seq = message.seq;
+      if (typeof message.seq === 'number' && message.seq > entry.seq) {
+        // Sequence numbers are dense, so a jump means the events in between
+        // were never delivered. The patch itself is valid, but applying it
+        // over a hole leaves silently stale state — surface the missed range
+        // so the app can refetch. (`seq === entry.seq + 1` is the normal,
+        // gapless case and stays silent.)
+        if (message.seq > entry.seq + 1) {
+          const gap: SubscriptionGap = { from: entry.seq, to: message.seq - 1 };
+          for (const cb of entry.gapCbs) cb(gap);
+        }
+        entry.seq = message.seq;
+      }
       entry.handler(message.event as unknown as SubscriptionEvent, {
         seq: typeof message.seq === 'number' ? message.seq : entry.seq,
       });
@@ -394,6 +464,12 @@ export class RealtimeClient {
       const entry = this.#subs.get(message.ack);
       if (entry !== undefined) {
         entry.attached = true;
+        // A fresh `subscribe` creates a NEW server-side subscriber whose
+        // sequence restarts at 1. Keeping the old cursor here would leave it
+        // permanently ahead of the server, so the next reconnect would ask to
+        // resume from a seq the server never reached — and silently receive
+        // nothing, forever. Reset to 0 and let `onGap` flag the discontinuity.
+        entry.seq = 0;
         for (const cb of entry.ackCbs) cb(message.ack, 'subscribe', entry.seq);
       }
       return;
@@ -449,6 +525,11 @@ export class RealtimeClient {
     // back to a fresh subscribe on the same socket, silently.
     if (entry.attached && error.code === ErrorCode.SUBSCRIPTION_FAILED) {
       entry.attached = false;
+      // The server could not replay the window we asked for, so events were
+      // lost for good. Tell the app before re-subscribing: the fresh subscribe
+      // restarts the sequence at 1, which would otherwise look perfectly
+      // contiguous and hide the hole.
+      for (const cb of entry.gapCbs) cb({ from: entry.seq });
       const socket = this.#socket;
       /* v8 ignore next — the error frame arrived on this socket, so it is
          open; the guard defends against a mid-frame close. */

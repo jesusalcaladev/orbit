@@ -11,7 +11,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { createOrbit, createSessionDriver, memoryAdapter } from '../src/index.js';
-import { SubscriptionHub } from '../src/index.js';
+import { RESUME_LOG_MAX, SubscriptionHub } from '../src/index.js';
 import type { SubscriptionEvent } from '../src/types.js';
 
 function makeWorld() {
@@ -85,6 +85,28 @@ describe('createSessionDriver — the shared frame contract (spec §10)', () => 
     await driver.dispatch({ unsubscribe: 's1' });
     expect(sent).toContainEqual({ unsubscribed: 's1' });
     expect(handlers.size).toBe(0);
+  });
+
+  it('rejects a same-session resume whose window expired', async () => {
+    // A resume can also arrive on a session that never dropped — the client
+    // re-attaching on the same socket. If the window expired anyway the replay
+    // would be incomplete, so it must be refused here too rather than
+    // acknowledged as `resumed` with missing events.
+    const { orbit, handlers } = makeWorld();
+    const { driver, sent } = makeSession(orbit);
+
+    await driver.dispatch({ subscribe: 'post { id }', id: 's1' });
+    // Overflow the server's retention ring for this subscription.
+    for (let i = 0; i <= RESUME_LOG_MAX; i += 1) {
+      for (const handler of handlers) handler({ type: 'created', id: `p${i}`, data: null });
+    }
+
+    await expect(driver.dispatch({ resume: 's1', after: 0 })).rejects.toMatchObject({
+      code: 'ORBIT_SUBSCRIPTION_FAILED',
+      details: { subscription: 's1', after: 0 },
+    });
+    // No `resumed` ack: the client must not believe the replay succeeded.
+    expect(sent.some((frame) => frame.resumed === 's1')).toBe(false);
   });
 
   it('replays the gap on resume within the connection', async () => {

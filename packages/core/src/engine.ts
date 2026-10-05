@@ -9,11 +9,14 @@ import {
 } from './envelope.js';
 import { ErrorCode, isOrbitError, OrbitError, toOrbitError } from './errors.js';
 import {
+  DEFAULT_MAX_BREADTH,
+  DEFAULT_MAX_COMPLEXITY,
   DEFAULT_MAX_DEPTH,
   DEFAULT_MAX_KEY_LENGTH,
   DEFAULT_MAX_VALUE_LENGTH,
   parseOQS,
 } from './parser.js';
+import type { ParseOptions } from './parser.js';
 import { PluginRegistry } from './plugins/registry.js';
 import { isShortCircuit } from './plugins/types.js';
 import type { OrbitPlugin, AfterExecuteInput } from './plugins/types.js';
@@ -56,6 +59,20 @@ const VARY = 'accept, accept-encoding';
 /** Max entries in the parse LRU — bounded so a hot client can't grow it forever. */
 const PARSE_CACHE_MAX = 256;
 
+/**
+ * The `parsed` value handed to `onBeforeResolve` when there is no query tree —
+ * a mutation batch, whose ops are gated before any of them runs. Hooks that
+ * rewrite or short-circuit on a query tree must ignore it; it exists only so
+ * the hook signature stays uniform.
+ */
+const UNPARSED: QueryNode = Object.freeze({
+  entity: '',
+  filters: Object.freeze({}) as Filters,
+  fields: Object.freeze([]) as unknown as string[],
+  relations: Object.freeze({}) as QueryNode['relations'],
+  origin: 'client',
+});
+
 export interface OrbitConfig {
   /** Adapters to mount (entity → data source). */
   adapters?: DataAdapter[] | AdapterRegistry;
@@ -69,6 +86,18 @@ export interface OrbitConfig {
   maxKeyLength?: number;
   /** Maximum filter-value length (quoted or bare). Default 1024. */
   maxValueLength?: number;
+  /**
+   * Maximum selections (fields + relations) on any single node of a query.
+   * Default 128. Depth does not bound fan-out, so a query one level deep can
+   * still ask for thousands of columns; this caps that shape.
+   */
+  maxQueryBreadth?: number;
+  /**
+   * Maximum selections across an entire query tree. Default 1024. Bounds the
+   * total work one request can ask for, including the many-mid-width-nodes
+   * shape a per-node breadth cap alone would admit.
+   */
+  maxQueryComplexity?: number;
   /** Optional cache plugin configuration. When set, automatically mounts
    *  `createCachePlugin` with these options and integrates caching into the
    *  handler (reads cache spec from `envelope.cache` or `x-orbit-cache` header). */
@@ -106,6 +135,8 @@ interface OrbitOptions {
    */
   providers: Readonly<Record<string, unknown>>;
   maxQueryDepth: number;
+  maxQueryBreadth: number;
+  maxQueryComplexity: number;
   maxPayloadBytes: number;
   maxKeyLength: number;
   maxValueLength: number;
@@ -176,6 +207,25 @@ export class Orbit {
    * and could mutate it, which would corrupt the shared cache entry. With an
    * empty plugin list the tree is read-only, so repeat queries skip parsing.
    */
+  /**
+   * The engine's parse limits, as one object.
+   *
+   * Every `parseOQS` call in the engine goes through here so a new limit cannot
+   * be added to some call sites and forgotten in others — a limit that only
+   * guards the direct `execute()` path would still be bypassable over HTTP and
+   * SSE. The subscription hub reads the same three limits off the engine.
+   */
+  #parseOptions(origin?: NodeOrigin): ParseOptions {
+    return {
+      maxDepth: this.#options.maxQueryDepth,
+      maxKeyLength: this.#options.maxKeyLength,
+      maxValueLength: this.#options.maxValueLength,
+      maxBreadth: this.#options.maxQueryBreadth,
+      maxComplexity: this.#options.maxQueryComplexity,
+      ...(origin !== undefined ? { origin } : {}),
+    };
+  }
+
   #parse(query: string, origin: NodeOrigin): QueryNode {
     // Safe to omit the length caps from the key: they are engine-constant
     // (readonly options), this cache is per-engine, and the LRU path only
@@ -189,12 +239,7 @@ export class Orbit {
       this.#parseCache.set(key, hit);
       return hit;
     }
-    const node = parseOQS(query, {
-      maxDepth: this.#options.maxQueryDepth,
-      maxKeyLength: this.#options.maxKeyLength,
-      maxValueLength: this.#options.maxValueLength,
-      origin,
-    });
+    const node = parseOQS(query, this.#parseOptions(origin));
     this.#parseCache.set(key, node);
     if (this.#parseCache.size > PARSE_CACHE_MAX) {
       // The map just grew past the cap, so it is non-empty: a key exists.
@@ -236,6 +281,16 @@ export class Orbit {
   /** Maximum filter-value length, enforced at parse (used by the realtime hub too). */
   get maxValueLength(): number {
     return this.#options.maxValueLength;
+  }
+
+  /** Maximum selections on a single node, enforced at parse (used by the realtime hub too). */
+  get maxQueryBreadth(): number {
+    return this.#options.maxQueryBreadth;
+  }
+
+  /** Maximum selections in a whole query tree, enforced at parse (used by the realtime hub too). */
+  get maxQueryComplexity(): number {
+    return this.#options.maxQueryComplexity;
   }
 
   /** Maximum batch mutation ops per envelope (used by the realtime hub too). */
@@ -304,7 +359,11 @@ export class Orbit {
             { details: { timeoutMs } },
           )
         : await this.#normalizeError(error, fullCtx);
-      await this.#fireAfterExecute({ error: orbitError, envelope: valid, ctx: fullCtx });
+      await this.#fireAfterExecute({
+        error: orbitError,
+        envelope: valid,
+        ctx: fullCtx,
+      });
       throw orbitError;
     } finally {
       if (timer !== undefined) clearTimeout(timer);
@@ -404,13 +463,35 @@ export class Orbit {
     const encoding =
       typeof CompressionStream === 'undefined'
         ? null
-        : negotiateEncoding(request.headers.get('accept-encoding'), { brotli: hasBrotli() });
+        : negotiateEncoding(request.headers.get('accept-encoding'), {
+            brotli: hasBrotli(),
+          });
     // Conditional requests are only meaningful for the cacheable GET endpoint:
     // a POST response is not a shared-cache representation, so it gets neither
     // a validator nor a 304 (spec §7). `undefined` opts the response out.
     const conditional =
       request.method === 'GET' ? { ifNoneMatch: request.headers.get('if-none-match') } : undefined;
     try {
+      // CORS preflight (additive, spec §7): an OPTIONS request carries no
+      // envelope — the browser is asking the SERVER for permission before any
+      // application request exists. When a mounted plugin can answer
+      // preflights (`@orbit/cors` — duck-typed `preflight` method, the same
+      // pattern as the cache plugin's eviction capability), run it and serve
+      // a bare 204 with the `access-control-*` headers it stamped on
+      // `ctx.responseHeaders`. A plugin that throws denies the preflight with
+      // its error's status. Without such a plugin the request falls through
+      // to the envelope path, which rejects it exactly as before.
+      if (request.method === 'OPTIONS') {
+        const answerPreflight = findPreflightHandler(this.#options.plugins);
+        if (answerPreflight !== undefined) {
+          await answerPreflight(request, base);
+          return new Response(null, {
+            status: 204,
+            headers: finalHeaders({ vary: VARY }, base),
+          });
+        }
+      }
+
       // GET endpoint (spec §3 additive): queries via query-string/headers,
       // making them CDN-cacheable. Only { query } envelopes are allowed —
       // mutations (do/ops) must use POST. The query can come from the `query`
@@ -427,13 +508,12 @@ export class Orbit {
         }
         const cache =
           url.searchParams.get('cache') ?? request.headers.get('x-orbit-cache') ?? undefined;
-        const envelope: OrbitEnvelope = { query, ...(cache !== undefined ? { cache } : {}) };
+        const envelope: OrbitEnvelope = {
+          query,
+          ...(cache !== undefined ? { cache } : {}),
+        };
         if (format === 'sse') {
-          parseOQS(query, {
-            maxDepth: this.#options.maxQueryDepth,
-            maxKeyLength: this.#options.maxKeyLength,
-            maxValueLength: this.#options.maxValueLength,
-          });
+          parseOQS(query, this.#parseOptions());
           return this.#sseResponse(this.stream(envelope, base), encoding, base);
         }
         const result = await this.execute(envelope, base);
@@ -447,7 +527,10 @@ export class Orbit {
           ErrorCode.PAYLOAD_TOO_LARGE,
           'Request payload exceeds the configured limit',
           {
-            details: { maxBytes: this.#options.maxPayloadBytes, received: declared },
+            details: {
+              maxBytes: this.#options.maxPayloadBytes,
+              received: declared,
+            },
           },
         );
       }
@@ -461,11 +544,7 @@ export class Orbit {
         // `#readMultipart` always returns an object (possibly empty).
         const fullCtx: OrbitContext = { ...base, files };
         if (format === 'sse') {
-          parseOQS(envelope.query ?? '', {
-            maxDepth: this.#options.maxQueryDepth,
-            maxKeyLength: this.#options.maxKeyLength,
-            maxValueLength: this.#options.maxValueLength,
-          });
+          parseOQS(envelope.query ?? '', this.#parseOptions());
           return this.#sseResponse(this.stream(envelope, fullCtx), encoding, fullCtx);
         }
         const result = await this.execute(envelope, fullCtx);
@@ -483,11 +562,7 @@ export class Orbit {
         // Fail fast on query syntax errors BEFORE committing to a 200 stream:
         // only resolution-stage errors (e.g. an entity that doesn't resolve)
         // become SSE frames. Without this, ORBIT_INVALID_QUERY would be a 200.
-        parseOQS(envelope.query ?? '', {
-          maxDepth: this.#options.maxQueryDepth,
-          maxKeyLength: this.#options.maxKeyLength,
-          maxValueLength: this.#options.maxValueLength,
-        });
+        parseOQS(envelope.query ?? '', this.#parseOptions());
         return this.#sseResponse(this.stream(envelope, base), encoding, base);
       }
 
@@ -497,7 +572,28 @@ export class Orbit {
       // `execute` already normalizes (running onError hooks once); only
       // normalize raw errors here so translators never run twice.
       const orbitError = isOrbitError(error) ? error : await this.#normalizeError(error, base);
-      return this.#errorResponse(orbitError, format, encoding, base);
+      // Building the error response can itself fail (a runtime without the
+      // negotiated compression codec, a broken plugin header…). An exception
+      // here would escape the handler and crash the host — degrade to the
+      // plainest safe answer instead: the error contract as uncompressed
+      // JSON with `no-store`.
+      //
+      // `await` inside the `try` is load-bearing: `#errorResponse` is async and
+      // compresses via `compressBytes`, so the realistic failure is a REJECTED
+      // promise, not a synchronous throw. Returning it without awaiting leaves
+      // the rejection outside this catch, and the handler's whole safety net is
+      // bypassed precisely when it is needed.
+      try {
+        return await this.#errorResponse(orbitError, format, encoding, base);
+      } catch {
+        return new Response(JSON.stringify(orbitError.toJSON()), {
+          status: orbitError.status,
+          headers: {
+            'content-type': JSON_CONTENT_TYPE,
+            'cache-control': 'no-store',
+          },
+        });
+      }
     }
   }
 
@@ -520,7 +616,10 @@ export class Orbit {
         ErrorCode.PAYLOAD_TOO_LARGE,
         'Request payload exceeds the configured limit',
         {
-          details: { maxBytes: this.#options.maxPayloadBytes, received: raw.byteLength },
+          details: {
+            maxBytes: this.#options.maxPayloadBytes,
+            received: raw.byteLength,
+          },
         },
       );
     }
@@ -528,7 +627,9 @@ export class Orbit {
     try {
       // Reconstruct with the ORIGINAL content-type so the boundary travels with
       // the body (a bare Response loses the multipart boundary).
-      form = await new Response(raw, { headers: { 'content-type': contentType } }).formData();
+      form = await new Response(raw, {
+        headers: { 'content-type': contentType },
+      }).formData();
     } catch {
       throw new OrbitError(
         ErrorCode.INVALID_QUERY,
@@ -569,7 +670,10 @@ export class Orbit {
       }
       if (name === 'envelope') continue;
       if (value instanceof File) {
-        files[name] = value;
+        // Attacker-controlled field name: `setOwn` defines an own property so a
+        // field literally called `__proto__` cannot rewrite this object's
+        // prototype (every other attacker-keyed map in core does the same).
+        setOwn(files, name, value);
       } else {
         throw new OrbitError(
           ErrorCode.INVALID_QUERY,
@@ -631,12 +735,7 @@ export class Orbit {
     let parsed =
       this.#options.plugins.list.length === 0
         ? this.#parse(raw, origin)
-        : parseOQS(raw, {
-            maxDepth: this.#options.maxQueryDepth,
-            maxKeyLength: this.#options.maxKeyLength,
-            maxValueLength: this.#options.maxValueLength,
-            origin,
-          });
+        : parseOQS(raw, this.#parseOptions(origin));
 
     // 3. onAfterParse — enrich or replace the parsed tree.
     for (const plugin of this.#options.plugins.list) {
@@ -651,7 +750,11 @@ export class Orbit {
     for (const plugin of this.#options.plugins.list) {
       const result = await plugin.hooks.onBeforeResolve?.({ parsed, ctx });
       if (isShortCircuit(result)) {
-        return { data: result.shortCircuit, fromCache: true, contentType: JSON_CONTENT_TYPE };
+        return {
+          data: result.shortCircuit,
+          fromCache: true,
+          contentType: JSON_CONTENT_TYPE,
+        };
       }
     }
 
@@ -684,10 +787,20 @@ export class Orbit {
    * if any op fails, the error is returned immediately and subsequent ops
    * are skipped. The response `data` is an array of per-op results; the
    * top-level `invalidates` is the union of all ops' invalidation keys.
+   *
+   * `onBeforeResolve` fires ONCE for the whole batch before the first op runs.
+   * That pre-flight point is what lets a gate reject the batch atomically —
+   * without it, a policy plugin could only reject op N after ops 1..N-1 had
+   * already committed, leaving the caller with a half-applied batch it was
+   * told had failed.
    */
   async #executeBatchMutations(ops: MutationOp[], ctx: OrbitContext): Promise<OrbitResult> {
     const results: unknown[] = [];
     const allInvalidates: string[] = [];
+
+    for (const plugin of this.#options.plugins.list) {
+      await plugin.hooks.onBeforeResolve?.({ parsed: UNPARSED, ctx });
+    }
 
     for (const op of ops) {
       const opEnvelope: OrbitEnvelope = {
@@ -814,7 +927,10 @@ export class Orbit {
 
     return {
       status: 200,
-      data: { success: true, ...(mutation.id !== undefined ? { id: mutation.id } : {}) },
+      data: {
+        success: true,
+        ...(mutation.id !== undefined ? { id: mutation.id } : {}),
+      },
       ...(invalidates ? { invalidates } : {}),
       contentType: JSON_CONTENT_TYPE,
     };
@@ -872,7 +988,11 @@ export class Orbit {
         );
       }
 
-      const requests: Array<{ pending: Pending; filters: Filters; ctx: OrbitContext }> = [];
+      const requests: Array<{
+        pending: Pending;
+        filters: Filters;
+        ctx: OrbitContext;
+      }> = [];
       for (const pending of group) {
         let filters = { ...pending.node.filters };
         let requestCtx: OrbitContext = { ...ctx, parent: pending.parent };
@@ -1040,7 +1160,10 @@ export class Orbit {
           headers,
         });
       }
-      return new Response(result.body as BodyInit, { status: result.status, headers });
+      return new Response(result.body as BodyInit, {
+        status: result.status,
+        headers,
+      });
     }
 
     const payload = {
@@ -1111,7 +1234,11 @@ export class Orbit {
         status: orbitError.status,
         headers: noStore(
           finalHeaders(
-            { 'content-type': SSE_CONTENT_TYPE, 'cache-control': 'no-cache', vary: VARY },
+            {
+              'content-type': SSE_CONTENT_TYPE,
+              'cache-control': 'no-cache',
+              vary: VARY,
+            },
             ctx,
           ),
         ),
@@ -1121,7 +1248,11 @@ export class Orbit {
       const bytes = encodeMsgpack(payload);
       const headers = noStore(
         finalHeaders(
-          { 'content-type': MSGPACK_CONTENT_TYPE, 'cache-control': 'no-store', vary: VARY },
+          {
+            'content-type': MSGPACK_CONTENT_TYPE,
+            'cache-control': 'no-store',
+            vary: VARY,
+          },
           ctx,
         ),
       );
@@ -1137,7 +1268,11 @@ export class Orbit {
     const body = JSON.stringify(payload);
     const headers = noStore(
       finalHeaders(
-        { 'content-type': JSON_CONTENT_TYPE, 'cache-control': 'no-store', vary: VARY },
+        {
+          'content-type': JSON_CONTENT_TYPE,
+          'cache-control': 'no-store',
+          vary: VARY,
+        },
         ctx,
       ),
     );
@@ -1201,7 +1336,11 @@ export class Orbit {
     // handler's `ctx` option); a pipeline-set `responseHeaders` arrives too
     // late to reach this Response (documented on `OrbitContext`).
     const headers = finalHeaders(
-      { 'content-type': SSE_CONTENT_TYPE, 'cache-control': 'no-cache', vary: VARY },
+      {
+        'content-type': SSE_CONTENT_TYPE,
+        'cache-control': 'no-cache',
+        vary: VARY,
+      },
       ctx,
     );
     if (encoding !== null) {
@@ -1215,7 +1354,10 @@ export class Orbit {
     let orbitError = toOrbitError(error, ctx);
     for (const plugin of this.#options.plugins.list) {
       try {
-        const translated = await plugin.hooks.onError?.({ error: orbitError, ctx });
+        const translated = await plugin.hooks.onError?.({
+          error: orbitError,
+          ctx,
+        });
         if (translated instanceof OrbitError) orbitError = translated;
       } catch {
         // A failing error handler must never mask the original error.
@@ -1256,6 +1398,8 @@ export function createOrbit(config: OrbitConfig = {}): Orbit {
     plugins,
     providers,
     maxQueryDepth: config.maxQueryDepth ?? DEFAULT_MAX_DEPTH,
+    maxQueryBreadth: config.maxQueryBreadth ?? DEFAULT_MAX_BREADTH,
+    maxQueryComplexity: config.maxQueryComplexity ?? DEFAULT_MAX_COMPLEXITY,
     maxPayloadBytes: config.maxPayloadBytes ?? DEFAULT_MAX_PAYLOAD_BYTES,
     maxKeyLength: config.maxKeyLength ?? DEFAULT_MAX_KEY_LENGTH,
     maxValueLength: config.maxValueLength ?? DEFAULT_MAX_VALUE_LENGTH,
@@ -1263,6 +1407,29 @@ export function createOrbit(config: OrbitConfig = {}): Orbit {
     maxMultipartFields: config.maxMultipartFields ?? 64,
     maxOps: config.maxOps ?? DEFAULT_MAX_OPS,
   });
+}
+
+/**
+ * A plugin that can answer CORS preflights (and bare OPTIONS requests) —
+ * duck-typed, the same pattern as the cache plugin's eviction capability: the
+ * engine never imports `@orbit/cors`, it only looks for a plugin that exposes
+ * `preflight`. The method receives the raw request and stamps the
+ * `access-control-*` answer onto `ctx.responseHeaders`; throwing denies the
+ * preflight with the thrown error's status (e.g. a 403).
+ */
+interface PreflightPlugin {
+  preflight?(request: Request, ctx: OrbitContext): void | Promise<void>;
+}
+
+/** Find the first mounted plugin that can answer a preflight, if any. */
+function findPreflightHandler(
+  plugins: PluginRegistry,
+): NonNullable<PreflightPlugin['preflight']> | undefined {
+  for (const plugin of plugins.list) {
+    const candidate = plugin as OrbitPlugin & PreflightPlugin;
+    if (typeof candidate.preflight === 'function') return candidate.preflight.bind(candidate);
+  }
+  return undefined;
 }
 
 /**
@@ -1361,7 +1528,10 @@ function collectProviders(plugins: PluginRegistry): Readonly<Record<string, unkn
  * Build a response `Headers` set: the engine's base headers (content-type,
  * negotiation metadata) merged with the pipeline's `ctx.responseHeaders`.
  * Array values append one header line per item — `set-cookie` in particular
- * needs a line per cookie, and `Headers.append` preserves that.
+ * needs a line per cookie, and `Headers.append` preserves that. `vary` is
+ * merged as the LIST header it is: a plugin adding `origin` (e.g.
+ * `@orbit/cors`) keeps the engine's `accept, accept-encoding` on the wire
+ * instead of silently replacing it.
  */
 function finalHeaders(base: Record<string, string>, ctx: OrbitContext): Headers {
   const headers = new Headers(base);
@@ -1369,6 +1539,26 @@ function finalHeaders(base: Record<string, string>, ctx: OrbitContext): Headers 
     for (const [name, value] of Object.entries(ctx.responseHeaders)) {
       if (Array.isArray(value)) {
         for (const item of value) headers.append(name, item);
+      } else if (name.toLowerCase() === 'vary') {
+        /* v8 ignore start — defensive: every `finalHeaders` call site passes
+           `vary: VARY` as a base header, so there is always an existing value
+           to merge into and always at least one surviving token. Kept so a
+           future call site that sets no base `vary` degrades to the plugin's
+           tokens rather than throwing or emitting an empty header. */
+        const tokens = headers
+          .get('vary')
+          ?.split(',')
+          .map((token) => token.trim())
+          .filter((token) => token !== '');
+        const merged = tokens ?? [];
+        for (const token of value.split(',')) {
+          const trimmed = token.trim();
+          if (trimmed !== '' && !merged.some((t) => t.toLowerCase() === trimmed.toLowerCase())) {
+            merged.push(trimmed);
+          }
+        }
+        if (merged.length > 0) headers.set('vary', merged.join(', '));
+        /* v8 ignore stop */
       } else {
         headers.set(name, value);
       }

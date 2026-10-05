@@ -115,7 +115,11 @@ function parseEncodingEntries(header: string | null | undefined): EncodingEntry[
       const [key, value] = param.trim().split('=');
       if (key === 'q' && value !== undefined) {
         const parsed = Number(value);
-        if (Number.isFinite(parsed)) q = parsed;
+        // `Number('')` is 0, so an EMPTY q-value (`gzip;q=`) would otherwise
+        // read as an explicit "unacceptable" and silently disable compression
+        // for a response that CAN be compressed. Treat a blank q as absent and
+        // keep the default, like any other unparseable q.
+        if (value.trim() !== '' && Number.isFinite(parsed)) q = parsed;
       }
     }
     // `split()` always yields at least one element, so `rawName` is defined.

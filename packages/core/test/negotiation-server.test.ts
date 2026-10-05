@@ -168,11 +168,15 @@ describe('handler — gzip', () => {
  */
 function stubCompressionStream(brotli: boolean): () => void {
   const original = globalThis.CompressionStream;
-  const stub = (format: string) => {
+  // MUST be a constructable `function`, not an arrow: the engine (per the web
+  // standard) invokes `new CompressionStream(format)` — an arrow would throw
+  // `TypeError: CompressionStream is not a constructor` on every use,
+  // including the gzip delegation below.
+  const stub = function (this: unknown, format: string) {
     if (format !== 'br') return new original(format as CompressionFormat);
     if (!brotli) throw new TypeError('unsupported format: br');
     return new TransformStream<Uint8Array<ArrayBuffer>, Uint8Array<ArrayBuffer>>();
-  };
+  } as unknown as typeof CompressionStream;
   (globalThis as unknown as { CompressionStream: unknown }).CompressionStream = stub;
   return () => {
     (globalThis as unknown as { CompressionStream: unknown }).CompressionStream = original;

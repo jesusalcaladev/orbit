@@ -28,6 +28,9 @@ const FROZEN_TYPE_EXPORTS = [
   'CacheStore',
   'CacheEntry',
   'MemoryCacheStoreOptions',
+  // Additive (spec §12) — query allowlist plugin options.
+  'QueryAllowlistOptions',
+  'QueryAllowlistPluginOptions',
   'OrbitPlugin',
   'OrbitHooks',
   'ShortCircuit',
@@ -84,6 +87,10 @@ const FROZEN_EXPORTS = [
   // Query language
   'parseOQS',
   'DEFAULT_MAX_DEPTH',
+  'DEFAULT_MAX_KEY_LENGTH',
+  'DEFAULT_MAX_VALUE_LENGTH',
+  'DEFAULT_MAX_BREADTH',
+  'DEFAULT_MAX_COMPLEXITY',
   // Errors
   'OrbitError',
   'ErrorCode',
@@ -101,6 +108,8 @@ const FROZEN_EXPORTS = [
   'createCachePlugin',
   'parseCacheSpec',
   'createMemoryCacheStore',
+  // Additive (spec §12) — restrict execution to a known set of queries.
+  'createQueryAllowlistPlugin',
   'isShortCircuit',
   'HOOK_ORDER',
   // Adapters

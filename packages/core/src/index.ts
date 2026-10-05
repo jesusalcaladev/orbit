@@ -28,7 +28,14 @@ export {
 export type { EncodingSupport, OrbitEncoding, OrbitFormat } from './serialize/negotiate.js';
 
 // Query language
-export { parseOQS, DEFAULT_MAX_DEPTH } from './parser.js';
+export {
+  parseOQS,
+  DEFAULT_MAX_DEPTH,
+  DEFAULT_MAX_KEY_LENGTH,
+  DEFAULT_MAX_VALUE_LENGTH,
+  DEFAULT_MAX_BREADTH,
+  DEFAULT_MAX_COMPLEXITY,
+} from './parser.js';
 export type { ParseOptions } from './parser.js';
 
 // Errors
@@ -55,6 +62,8 @@ export type {
   CacheEntry,
   MemoryCacheStoreOptions,
 } from './plugins/cache.js';
+export { createQueryAllowlistPlugin } from './plugins/allowlist.js';
+export type { QueryAllowlistOptions, QueryAllowlistPluginOptions } from './plugins/allowlist.js';
 export type {
   OrbitPlugin,
   OrbitHooks,

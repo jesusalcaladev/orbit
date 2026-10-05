@@ -20,7 +20,7 @@ export { OrbitClient, createClient } from './client.js';
 export { OrbitNetworkError } from './errors.js';
 export { QueryCache } from './cache.js';
 export { RealtimeClient } from './realtime.js';
-export type { SubscribeOptions, SubscriptionHandle } from './realtime.js';
+export type { SubscribeOptions, SubscriptionGap, SubscriptionHandle } from './realtime.js';
 // The client throws the same error contract as the server (@orbit/core) —
 // re-exported so a client-only consumer needs a single import.
 export { ErrorCode, OrbitError, isOrbitError } from '@orbit/core';

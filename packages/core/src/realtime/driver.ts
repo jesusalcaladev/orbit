@@ -100,7 +100,16 @@ export function createSessionDriver(
       const envelope = validateEnvelope(message, orbit.maxOps);
       // The session's auth context (from `authorize`) rides into the engine,
       // so socket envelopes hit the same identity-stamped pipeline as HTTP.
-      const result = await orbit.execute(envelope, { ...(hooks.ctx ?? {}) });
+      // `state` is copied per envelope: a client may pipeline frames, and a
+      // shared object would let two concurrent executions overwrite each
+      // other's cache scratch (MISS_KEY), writing one query's data under
+      // another's key.
+      const sessionCtx = hooks.ctx ?? {};
+      const { state: sessionState, ...sessionRest } = sessionCtx;
+      const result = await orbit.execute(envelope, {
+        ...sessionRest,
+        ...(isRecord(sessionState) ? { state: { ...sessionState } } : {}),
+      });
       send({
         ...(id !== undefined ? { id } : {}),
         status: result.status,
@@ -193,8 +202,18 @@ export function createSessionDriver(
           typeof message.after === 'number' && Number.isFinite(message.after) ? message.after : 0;
         const entry = clientSubs.get(clientId);
         if (entry) {
-          // Same live session — just replay the gap (seq > after).
-          hub.resume(clientId, after, entry.onEvent);
+          // Same live session — just replay the gap (seq > after). An expired
+          // retention window makes the replay incomplete, which the hub reports
+          // as `null`; reject so the client re-subscribes fresh (same recovery
+          // path as the reconnect branch below) instead of applying a partial
+          // stream it cannot detect.
+          if (hub.resume(clientId, after, entry.onEvent) === null) {
+            throw new OrbitError(
+              ErrorCode.SUBSCRIPTION_FAILED,
+              `Retention window for subscription '${clientId}' expired — re-subscribe to start over`,
+              { details: { subscription: clientId, after } },
+            );
+          }
           send({ resumed: clientId, after });
           return;
         }

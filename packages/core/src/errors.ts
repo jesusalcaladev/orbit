@@ -12,6 +12,10 @@ export const ErrorCode = {
   PERMISSION_DENIED: 'ORBIT_PERMISSION_DENIED',
   /** The query tree nests deeper than the configured maximum. */
   MAX_DEPTH_EXCEEDED: 'ORBIT_MAX_DEPTH_EXCEEDED',
+  /** A single node selects more items than the configured breadth limit. */
+  MAX_BREADTH_EXCEEDED: 'ORBIT_MAX_BREADTH_EXCEEDED',
+  /** The whole query tree selects more items than the configured complexity limit. */
+  MAX_COMPLEXITY_EXCEEDED: 'ORBIT_MAX_COMPLEXITY_EXCEEDED',
   /** The request envelope exceeds the configured size limit. */
   PAYLOAD_TOO_LARGE: 'ORBIT_PAYLOAD_TOO_LARGE',
   /** A mutation action could not be executed. */
@@ -31,6 +35,8 @@ export const ErrorStatus: Record<OrbitErrorCode, number> = {
   [ErrorCode.FILTER_INVALID]: 400,
   [ErrorCode.PERMISSION_DENIED]: 403,
   [ErrorCode.MAX_DEPTH_EXCEEDED]: 400,
+  [ErrorCode.MAX_BREADTH_EXCEEDED]: 400,
+  [ErrorCode.MAX_COMPLEXITY_EXCEEDED]: 400,
   [ErrorCode.PAYLOAD_TOO_LARGE]: 413,
   [ErrorCode.MUTATION_FAILED]: 500,
   [ErrorCode.SUBSCRIPTION_FAILED]: 500,

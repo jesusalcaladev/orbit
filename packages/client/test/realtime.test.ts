@@ -367,6 +367,67 @@ describe('realtime — unit (fake socket frames)', () => {
     }
   });
 
+  it('lets a late socket open resolve an already-timed-out waiter without double-settling', async () => {
+    vi.useFakeTimers();
+    try {
+      const client = unitClient();
+      const realtime = new RealtimeClient(
+        'ws://orbit.invalid',
+        FakeWebSocket as unknown as typeof WebSocket,
+      );
+      // The socket never opens, so the open-waiter times out and rejects. The
+      // catch handler is attached immediately so the rejection is never
+      // observed as unhandled while the timers advance.
+      const settled = realtime
+        .request({ query: 'chat { id }' })
+        .then(() => undefined)
+        .catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(10_000);
+      const outcome = await settled;
+      expect(outcome).toBeInstanceOf(OrbitNetworkError);
+
+      // The socket opens afterwards. The resolver is already settled, so it
+      // must return without settling twice or touching an unrelated waiter.
+      FakeWebSocket.instances[0]!.open();
+      // Further timeout ticks on settled waiters are likewise no-ops.
+      await vi.advanceTimersByTimeAsync(20_000);
+      // Nothing settled twice: the rejection above is the only outcome. The
+      // `.catch` is attached from the start so the rejection is never
+      // momentarily unhandled (which vitest reports as an unhandled error and
+      // fails the run under coverage).
+      expect(outcome).toBeInstanceOf(OrbitNetworkError);
+      client.close();
+      realtime.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('removes timed-out socket open waiters before the socket later opens', async () => {
+    vi.useFakeTimers();
+    try {
+      const client = unitClient();
+      const replies = Array.from({ length: 3 }, () =>
+        client
+          .socket()
+          .request({ query: 'chat { id }' })
+          .catch((error: unknown) => error),
+      );
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(
+        (await Promise.all(replies)).every((error) => error instanceof OrbitNetworkError),
+      ).toBe(true);
+
+      const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout');
+      FakeWebSocket.instances[0]!.open();
+      expect(clearTimeoutSpy).not.toHaveBeenCalled();
+      clearTimeoutSpy.mockRestore();
+      client.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('defaults to ids unique per client instance (two tabs do not collide)', () => {
     const clientA = unitClient();
     const clientB = unitClient();
@@ -522,6 +583,95 @@ describe('realtime — unit (fake socket frames)', () => {
     ws.receive({ id: 'req-99', status: 200, data: [] }); // stale reply, no pending
     ws.receive({ id: 'ghost-sub', error: { code: ErrorCode.SUBSCRIPTION_FAILED, message: 'x' } });
     expect(errors).toHaveLength(0);
+  });
+
+  it('reports a gap when the event stream skips sequence numbers', () => {
+    const client = unitClient();
+    const gaps: Array<{ from: number; to?: number }> = [];
+    const seen: number[] = [];
+    const sub = client.subscribe('chat { id }', (_event, meta) => seen.push(meta.seq), {
+      onGap: (gap) => gaps.push(gap),
+    });
+    const ws = FakeWebSocket.instances[0]!;
+    ws.open();
+    ws.receive({ ack: sub.id });
+
+    // A dense stream (1, 2, 3) is gapless and silent.
+    ws.receive({ id: sub.id, seq: 1, event: { type: 'created', id: '1', data: null } });
+    ws.receive({ id: sub.id, seq: 2, event: { type: 'created', id: '2', data: null } });
+    expect(gaps).toHaveLength(0);
+
+    // A jump to 5 proves event 3 was never delivered.
+    ws.receive({ id: sub.id, seq: 5, event: { type: 'created', id: '5', data: null } });
+    expect(gaps).toEqual([{ from: 2, to: 4 }]);
+    // The patch is still applied and the cursor advances, so only ONE gap is
+    // reported (the stream is dense again from here on).
+    ws.receive({ id: sub.id, seq: 6, event: { type: 'created', id: '6', data: null } });
+    expect(gaps).toHaveLength(1);
+    expect(seen).toEqual([1, 2, 5, 6]);
+    expect(sub.seq).toBe(6);
+  });
+
+  it('exposes onGap on the handle as well as the subscribe option', () => {
+    const client = unitClient();
+    const gaps: Array<{ from: number; to?: number }> = [];
+    const sub = client.subscribe('chat { id }', () => {});
+    const ws = FakeWebSocket.instances[0]!;
+    ws.open();
+    ws.receive({ ack: sub.id });
+    sub.onGap((gap) => gaps.push(gap));
+    ws.receive({ id: sub.id, seq: 1, event: { type: 'created', id: '1', data: null } });
+    ws.receive({ id: sub.id, seq: 9, event: { type: 'created', id: '9', data: null } });
+    expect(gaps).toEqual([{ from: 1, to: 8 }]);
+  });
+
+  it('resets the cursor on a fresh ack so it never sits ahead of the server', () => {
+    const client = unitClient();
+    const sub = client.subscribe('chat { id }', () => {}, { id: 'feed' });
+    const ws = FakeWebSocket.instances[0]!;
+    ws.open();
+    ws.receive({ ack: 'feed' });
+    ws.receive({ id: 'feed', seq: 1, event: { type: 'created', id: '1', data: null } });
+    ws.receive({ id: 'feed', seq: 2, event: { type: 'created', id: '2', data: null } });
+    expect(sub.seq).toBe(2);
+
+    // A re-subscribe (after a rejected resume) creates a NEW server-side
+    // subscriber whose sequence restarts at 1 — the cursor must follow,
+    // otherwise every later resume asks for a seq the server never reached.
+    ws.receive({ ack: 'feed' });
+    expect(sub.seq).toBe(0);
+    ws.receive({ id: 'feed', seq: 1, event: { type: 'created', id: '3', data: null } });
+    expect(sub.seq).toBe(1);
+  });
+
+  it('reports a gap with an unknown extent when a resume is rejected', () => {
+    const client = unitClient();
+    const gaps: Array<{ from: number; to?: number }> = [];
+    const errors: Error[] = [];
+    const sub = client.subscribe('chat { id }', () => {}, {
+      id: 'feed',
+      onGap: (gap) => gaps.push(gap),
+      onError: (e) => errors.push(e),
+    });
+    const ws = FakeWebSocket.instances[0]!;
+    ws.open();
+    ws.receive({ ack: 'feed' });
+    for (let seq = 1; seq <= 4; seq += 1) {
+      ws.receive({ id: 'feed', seq, event: { type: 'created', id: String(seq), data: null } });
+    }
+    expect(sub.seq).toBe(4);
+
+    // The server refuses the resume: its retention window rolled over. The
+    // extent of the loss is unknowable, so `to` is absent.
+    ws.receive({
+      id: 'feed',
+      error: { code: ErrorCode.SUBSCRIPTION_FAILED, message: 'Retention window expired' },
+    });
+    expect(gaps).toEqual([{ from: 4 }]);
+    // A normal recovery path: it silently re-subscribes on the same socket and
+    // does NOT surface an error to the app.
+    expect(errors).toHaveLength(0);
+    expect(ws.frames().at(-1)).toEqual({ subscribe: 'chat { id }', id: 'feed' });
   });
 
   it('makes handle.close() idempotent', () => {

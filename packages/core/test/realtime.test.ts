@@ -3,7 +3,14 @@ import type { Server } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { DataAdapter } from '../src/adapters/types.js';
 import { ErrorCode } from '../src/errors.js';
-import { createOrbit, createRealtimeServer, decodeMsgpack, encodeMsgpack } from '../src/index.js';
+import {
+  createOrbit,
+  createRealtimeServer,
+  decodeMsgpack,
+  encodeMsgpack,
+  memoryAdapter,
+  parseOQS,
+} from '../src/index.js';
 import type { RealtimeServer, RealtimeServerOptions } from '../src/index.js';
 import { SubscriptionHub } from '../src/realtime/hub.js';
 import type { Filters, MutationArgs, SubscriptionEvent } from '../src/types.js';
@@ -153,6 +160,48 @@ describe('SubscriptionHub', () => {
     expect(hub.activeCount).toBe(0);
   });
 
+  it('bounds a gated subscribe with the same cost limits as a query', async () => {
+    // `authorizedSubscribe` parses on its own (it must honour an `onAfterParse`
+    // rewrite), so it needs the limits applied explicitly — otherwise the gate
+    // path would accept queries the query path rejects.
+    const wide = 'post { a, b }';
+    const bounded = createOrbit({
+      adapters: memoryAdapter([{ entity: 'post', resolve: () => ({ id: 'p' }) }]),
+      maxQueryBreadth: 1,
+    });
+    await expect(
+      new SubscriptionHub(bounded).authorizedSubscribe(wide, 'w1', () => {}, {}),
+    ).rejects.toMatchObject({ code: ErrorCode.MAX_BREADTH_EXCEEDED });
+  });
+
+  it('returns a working unsubscribe handle from a gated subscribe', async () => {
+    // The handle returned by the gate path is the same object the transports
+    // hold; its `unsubscribe` must release the subscription it names.
+    const { orbit } = createPostWorld();
+    const hub = new SubscriptionHub(orbit);
+    const sub = await hub.authorizedSubscribe('post { id }', 'h1', () => {}, {});
+    expect(sub.id).toBe('h1');
+    expect(hub.activeCount).toBe(1);
+    sub.unsubscribe();
+    expect(hub.activeCount).toBe(0);
+  });
+
+  it('rejects a gated subscribe on an adapter with no subscription hook', async () => {
+    // `authorizedSubscribe` — the gate both transports use — takes a different
+    // path than `subscribe`, so the "does not support subscriptions" guard has
+    // to hold there too, not just on the public method.
+    const plain = createOrbit({ adapters: [{ entity: 'user', resolve: () => null }] });
+    const plainHub = new SubscriptionHub(plain);
+    await expect(
+      plainHub.authorizedSubscribe('user { id }', 'g1', () => {}, {}),
+    ).rejects.toMatchObject({
+      code: ErrorCode.SUBSCRIPTION_FAILED,
+      details: { entity: 'user' },
+    });
+    // The failed gate must not leave a subscription behind.
+    expect(plainHub.activeCount).toBe(0);
+  });
+
   it('rejects duplicate ids, unknown entities and unsupported adapters', () => {
     const { orbit } = createPostWorld();
     const hub = new SubscriptionHub(orbit);
@@ -226,21 +275,95 @@ describe('SubscriptionHub', () => {
     expect(hub.activeCount).toBe(0);
   });
 
-  it('keeps only the last RESUME_LOG_MAX events for replay', async () => {
+  it('refuses to resume once the retention window dropped the requested events', async () => {
     const { orbit, create } = createPostWorld();
     const hub = new SubscriptionHub(orbit);
     hub.subscribe('post { id }', 's', () => {});
     for (let i = 0; i < 520; i += 1) {
       await create({ id: `p${i}`, title: 'T', status: 'live' });
     }
+    // 520 events were produced; the ring kept only the newest 512 (seq 9..520).
+    // Resuming from 0 can no longer be served completely, so it must be
+    // REFUSED rather than replaying a silently incomplete window (the client
+    // re-subscribes from scratch instead).
+    expect(hub.resume('s', 0, () => {})).toBeNull();
+    // The newest event is still retained, so a recent cursor resumes fine.
     const replayed: number[] = [];
-    const sub = hub.resume('s', 0, (seq) => replayed.push(seq));
+    const sub = hub.resume('s', 519, (seq) => replayed.push(seq));
     expect(sub).not.toBeNull();
-    // 520 events were produced; the ring buffer kept the newest 512.
-    expect(replayed).toHaveLength(512);
-    expect(replayed[0]).toBe(9);
+    expect(replayed).toEqual([520]);
     sub!.unsubscribe();
     expect(hub.activeCount).toBe(0);
+  });
+
+  it('refuses to resume when the retention window is exactly one event short', async () => {
+    const { orbit, create } = createPostWorld();
+    const hub = new SubscriptionHub(orbit);
+    hub.subscribe('post { id }', 's', () => {});
+    for (let i = 0; i < 513; i += 1) {
+      await create({ id: `p${i}`, title: 'T', status: 'live' });
+    }
+    // Retained: seq 2..513. A client at seq 1 needs 2..513 — served exactly.
+    const exact: number[] = [];
+    const ok = hub.resume('s', 1, (seq) => exact.push(seq));
+    expect(ok).not.toBeNull();
+    expect(exact).toHaveLength(512);
+    ok!.unsubscribe();
+
+    // Off-by-one boundary: a client at 0 needs 1..513, and seq 1 is gone.
+    expect(hub.resume('s', 0, () => {})).toBeNull();
+  });
+
+  it('rejects an over-wide selection with MAX_BREADTH_EXCEEDED', () => {
+    // One node, many fields: depth 1, so `maxQueryDepth` never sees it. This is
+    // the shape a depth-only limit cannot bound.
+    const wide = `user { ${Array.from({ length: 6 }, (_, i) => `f${i}`).join(', ')} }`;
+    expect(() => parseOQS(wide, { maxBreadth: 5 })).toThrowError(
+      expect.objectContaining({ code: ErrorCode.MAX_BREADTH_EXCEEDED }),
+    );
+    // Exactly at the limit is fine.
+    expect(() => parseOQS(wide, { maxBreadth: 6 })).not.toThrow();
+  });
+
+  it('rejects an over-large tree with MAX_COMPLEXITY_EXCEEDED', () => {
+    // Each node is within its breadth budget, but the tree total is not: the
+    // shape a per-node limit alone would admit.
+    const tree = `user { ${Array.from({ length: 3 }, (_, i) => `p${i} { a, b }`).join(', ')} }`;
+    expect(() => parseOQS(tree, { maxComplexity: 8 })).toThrowError(
+      expect.objectContaining({ code: ErrorCode.MAX_COMPLEXITY_EXCEEDED }),
+    );
+    expect(() => parseOQS(tree, { maxComplexity: 9 })).not.toThrow();
+  });
+
+  it('bounds subscriptions with the same limits as queries', () => {
+    // A subscription query runs the pipeline too, so it must not be a way
+    // around the engine's cost limits.
+    const { orbit } = createPostWorld();
+    const hub = new SubscriptionHub(orbit);
+    const bounded = createOrbit({
+      adapters: [{ entity: 'post', resolve: () => ({ id: 'p' }) }],
+      maxQueryBreadth: 1,
+    });
+    const wide = 'post { a, b }';
+    expect(() => new SubscriptionHub(orbit).subscribe(wide, 'ok', () => {})).not.toThrow();
+    expect(() => new SubscriptionHub(bounded).subscribe(wide, 'too-wide', () => {})).toThrowError(
+      expect.objectContaining({ code: ErrorCode.MAX_BREADTH_EXCEEDED }),
+    );
+    hub.subscribe('post { a }', 'ok', () => {});
+    expect(hub.activeCount).toBe(1);
+    hub.unsubscribe('ok');
+  });
+
+  it('refuses to resume a cursor ahead of the server', () => {
+    const { orbit, create } = createPostWorld();
+    const hub = new SubscriptionHub(orbit);
+    hub.subscribe('post { id }', 's', () => {});
+    // A cursor the server never issued (stale client state after a re-subscribe)
+    // cannot be confirmed — nothing could be replayed for it.
+    expect(hub.resume('s', 99, () => {})).toBeNull();
+    // The matching cursor resumes.
+    expect(hub.resume('s', 0, () => {})).not.toBeNull();
+    void create;
   });
 });
 

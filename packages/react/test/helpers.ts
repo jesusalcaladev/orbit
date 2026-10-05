@@ -11,6 +11,7 @@ import type {
   RealtimeStatus,
   SubscribeOptions,
   SubscriptionEvent,
+  SubscriptionGap,
   SubscriptionHandle,
 } from '@orbit/client';
 import type { OrbitError } from '@orbit/core';
@@ -40,6 +41,7 @@ export interface FakeSub {
   emit: (event: SubscriptionEvent, seq?: number) => void;
   emitStatus: (status: RealtimeStatus) => void;
   emitError: (error: OrbitError) => void;
+  emitGap: (gap: SubscriptionGap) => void;
 }
 
 export interface FakeTransport {
@@ -75,6 +77,7 @@ export function fakeTransport(): { transport: FakeTransport; client: OrbitClient
       const statusCbs = new Set<(status: RealtimeStatus) => void>();
       const errorCbs = new Set<(error: OrbitError) => void>();
       const ackCbs = new Set<(id: string, kind: 'subscribe' | 'resume', seq: number) => void>();
+      const gapCbs = new Set<(gap: SubscriptionGap) => void>();
       const sub: FakeSub = {
         query,
         handler,
@@ -90,6 +93,9 @@ export function fakeTransport(): { transport: FakeTransport; client: OrbitClient
         },
         emitError: (error) => {
           for (const cb of errorCbs) cb(error);
+        },
+        emitGap: (gap) => {
+          for (const cb of gapCbs) cb(gap);
         },
       };
       const handle: SubscriptionHandle = {
@@ -107,12 +113,16 @@ export function fakeTransport(): { transport: FakeTransport; client: OrbitClient
         onAck: (cb) => {
           ackCbs.add(cb);
         },
+        onGap: (cb) => {
+          gapCbs.add(cb);
+        },
       };
       sub.handle = handle;
       subs.push(sub);
       // Mirror the real RealtimeClient: `options.onError` joins the same
       // callbacks `handle.onError` registers.
       if (options.onError !== undefined) errorCbs.add(options.onError);
+      if (options.onGap !== undefined) gapCbs.add(options.onGap);
       return handle;
     },
   );

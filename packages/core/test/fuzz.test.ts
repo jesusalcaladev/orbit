@@ -101,6 +101,8 @@ function randomJsonValue(rand: () => number, depth = 0): unknown {
 const ALLOWED_PARSE_CODES: Set<OrbitErrorCode> = new Set([
   ErrorCode.INVALID_QUERY,
   ErrorCode.MAX_DEPTH_EXCEEDED,
+  ErrorCode.MAX_BREADTH_EXCEEDED,
+  ErrorCode.MAX_COMPLEXITY_EXCEEDED,
 ]);
 
 describe('fuzz — parseOQS (no crash, only protocol errors)', () => {
@@ -160,6 +162,9 @@ describe('fuzz — parseOQS (no crash, only protocol errors)', () => {
 });
 
 describe('fuzz — decodeMsgpack (no crash, no hang, fast fail)', () => {
+  // 2000 decodes of random bytes is intentionally CPU-bound and outgrows
+  // vitest's default 5 s timeout under full parallel load. Stated explicitly:
+  // the property under test is "no crash, no hang", not a speed.
   it('2000 random byte payloads either decode or throw a plain codec Error', () => {
     const rand = mulberry32(0x0f57c);
     for (let i = 0; i < 2000; i += 1) {
@@ -177,7 +182,7 @@ describe('fuzz — decodeMsgpack (no crash, no hang, fast fail)', () => {
         );
       }
     }
-  });
+  }, 60_000);
 
   it('a nesting bomb (100k fixarrays) throws a codec error, not a stack overflow', () => {
     const bomb = new Uint8Array(100_000).fill(0x91); // 0x91 = fixarray, 1 element
@@ -232,6 +237,8 @@ describe('fuzz — parseCacheSpec (no crash, only protocol errors)', () => {
 });
 
 describe('fuzz — negotiateFormat (never throws, always a valid format)', () => {
+  // Like the msgpack fuzz above, 1000 in-loop assertions plus header fuzzing is
+  // CPU-bound work that outgrows the default 5 s timeout on a loaded machine.
   it('1000 adversarial Accept headers resolve deterministically', () => {
     const rand = mulberry32(0x0b3a7);
     for (let i = 0; i < 1000; i += 1) {
@@ -251,7 +258,7 @@ describe('fuzz — negotiateFormat (never throws, always a valid format)', () =>
     ]) {
       expect(['json', 'msgpack', 'sse']).toContain(negotiateFormat(header));
     }
-  });
+  }, 60_000);
 });
 
 describe('fuzz — engine.execute (always settles, only OrbitError rejects)', () => {

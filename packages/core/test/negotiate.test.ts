@@ -131,6 +131,23 @@ describe('negotiateEncoding', () => {
     expect(negotiateEncoding('gzip;q=0.2, br;q=0.9', { brotli: true })).toBe('br');
   });
 
+  it('ignores malformed q-values instead of refusing the codec', () => {
+    // A hostile or buggy client sends a non-numeric q. Refusing the codec
+    // entirely would let `Accept-Encoding: gzip;q=NaN` disable compression for
+    // a response that CAN be compressed — a trivial amplification lever. The
+    // q is ignored (treated as 1) and the codec is still honoured.
+    for (const header of [
+      'gzip;q=NaN',
+      'gzip;q=abc',
+      'gzip;q=',
+      'gzip;q',
+      'gzip;level=9',
+      'gzip; q = 0.8',
+    ]) {
+      expect(negotiateEncoding(header, { brotli: false })).toBe('gzip');
+    }
+  });
+
   it('rejects a codec disabled with q=0', () => {
     expect(negotiateEncoding('br;q=0, gzip', { brotli: true })).toBe('gzip');
     expect(negotiateEncoding('gzip;q=0, br', { brotli: true })).toBe('br');

@@ -141,10 +141,17 @@ export function createRestAdapter(options: RestAdapterOptions): DataAdapter {
       }
       if (ctx.parent && options.parentKey) {
         const parentId = parentIdOf(ctx.parent);
-        if (parentId !== undefined) url.searchParams.set(options.parentKey, String(parentId));
+        // Fail CLOSED. A parent with no resolvable id cannot be scoped, and
+        // dropping the parent filter would issue an UNSCOPED collection GET —
+        // returning every record in the upstream collection instead of this
+        // parent's children. No identifiable parent means no children.
+        if (parentId === undefined) return [];
+        url.searchParams.set(options.parentKey, String(parentId));
       }
 
-      const response = await doFetch(url.toString(), { headers: await resolveHeaders() });
+      const response = await doFetch(url.toString(), {
+        headers: await resolveHeaders(),
+      });
       // 404 from an upstream REST API means "no record" — Orbit represents
       // that as `null` data, not an error. (Collection endpoints that 404 on
       // empty results therefore yield `null`, not `[]` — the adapter never
@@ -221,8 +228,7 @@ export function createRestAdapter(options: RestAdapterOptions): DataAdapter {
 /**
  * Alias for {@link createRestAdapter} kept for backwards compatibility.
  *
- * @deprecated Use {@link createRestAdapter} — the `create*` prefix matches
- * the other first-party adapters (`createMongoAdapter`, `createPostgresAdapter`,
- * `createKvCacheStore`).
+ * @deprecated Use {@link createRestAdapter} — the `create*` prefix is the
+ * canonical adapter factory naming convention.
  */
 export const restAdapter = createRestAdapter;
