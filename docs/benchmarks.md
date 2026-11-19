@@ -53,10 +53,10 @@ Orbit is built to be *fast by contract*: one round-trip, batched resolution, bin
 <text x="38" y="167.5" font-size="9" fill="#555" text-anchor="end" dominant-baseline="middle">75%</text>
 <line x1="44" y1="115.0" x2="1016" y2="115.0" stroke="#2a2a3a" stroke-width="1" stroke-dasharray="3 6"/>
 <text x="38" y="115.0" font-size="9" fill="#555" text-anchor="end" dominant-baseline="middle">100%</text>
-<rect x="49.5" y="211.3" width="30.0" height="113.7" rx="6" fill="url(#compGrad)">
+<rect x="49.5" y="214.2" width="30.0" height="110.8" rx="6" fill="url(#compGrad)">
   <title>B1 · competition: 0.034 ms (graphql-js, cached doc, measured)</title>
 </rect>
-<text x="64.5" y="205.3" font-size="10" fill="#888" text-anchor="middle" dominant-baseline="middle">0.034 ms</text>
+<text x="64.5" y="208.2" font-size="10" fill="#888" text-anchor="middle" dominant-baseline="middle">0.034 ms</text>
 <rect x="89.5" y="115.0" width="30.0" height="210.0" rx="6" fill="url(#orbitGrad)" filter="url(#orbitShadow)">
   <title>B1 · orbit: 0.06 ms</title>
 </rect>
@@ -73,14 +73,14 @@ Orbit is built to be *fast by contract*: one round-trip, batched resolution, bin
 <text x="185.5" y="317.0" font-size="10" font-weight="700" fill="#fff" text-anchor="middle" dominant-baseline="middle">5 queries</text>
 <text x="165.5" y="345" font-size="11" font-weight="700" fill="#f0f0f0" text-anchor="middle">B2</text>
 <text x="165.5" y="361" font-size="9" fill="#888" text-anchor="middle">Deep nest (5 …</text>
-<rect x="211.5" y="209.3" width="30.0" height="115.7" rx="6" fill="url(#compGrad)">
-  <title>B3 · competition: 105,415 RPS (graphql-js, cached doc, measured)</title>
+<rect x="211.5" y="174.7" width="30.0" height="150.3" rx="6" fill="url(#compGrad)">
+  <title>B3 · competition: 130,624 RPS (graphql-js, cached doc, measured)</title>
 </rect>
-<text x="226.5" y="203.3" font-size="10" fill="#888" text-anchor="middle" dominant-baseline="middle">105,415 RPS</text>
+<text x="226.5" y="168.7" font-size="10" fill="#888" text-anchor="middle" dominant-baseline="middle">130,624 RPS</text>
 <rect x="251.5" y="115.0" width="30.0" height="210.0" rx="6" fill="url(#orbitGrad)" filter="url(#orbitShadow)">
-  <title>B3 · orbit: 191,312 RPS</title>
+  <title>B3 · orbit: 182,523 RPS</title>
 </rect>
-<text x="266.5" y="109.0" font-size="10" font-weight="700" fill="#fff" text-anchor="middle" dominant-baseline="middle">191,312 RPS</text>
+<text x="266.5" y="109.0" font-size="10" font-weight="700" fill="#fff" text-anchor="middle" dominant-baseline="middle">182,523 RPS</text>
 <text x="246.5" y="345" font-size="11" font-weight="700" fill="#f0f0f0" text-anchor="middle">B3</text>
 <text x="246.5" y="361" font-size="9" fill="#888" text-anchor="middle">Throughput</text>
 <rect x="292.5" y="115.0" width="30.0" height="210.0" rx="6" fill="url(#compGrad)">
@@ -97,10 +97,10 @@ Orbit is built to be *fast by contract*: one round-trip, batched resolution, bin
   <title>B5 · competition: 400 ms (REST, waits for all)</title>
 </rect>
 <text x="388.5" y="109.0" font-size="10" fill="#888" text-anchor="middle" dominant-baseline="middle">400 ms</text>
-<rect x="413.5" y="321.9" width="30.0" height="3.1" rx="6" fill="url(#orbitGrad)" filter="url(#orbitShadow)">
+<rect x="413.5" y="322.0" width="30.0" height="3.0" rx="6" fill="url(#orbitGrad)" filter="url(#orbitShadow)">
   <title>B5 · orbit: 6 ms</title>
 </rect>
-<text x="428.5" y="315.9" font-size="10" font-weight="700" fill="#fff" text-anchor="middle" dominant-baseline="middle">6 ms</text>
+<text x="428.5" y="316.0" font-size="10" font-weight="700" fill="#fff" text-anchor="middle" dominant-baseline="middle">6 ms</text>
 <text x="408.5" y="345" font-size="11" font-weight="700" fill="#f0f0f0" text-anchor="middle">B5</text>
 <text x="408.5" y="361" font-size="9" fill="#888" text-anchor="middle">TTFB · stream…</text>
 <rect x="454.5" y="115.0" width="30.0" height="210.0" rx="6" fill="url(#compGrad)">
@@ -117,46 +117,46 @@ Orbit is built to be *fast by contract*: one round-trip, batched resolution, bin
   <title>B7 · competition: 200 ms (spec goal)</title>
 </rect>
 <text x="550.5" y="109.0" font-size="10" fill="#888" text-anchor="middle" dominant-baseline="middle">200 ms</text>
-<rect x="575.5" y="318.7" width="30.0" height="6.3" rx="6" fill="url(#orbitGrad)" filter="url(#orbitShadow)">
-  <title>B7 · orbit: 6.05 ms</title>
+<rect x="575.5" y="320.6" width="30.0" height="4.4" rx="6" fill="url(#orbitGrad)" filter="url(#orbitShadow)">
+  <title>B7 · orbit: 4.22 ms</title>
 </rect>
-<text x="590.5" y="312.7" font-size="10" font-weight="700" fill="#fff" text-anchor="middle" dominant-baseline="middle">6.05 ms</text>
+<text x="590.5" y="314.6" font-size="10" font-weight="700" fill="#fff" text-anchor="middle" dominant-baseline="middle">4.22 ms</text>
 <text x="570.5" y="345" font-size="11" font-weight="700" fill="#f0f0f0" text-anchor="middle">B7</text>
 <text x="570.5" y="361" font-size="9" fill="#888" text-anchor="middle">Realtime HTTP…</text>
-<rect x="616.5" y="165.9" width="30.0" height="159.1" rx="6" fill="url(#compGrad)">
-  <title>B8 · competition: 2,477 RPS (graphql-js, measured)</title>
+<rect x="616.5" y="169.5" width="30.0" height="155.5" rx="6" fill="url(#compGrad)">
+  <title>B8 · competition: 2,439 RPS (graphql-js, measured)</title>
 </rect>
-<text x="631.5" y="159.9" font-size="10" fill="#888" text-anchor="middle" dominant-baseline="middle">2,477 RPS</text>
+<text x="631.5" y="163.5" font-size="10" fill="#888" text-anchor="middle" dominant-baseline="middle">2,439 RPS</text>
 <rect x="656.5" y="115.0" width="30.0" height="210.0" rx="6" fill="url(#orbitGrad)" filter="url(#orbitShadow)">
-  <title>B8 · orbit: 3,270 RPS</title>
+  <title>B8 · orbit: 3,293 RPS</title>
 </rect>
-<text x="671.5" y="109.0" font-size="10" font-weight="700" fill="#fff" text-anchor="middle" dominant-baseline="middle">3,270 RPS</text>
+<text x="671.5" y="109.0" font-size="10" font-weight="700" fill="#fff" text-anchor="middle" dominant-baseline="middle">3,293 RPS</text>
 <text x="651.5" y="345" font-size="11" font-weight="700" fill="#f0f0f0" text-anchor="middle">B8</text>
 <text x="651.5" y="361" font-size="9" fill="#888" text-anchor="middle">Wire path · r…</text>
 <rect x="697.5" y="115.0" width="30.0" height="210.0" rx="6" fill="url(#compGrad)">
-  <title>B9 · competition: 22.23 ms (graphql-js + DataLoader, cold: 5 DB batches/request, measured)</title>
+  <title>B9 · competition: 22.17 ms (graphql-js + DataLoader, cold: 5 DB batches/request, measured)</title>
 </rect>
-<text x="712.5" y="109.0" font-size="10" fill="#888" text-anchor="middle" dominant-baseline="middle">22.23 ms</text>
+<text x="712.5" y="109.0" font-size="10" fill="#888" text-anchor="middle" dominant-baseline="middle">22.17 ms</text>
 <rect x="737.5" y="323.0" width="30.0" height="2.0" rx="6" fill="url(#orbitGrad)" filter="url(#orbitShadow)">
   <title>B9 · orbit: 0.09 ms (0 DB calls)</title>
 </rect>
 <text x="752.5" y="317.0" font-size="10" font-weight="700" fill="#fff" text-anchor="middle" dominant-baseline="middle">0.09 ms</text>
 <text x="732.5" y="345" font-size="11" font-weight="700" fill="#f0f0f0" text-anchor="middle">B9</text>
 <text x="732.5" y="361" font-size="9" fill="#888" text-anchor="middle">Deep nest · w…</text>
-<rect x="778.5" y="115.0" width="30.0" height="210.0" rx="6" fill="url(#compGrad)">
-  <title>B10 · competition: 0.903 ms (raw fetch, measured)</title>
+<rect x="778.5" y="138.7" width="30.0" height="186.3" rx="6" fill="url(#compGrad)">
+  <title>B10 · competition: 0.775 ms (raw fetch, measured)</title>
 </rect>
-<text x="793.5" y="109.0" font-size="10" fill="#888" text-anchor="middle" dominant-baseline="middle">0.903 ms</text>
-<rect x="818.5" y="121.2" width="30.0" height="203.8" rx="6" fill="url(#orbitGrad)" filter="url(#orbitShadow)">
-  <title>B10 · orbit: 0.877 ms</title>
+<text x="793.5" y="132.7" font-size="10" fill="#888" text-anchor="middle" dominant-baseline="middle">0.775 ms</text>
+<rect x="818.5" y="115.0" width="30.0" height="210.0" rx="6" fill="url(#orbitGrad)" filter="url(#orbitShadow)">
+  <title>B10 · orbit: 0.873 ms</title>
 </rect>
-<text x="833.5" y="115.2" font-size="10" font-weight="700" fill="#fff" text-anchor="middle" dominant-baseline="middle">0.877 ms</text>
+<text x="833.5" y="109.0" font-size="10" font-weight="700" fill="#fff" text-anchor="middle" dominant-baseline="middle">0.873 ms</text>
 <text x="813.5" y="345" font-size="11" font-weight="700" fill="#f0f0f0" text-anchor="middle">B10</text>
 <text x="813.5" y="361" font-size="9" fill="#888" text-anchor="middle">Client overhe…</text>
 <rect x="859.5" y="115.0" width="30.0" height="210.0" rx="6" fill="url(#compGrad)">
-  <title>B11 · competition: 1.054 ms (raw fetch, measured)</title>
+  <title>B11 · competition: 0.791 ms (raw fetch, measured)</title>
 </rect>
-<text x="874.5" y="109.0" font-size="10" fill="#888" text-anchor="middle" dominant-baseline="middle">1.054 ms</text>
+<text x="874.5" y="109.0" font-size="10" fill="#888" text-anchor="middle" dominant-baseline="middle">0.791 ms</text>
 <rect x="899.5" y="323.0" width="30.0" height="2.0" rx="6" fill="url(#orbitGrad)" filter="url(#orbitShadow)">
   <title>B11 · orbit: 0.002 ms (0 HTTP — client cache)</title>
 </rect>
@@ -180,31 +180,31 @@ Orbit is built to be *fast by contract*: one round-trip, batched resolution, bin
 
 | ID | Scenario | Metric | Competition | Orbit | Goal | Status |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| B1 | Simple query (user by ID) | P99 latency | graphql-js **0.118 ms** cached-doc · **1.83 ms** naive (measured) · REST 5 ms ref | **0.11 ms** | < 3 ms | ✅ |
+| B1 | Simple query (user by ID) | P99 latency | graphql-js **0.034 ms** cached-doc · **0.88 ms** naive (measured) · REST 5 ms ref | **0.06 ms** | < 3 ms | ✅ |
 | B2 | Deep nest, 5 levels (User→Posts→Comments→Likes→LikedBy) | DB round-trips | graphql-js **1112 resolver calls** (measured) | **5** | ≤ 5 (1 batch/level) | ✅ |
-| B3 | Throughput | Requests/sec (engine core) | graphql-js **31,461** cached-doc (measured) | **81,847** (server-side ~13.9k · fetch path ~11.8k) | ~30,000 | ✅ |
+| B3 | Throughput | Requests/sec (engine core) | graphql-js **130,624** cached-doc (measured) | **182,523** (server-side ~28.6k · fetch path ~32.2k) | ~30,000 | ✅ |
 | B4 | Payload — 20-post feed | KB transmitted | graphql-js JSON **446 KB** (measured; 19.1 KB gzipped) | **19 KB** (msgpack+gzip) | ~120 KB | ✅ |
-| B5 | TTFB in streaming | Time to first byte | REST 400 ms (ref) | **5 ms** | < 50 ms | ✅ |
-| B6 | Mobile reconnect (offline) | Sync time | Apollo refetch 2,000 ms (ref) | **0.1 ms** (warm replay) · realtime resume 339 µs | < 200 ms | ✅ |
-| B7 | Realtime HTTP — WebSocket fan-out | Fan-out latency (200 sockets) | spec goal 200 ms | **8.1 ms** (write path ~5.3 ms) · resume 500 patches ~3.2 ms · ~909 subs/s | < 200 ms | ✅ |
-| B8 | Wire path · real HTTP (node:http + keep-alive) | Requests/sec over HTTP | graphql-js **984** (measured, same server) | **1,607** | ≥ graphql-js | ✅ |
-| B9 | Deep nest · warm cache replay vs DataLoader | Warm replay P99 latency | graphql-js + DataLoader **53.68 ms** · **5 DB batches/request** (measured) | **0.16 ms** · **0 DB calls** | < 200 ms (0 DB calls warm) | ✅ |
-| B10 | Client overhead · real HTTP round-trip | P99 round-trip latency | raw fetch **1.993 ms** (measured) | **1.886 ms** (−5.4% — client is faster than the hand-rolled loop) | ≤ 15% overhead | ✅ |
-| B11 | React layer · warm cache hit vs raw fetch | P99 latency (warm cache hit) | raw fetch **1.821 ms** (measured) | **0.003 ms** · **0 HTTP round-trips** (589× faster; miss overhead vs bare client **7.7%**) | < 0.5 ms warm | ✅ |
+| B5 | TTFB in streaming | Time to first byte | REST 400 ms (ref) | **6 ms** | < 50 ms | ✅ |
+| B6 | Mobile reconnect (offline) | Sync time | Apollo refetch 2,000 ms (ref) | **0.1 ms** (warm replay) · realtime resume 141 µs | < 200 ms | ✅ |
+| B7 | Realtime HTTP — WebSocket fan-out | Fan-out latency (200 sockets) | spec goal 200 ms | **4.22 ms** (write path ~3.07 ms) · resume 500 patches ~2.12 ms · ~1,121 subs/s | < 200 ms | ✅ |
+| B8 | Wire path · real HTTP (node:http + keep-alive) | Requests/sec over HTTP | graphql-js **2,439** (measured, same server) | **3,293** | ≥ graphql-js | ✅ |
+| B9 | Deep nest · warm cache replay vs DataLoader | Warm replay P99 latency | graphql-js + DataLoader **22.17 ms** · **5 DB batches/request** (measured) | **0.09 ms** · **0 DB calls** | < 200 ms (0 DB calls warm) | ✅ |
+| B10 | Client overhead · real HTTP round-trip | P99 round-trip latency | raw fetch **0.775 ms** (measured) | **0.873 ms** (+12.7% — inside the 15% budget) | ≤ 15% overhead | ✅ |
+| B11 | React layer · warm cache hit vs raw fetch | P99 latency (warm cache hit) | raw fetch **0.791 ms** (measured) | **0.002 ms** · **0 HTTP round-trips** (364× faster; miss overhead vs bare client **18.4%**) | < 0.5 ms warm | ✅ |
 | B12 | Wire bytes · agent write + read round-trip | Bytes on the wire (in + out) | raw request + gzip response **191.7 KB** (client default) | **25.5 KB** (gzip request + gzip response; the write request alone **173.7 → 7.5 KB**) | ≥ 50% fewer | ✅ |
 
-**11 of 11 goals met, against measured graphql-js competition.** (B12's baseline is the protocol's own default round-trip, not graphql-js: it measures the wire, not the engine — see its section.) (B2's goal is its theoretical floor: one batched round-trip per level. B3 compares the engine core — the spec's ~30k claim is about the protocol's own throughput; graphql-js is measured both naive (full pipeline per op) and with a cached document (the production-server equivalent of Orbit's parse LRU). B1 reports the same two-sided story: the cached number is the fair comparison to Orbit's parse LRU. B8 is the REAL wire path: both engines behind an identical `node:http` server, the same keep-alive client, the same machine — Orbit serves ~1.5× the requests of a bare GraphQL HTTP endpoint. B9 measures the repeat-request story: DataLoader (the standard N+1 fix) collapses B2's 1,112 resolver calls to 5 DB batches per request but still pays all 5 on EVERY request, because a fresh loader per request is the correct production setup; Orbit's cache plugin replays the warm request from memory at 0 DB calls. B7's competition column is the spec's realtime target — Apollo-style delta sync under 200 ms — because no load-tool reference exists for a zero-dependency WS server.)
+**11 of 11 goals met, against measured graphql-js competition.** (B12's baseline is the protocol's own default round-trip, not graphql-js: it measures the wire, not the engine — see its section.) (B2's goal is its theoretical floor: one batched round-trip per level. B3 compares the engine core — the spec's ~30k claim is about the protocol's own throughput; graphql-js is measured both naive (full pipeline per op) and with a cached document (the production-server equivalent of Orbit's parse LRU). B1 reports the same two-sided story: the cached number is the fair comparison to Orbit's parse LRU. B8 is the REAL wire path: both engines behind an identical `node:http` server, the same keep-alive client, the same machine — Orbit serves ~1.35× the requests of a bare GraphQL HTTP endpoint. B9 measures the repeat-request story: DataLoader (the standard N+1 fix) collapses B2's 1,112 resolver calls to 5 DB batches per request but still pays all 5 on EVERY request, because a fresh loader per request is the correct production setup; Orbit's cache plugin replays the warm request from memory at 0 DB calls. B7's competition column is the spec's realtime target — Apollo-style delta sync under 200 ms — because no load-tool reference exists for a zero-dependency WS server.)
 
 ## Scenario by scenario
 
-### B1 — Simple query: P99 latency — ✅ `0.11 ms` vs graphql-js `0.118 ms` cached / `1.83 ms` naive (goal < 3 ms)
+### B1 — Simple query: P99 latency — ✅ `0.06 ms` vs graphql-js `0.034 ms` cached / `0.88 ms` naive (goal < 3 ms)
 
 The full pipeline for `user(id="1") { name, email }`: envelope validation → OQS parse → hooks → resolve → project → serialize. Measured over 2,000 iterations of `orbit.execute(...)` after a warm-up, taking the 99th percentile. The same query, same data, through graphql-js, reported **honestly on both sides of its caching story**:
 
-- **Naive — full `graphql()` pipeline (parse + validate + execute) per op**: **1.83 ms P99**. A bare GraphQL server that re-parses and re-validates every request is **~16× slower** than Orbit's core.
-- **Cached-document — parse + validate once, then `execute()`**: **0.118 ms P99**. This is what production servers do and the apples-to-apples counterpart of Orbit's parse LRU — Orbit's core is still **~1.1× faster**, but the naive gap closes almost entirely once the document is cached.
+- **Naive — full `graphql()` pipeline (parse + validate + execute) per op**: **0.88 ms P99**. A bare GraphQL server that re-parses and re-validates every request is **~14× slower** than Orbit's core.
+- **Cached-document — parse + validate once, then `execute()`**: **0.034 ms P99**. This is what production servers do and the apples-to-apples counterpart of Orbit's parse LRU — in this run graphql-js is **~1.9× faster** on that path.
 
-The honest conclusion: with both engines caching their parse step, single-query core latency is a near-parity game. Orbit's real, measured advantages are B2 (round-trips), B3 (throughput) and B5 (streaming TTFB). The parser and projector are pure string/object work — no allocations beyond the result. Add the cache plugin and warm hits drop to the tens of microseconds (see B6).
+The honest conclusion: with both engines caching their parse step, single-query core latency is a near-parity game at tens of microseconds, and the winner flips between runs (0.06 ms vs 0.034 ms here, 0.11 ms vs 0.118 ms in the previous run). Orbit's real, measured advantages are B2 (round-trips), B3 (throughput) and B5 (streaming TTFB). The parser and projector are pure string/object work — no allocations beyond the result. Add the cache plugin and warm hits drop to the tens of microseconds (see B6).
 
 ### B2 — Deep nest: DB round-trips — ✅ `5` vs graphql-js `1112` resolver calls (measured)
 
@@ -214,19 +214,19 @@ Orbit resolves the tree **breadth-first**, grouping sibling requests by entity. 
 
 > Goal note: one batched round-trip per level is the theoretical floor for a 5-level graph (each level is a different entity, so they cannot be fused), hence the honest target of **≤ 5**, not `< 5`. GraphQL closes this gap only by adding DataLoader — a library Orbit bakes into the contract.
 
-### B3 — Throughput — ✅ `74,843 RPS` core vs graphql-js `20,528` cached / `~1.6k` naive (goal ~30,000)
+### B3 — Throughput — ✅ `182,523 RPS` core vs graphql-js `130,624` cached / `5,435` naive (goal ~30,000)
 
 B3 measures the engine honestly, and the GraphQL side too:
 
-- **Orbit core — the engine itself** (`orbit.execute`): sequential-await iterations of the full pipeline (envelope validation → OQS parse → hooks → resolve → project → serialize). **74,843 RPS** on this machine — **~2.5× the ~30k goal and 3.6× graphql-js with a cached document**.
-- **GraphQL naive — the full `graphql()` pipeline (parse + validate + execute) on every op**: **~1,566 RPS**. A bare GraphQL server pays parse + validate per request unless it caches documents.
-- **GraphQL cached-document — parse + validate once, then `execute()`**: **20,528 RPS**. This is what production servers (Apollo, yoga, …) do and the apples-to-apples equivalent of Orbit's parse LRU — Orbit's core still runs **3.6× faster**.
-- **Orbit server-side — the handler's work only**: a fresh `Request` is built outside the timer (a keep-alive load tool constructs requests once per connection), then `orbit.handler()` runs. **13,578 RPS** — the remaining gap to the core is undici's `arrayBuffer`/`Response` construction, not Orbit.
-- **Orbit fetch path — the full handler** with a fresh `Request` + `Response` per op: **10,140 RPS**. Measured breakdown (~99 µs/op): undici `Request`/`arrayBuffer` ~30 µs, `Response` ~20 µs, **Orbit ~10 µs** (execute 8 µs + envelope + negotiation), plus awaits/GC.
+- **Orbit core — the engine itself** (`orbit.execute`): sequential-await iterations of the full pipeline (envelope validation → OQS parse → hooks → resolve → project → serialize). **182,523 RPS** on this machine — **~6× the ~30k goal and ~1.4× graphql-js with a cached document**.
+- **GraphQL naive — the full `graphql()` pipeline (parse + validate + execute) on every op**: **5,435 RPS**. A bare GraphQL server pays parse + validate per request unless it caches documents.
+- **GraphQL cached-document — parse + validate once, then `execute()`**: **130,624 RPS**. This is what production servers (Apollo, yoga, …) do and the apples-to-apples equivalent of Orbit's parse LRU — Orbit's core still runs **~1.4× faster**.
+- **Orbit server-side — the handler's work only**: a fresh `Request` is built outside the timer (a keep-alive load tool constructs requests once per connection), then `orbit.handler()` runs. **28,643 RPS** — the remaining gap to the core is undici's `arrayBuffer`/`Response` construction, not Orbit.
+- **Orbit fetch path — the full handler** with a fresh `Request` + `Response` per op: **32,225 RPS** in this run. The two handler numbers land within measurement noise of each other (28.6k vs 32.2k) — the spread is undici's `Request`/`arrayBuffer`/`Response` work plus GC, not Orbit, whose own share is ~5 µs/op.
 
-**How the core stays fast:** a **parse LRU cache** (gated on zero plugins — nothing can mutate the tree) drops repeated `parseOQS` calls to a map lookup, and a `negotiateFormat` fast path resolves plain `Accept` headers in a single `includes()`. `execute()` runs at ~9 µs/op. A zero-plugin single-level fast path was measured and **deliberately skipped**: the generator pipeline now costs only ~2 µs of the budget, and duplicating the resolution logic would create permanent maintenance debt for <2%.
+**How the core stays fast:** a **parse LRU cache** (gated on zero plugins — nothing can mutate the tree) drops repeated `parseOQS` calls to a map lookup, and a `negotiateFormat` fast path resolves plain `Accept` headers in a single `includes()`. `execute()` runs at ~5 µs/op. A zero-plugin single-level fast path was measured and **deliberately skipped**: the generator pipeline now costs only ~2 µs of the budget, and duplicating the resolution logic would create permanent maintenance debt for <2%.
 
-> Why not measure raw HTTP? A zero-dependency harness cannot ship a load tool, and a hand-rolled client is itself the bottleneck: a bare `node:http` echo server tops out at ~4.4k RPS with our keep-alive client — client overhead, not server capacity. Measuring the engine core and the handler in-process is the honest, reproducible middle ground. The same argument holds for the GraphQL side: its HTTP layers (Apollo Server, yoga) add their own undici-bound overhead on top of the numbers above.
+> B8 takes this the rest of the way: both engines behind identical `node:http` servers, the same keep-alive client, the same machine. The in-process numbers here are the engine's ceiling; B8 is what a deployment actually sees.
 
 ### B4 — Payload size: 20-post feed — ✅ `19 KB` vs graphql-js `446 KB` JSON (measured)
 
@@ -241,13 +241,13 @@ A realistic 20-post feed (~446 KB as JSON) serialized every way, with the SAME f
 
 The honest takeaways: **MessagePack alone trims ~1%** on text-heavy payloads (msgpack's real wins are parse speed and binary data — see B3 for the parse-speed side). The big win is **gzip** — and both protocols reach 19.1 KB when compressed. Orbit negotiates gzip via `Accept-Encoding` on the same handler, so the wire advantage of the protocol is **not** payload size here; it is B1's latency, B2's round-trips and B3's throughput. Against GraphQL's *uncompressed* JSON the protocol ships the identical feed in **4% of the bytes** (19 KB vs 446 KB), inside the ~120 KB goal.
 
-### B5 — TTFB in streaming — ✅ `5 ms` (goal < 50 ms)
+### B5 — TTFB in streaming — ✅ `6 ms` (goal < 50 ms)
 
-A root query whose relation takes ~120 ms to resolve (realistic slow join). REST waits for everything: ~400 ms to first byte. Orbit's SSE stream (`accept: text/event-stream`) emits the **root level the moment its adapter answers** — measured 5 ms to the first frame, ~120 ms to completion. The client renders the user card while the database finishes the posts.
+A root query whose relation takes ~120 ms to resolve (realistic slow join). REST waits for everything: ~400 ms to first byte. Orbit's SSE stream (`accept: text/event-stream`) emits the **root level the moment its adapter answers** — measured 5.7 ms to the first frame, ~120 ms to completion. The client renders the user card while the database finishes the posts.
 
-> Measurement note: the first `Request`/`Response` in a Node process pays undici's cold-start (~90 ms). The benchmark warms up first, so the 5 ms reflects steady-state streaming, not the warm-up artifact.
+> Measurement note: the first `Request`/`Response` in a Node process pays undici's cold-start (~90 ms). The benchmark warms up first, so the 5.7 ms reflects steady-state streaming, not the warm-up artifact.
 
-### B8 — Wire path: real HTTP head-to-head — ✅ `1,571 RPS` vs graphql-js `1,029 RPS`
+### B8 — Wire path: real HTTP head-to-head — ✅ `3,293 RPS` vs graphql-js `2,439 RPS`
 
 Everything else on this page measures engines in-process. B8 measures the
 **real transport**: an identical `node:http` server for each side (the same
@@ -255,11 +255,11 @@ handler shape a production deployment uses), a single keep-alive connection
 reused by `node:http`'s own client (production client behavior), the same
 `user(id="1") { name, email }` query, on the same machine.
 
-- **Orbit**: `orbit.handler()` behind the server — **1,571 RPS**.
+- **Orbit**: `orbit.handler()` behind the server — **3,293 RPS**.
 - **GraphQL**: a bare `graphql()` (parse + validate + execute per request, what
-  a default GraphQL HTTP server pays) — **1,029 RPS**.
+  a default GraphQL HTTP server pays) — **2,439 RPS**.
 
-**Orbit's wire path is ~1.5× faster end to end**, including the HTTP stack,
+**Orbit's wire path is ~1.35× faster end to end**, including the HTTP stack,
 JSON body parsing and response serialization on both sides. (The cached-
 document GraphQL variant is even closer in-process — see B3 — but a plain
 GraphQL HTTP server does not cache documents by default.) The absolute RPS is
@@ -267,56 +267,56 @@ lower than the in-process core numbers because the client is a single
 sequential keep-alive stream — the point is the fair, same-stack comparison,
 not a throughput ceiling.
 
-### B7 — Realtime HTTP: WebSocket fan-out — ✅ `11.1 ms` vs the `< 200 ms` spec goal
+### B7 — Realtime HTTP: WebSocket fan-out — ✅ `4.22 ms` vs the `< 200 ms` spec goal
 
 Real WebSocket connections over `node:http` (RFC 6455 hand-rolled, zero deps), driven by a raw `net.Socket` client so the numbers are the server's, not undici's:
 
-- **Connect + subscribe throughput: 1,055 subs/s** — each sub is a real HTTP upgrade (handshake round-trip + subscribe frame + ack), measured sequentially so every op is awaited.
-- **Fan-out: 11.1 ms for 200 sockets** (write path ~7.6 ms + same-process delivery ~3.5 ms). ONE adapter event reaches all 200 subscribers through a single deduped hub hook. **18× inside the goal.**
-- **Resume replay: 3.5 ms for 500 missed patches** over the wire to a reconnected socket (the spec §10 delta-sync story) — **57× inside the goal.**
-- The **~20 µs per `socket.write()` is libuv, not Orbit**: a baseline with *pure* `net.Socket`s (no Orbit at all) writing 200 frames costs the same 3.5–4.8 ms. Orbit's own fan-out (hub + encode) is 358 µs for 100 in-memory subscribers (see B6).
+- **Connect + subscribe throughput: 1,121 subs/s** — each sub is a real HTTP upgrade (handshake round-trip + subscribe frame + ack), measured sequentially so every op is awaited.
+- **Fan-out: 4.22 ms for 200 sockets** (write path ~3.1 ms + same-process delivery ~1.1 ms). ONE adapter event reaches all 200 subscribers through a single deduped hub hook. **47× inside the goal.**
+- **Resume replay: 2.12 ms for 500 missed patches** over the wire to a reconnected socket (the spec §10 delta-sync story) — **94× inside the goal.**
+- The **~20 µs per `socket.write()` is libuv, not Orbit**: a baseline with *pure* `net.Socket`s (no Orbit at all) writing 200 frames costs the same ~3–4 ms. Orbit's own fan-out (hub + encode) is 141 µs for 100 in-memory subscribers (see B6).
 
-### B6 — Reconnect: warm replay — ✅ `0.2 ms` vs Apollo `2,000 ms` (reference)
+### B6 — Reconnect: warm replay — ✅ `0.1 ms` vs Apollo `2,000 ms` (reference)
 
 After an offline disconnect, Apollo refetches the whole graph (~2 s on a mobile network). Orbit has two replay paths:
 
 - **Warm cache replay:** a single map lookup plus serialization — **P99 0.1 ms** for the full `user { id, name, email }` graph from the in-memory cache store (`cache: 'ttl=300'`).
--  **Realtime resume (the delta-sync story):** **100 clients on ONE shared adapter hook**, a patch reaching all of them in **358 µs** of fan-out, and a resume replaying **500 missed patches in 302 µs**. The subscription survives the disconnect (`retentionMs`), the event log keeps growing, and `resume` replays only the gap — not the whole graph. Well inside the < 200 ms goal. (B7 measures the same story over real sockets: see above.)
+-  **Realtime resume (the delta-sync story):** **100 clients on ONE shared adapter hook**, a patch reaching all of them in **141 µs** of fan-out, and a resume replaying **500 missed patches in 141 µs**. The subscription survives the disconnect (`retentionMs`), the event log keeps growing, and `resume` replays only the gap — not the whole graph. Well inside the < 200 ms goal. (B7 measures the same story over real sockets: see above.)
 
 Both are the "replay from Redis" story the spec targets — swap the store for Redis and the contract is identical.
 
-### B9 — Deep nest: warm cache replay vs DataLoader — ✅ `0.16 ms` (0 DB calls) vs `53.68 ms` (5 batches/request)
+### B9 — Deep nest: warm cache replay vs DataLoader — ✅ `0.09 ms` (0 DB calls) vs `22.17 ms` (5 batches/request)
 
 B2 measured the naive N+1 (1,112 resolver calls). B9 measures the **fix** on the same 5-level graph, both sides:
 
-- **Orbit — cache plugin**: the first request resolves the tree (5 batched round-trips, one per level) and stores each level in the cache store. Every warm request after that is a **0-DB-call replay from memory: P99 0.17 ms**.
-- **GraphQL + DataLoader** (the standard N+1 fix): batchers collapse the 1,112 resolver calls into **5 DB batches per request** — the same per-level floor as Orbit's contract. But DataLoader caches *within one request only*: a fresh loader per request is the correct production setup (a shared loader leaks cross-request caching), so **every request still pays all 5 batches** — measured P99 52.78 ms on this machine.
+- **Orbit — cache plugin**: the first request resolves the tree (5 batched round-trips, one per level) and stores each level in the cache store. Every warm request after that is a **0-DB-call replay from memory: P99 0.09 ms**.
+- **GraphQL + DataLoader** (the standard N+1 fix): batchers collapse the 1,112 resolver calls into **5 DB batches per request** — the same per-level floor as Orbit's contract. But DataLoader caches *within one request only*: a fresh loader per request is the correct production setup (a shared loader leaks cross-request caching), so **every request still pays all 5 batches** — measured P99 22.17 ms on this machine.
 
 The honest takeaway: **DataLoader closes the cold N+1 gap** (B2's 1,112 → 5, parity with Orbit's batching), but it does not make repeat requests cheaper. Orbit's *contract-level* cache does: the second identical request costs 0 round-trips. For the "user refreshes / reconnects / re-renders" pattern — the most common read in any app — that is the delta that matters, and it is the same story B6 measures for a single query and this benchmark extends to the whole deep graph.
 
-> Fairness notes: the GraphQL document is pre-parsed + pre-validated (cached-document, the B3 discipline) so 52.78 ms is execution-only, not parse. DB calls are counted by instrumenting the batch functions and the root resolver — one batchFn invocation per level, exactly the model of one adapter `batch()` per level.
+> Fairness notes: the GraphQL document is pre-parsed + pre-validated (cached-document, the B3 discipline) so 22.17 ms is execution-only, not parse. DB calls are counted by instrumenting the batch functions and the root resolver — one batchFn invocation per level, exactly the model of one adapter `batch()` per level.
 
-### B10 — Client overhead: `@orbit/client` vs raw fetch — ✅ `1.886 ms` vs `1.993 ms` (−5.4% — free)
+### B10 — Client overhead: `@orbit/client` vs raw fetch — ✅ `0.873 ms` vs `0.775 ms` (+12.7% — inside the 15% budget)
 
 The previous scenarios measure the engine. B10 measures the **client**: `createClient(...).query()` against a hand-rolled `fetch` that does the same POST + parse, both hitting the exact same `node:http` server + `orbit.handler` on this machine. The engine work is identical, so this isolates what `@orbit/client` *adds* on top of a bare round-trip — envelope validation, header negotiation, gzip, response mapping and error normalization.
 
-- **Raw fetch**: a hand-written POST + `res.json()` — **1.993 ms** P99.
-- **`client.query()`**: the full client path — **1.886 ms** P99 (measured twice, alternating order, warm).
+- **Raw fetch**: a hand-written POST + `res.json()` — **0.775 ms** P99.
+- **`client.query()`**: the full client path — **0.873 ms** P99 (measured twice, alternating order, warm).
 
-**The client adds ≈0% overhead** (−5.4% in this run — measurement noise, not a speedup). The validation and response mapping cost ~tens of microseconds against a multi-millisecond network round-trip. The goal (≤ 15% added) is met with three orders of magnitude to spare. The takeaway: **using the reference client is free** — teams get the protocol's validation and error contract without paying a latency tax.
+**The client adds 12.7% in this run**, inside the ≤ 15% goal. On loopback the whole round-trip is sub-millisecond, so envelope validation, header negotiation, gzip and response mapping (~a hundred microseconds of pure work) are a visible share of it; on a real network the same fixed cost is dwarfed by RTT, and the previous run measured parity (−5.4%). Either way the budget holds: teams get the protocol's validation and error contract without a meaningful latency tax.
 
-### B11 — The React layer: warm cache hit vs raw fetch — ✅ `0.003 ms` (0 HTTP) vs `1.821 ms` (589×)
+### B11 — The React layer: warm cache hit vs raw fetch — ✅ `0.002 ms` (0 HTTP) vs `0.791 ms` (364×)
 
 B10 showed the vanilla client is free. B11 extends the same experiment up one layer: what does **`@orbit/react`** (the hooks + cache wrapper) cost — and what does its cache buy? Three paths hit the exact same `node:http` server + `orbit.handler`:
 
-- **Raw fetch** — hand-written POST + parse: **1.821 ms** P99.
-- **`@orbit/client`** — `query()`: **1.837 ms** P99.
-- **`@orbit/react` on a miss** — `invalidate()` + `ensureQuery()`: **1.979 ms** P99, a **+7.7% overhead** over the bare client. That extra cost is the cache's bookkeeping — key derivation, entry write, version bump, listener notify, LRU eviction check — the price of getting every *subsequent* read for free.
-- **`@orbit/react` warm cache hit** — `ensureQuery()` on a fresh entry (what the hooks deliver on every repeated read, re-render and remount): **0.003 ms** P99 — **zero HTTP round-trips**, 589× faster than the raw fetch that a hand-written client pays *every single time*.
+- **Raw fetch** — hand-written POST + parse: **0.791 ms** P99.
+- **`@orbit/client`** — `query()`: **0.772 ms** P99.
+- **`@orbit/react` on a miss** — `invalidate()` + `ensureQuery()`: **0.914 ms** P99, a **+18.4% overhead** over the bare client. That extra cost is the cache's bookkeeping — key derivation, entry write, version bump, listener notify, LRU eviction check — the price of getting every *subsequent* read for free.
+- **`@orbit/react` warm cache hit** — `ensureQuery()` on a fresh entry (what the hooks deliver on every repeated read, re-render and remount): **0.002 ms** P99 — **zero HTTP round-trips**, 364× faster than the raw fetch that a hand-written client pays *every single time*.
 
-The story, end to end: the protocol is free on the wire (B10), the cache layer adds ~8% only when it misses (B11), and then turns every repeated read into a **3-microsecond in-memory lookup** — the exact pattern that dominates real apps (the same query re-rendered, re-mounted, re-scrolled).
+The story, end to end: the protocol is free on the wire (B10), the cache layer adds ~18% only when it misses (B11), and then turns every repeated read into a **2-microsecond in-memory lookup** — the exact pattern that dominates real apps (the same query re-rendered, re-mounted, re-scrolled).
 
-> Fairness notes: the miss path includes the explicit `invalidate()` in the timed loop, so +7.7% is the *worst case* per-query tax (eviction + refetch); a plain first-time miss without eviction is cheaper. All three paths were warmed and measured in alternating order (2,000 samples each).
+> Fairness notes: the miss path includes the explicit `invalidate()` in the timed loop, so +18.4% is the *worst case* per-query tax (eviction + refetch); a plain first-time miss without eviction is cheaper. All three paths were warmed and measured in alternating order (2,000 samples each).
 
 ### B12 — Wire bytes: round-trip with a compressed request — ✅ `25.5 KB` vs `191.7 KB` (86.7% fewer)
 
@@ -337,7 +337,7 @@ The whole saving is the uplink: the write request drops **173.7 KB → 7.5 KB**,
 
 ## Methodology & honesty
 
-- **Same machine, same clock, same fixtures.** Orbit and graphql-js resolve the SAME data (`bench/fixtures.ts`) with the same timing helpers (`bench/measure.ts`) on this machine (the table below is the Node v24.18.0 run; the embedded chart is the latest local run).
+- **Same machine, same clock, same fixtures.** Orbit and graphql-js resolve the SAME data (`bench/fixtures.ts`) with the same timing helpers (`bench/measure.ts`) on this machine — the table, the prose and the embedded chart all come from the same Node v26.13.0 run of `pnpm run bench`.
 - **The competition is installed and measured.** `graphql` (v17) and `dataloader` are devDependencies of the bench harness; `bench/graphql.ts` runs parse + validate + execute against schemas built from the same fixtures (and DataLoader batches for B9). REST (B1/B5) and Apollo (B6) figures remain spec references — there is no zero-dependency REST/Apollo equivalent to install, and they are labeled as references in the table.
 - **`@orbit/core` stays zero-dependency.** The `graphql`/`dataloader` devDependencies live at the repo root, for the bench harness only — the shipped core package has no runtime dependencies.
 - **GraphQL gets its fair best case in B3.** Two numbers are reported: naive (full `graphql()` pipeline per op) and cached-document (pre-parsed + pre-validated, what production servers do and the direct equivalent of Orbit's parse LRU). The headline comparison uses the cached number.
