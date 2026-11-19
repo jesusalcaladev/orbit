@@ -14,6 +14,8 @@
  */
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { createServer as createNetServer, connect as connectSocket } from 'node:net';
+import type { Socket } from 'node:net';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -509,10 +511,71 @@ async function benchB6Realtime(): Promise<void> {
 // buffering, so the numbers are the server's, not the client's.
 // ---------------------------------------------------------------------------
 
+/**
+ * Raw `net.Socket` fan-out baseline: N plain TCP sockets on each end (no
+ * WebSocket framing, no Orbit hub), each written the same number of bytes as
+ * one real event frame. Returns the time from the synchronous write loop until
+ * every client socket received its frame — the same two instants B7 times — so
+ * the page can say what the kernel/libuv path costs instead of asserting it.
+ */
+async function netSocketBaseline(n: number, bytes: number): Promise<number> {
+  const payload = Buffer.alloc(bytes, 0x61);
+  const serverSide: Socket[] = [];
+  const server = createNetServer((socket) => {
+    socket.on('error', () => {});
+    serverSide.push(socket);
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = (server.address() as { port: number }).port;
+
+  const clients: Socket[] = [];
+  const received = new Array<number>(n).fill(0);
+  let wake: (() => void) | null = null;
+  for (let i = 0; i < n; i += 1) {
+    const client = connectSocket({ port, host: '127.0.0.1' });
+    client.setNoDelay(true);
+    client.on('error', () => {});
+    client.on('data', (chunk: Buffer) => {
+      received[i] = (received[i] ?? 0) + chunk.length;
+      if (wake && received.every((r) => r >= bytes)) {
+        const done = wake;
+        wake = null;
+        done();
+      }
+    });
+    clients.push(client);
+  }
+  await waitFor(
+    () => serverSide.length === n && clients.every((c) => !c.connecting),
+    'raw sockets connected',
+  );
+
+  const round = async (): Promise<number> => {
+    received.fill(0);
+    const all = new Promise<void>((resolve) => {
+      wake = resolve;
+    });
+    const start = now();
+    for (const socket of serverSide) socket.write(payload);
+    await all;
+    return (now() - start) * 1000;
+  };
+
+  await round(); // warm-up, same as the fan-out path above
+  const us = await round();
+
+  for (const client of clients) client.destroy();
+  for (const socket of serverSide) socket.destroy();
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+
+  return us;
+}
+
 async function benchB7(): Promise<{
   subsPerSec: number;
   fanOutUs: number;
   resumeMs: number;
+  socketBaselineUs: number;
   competitionMs: number;
 }> {
   const handlers = new Set<(event: SubscriptionEvent) => void>();
@@ -575,8 +638,10 @@ async function benchB7(): Promise<{
   const allDelivered = new Promise<void>((resolve) => {
     resolveAll = resolve;
   });
+  let frameBytes = 0;
   for (const client of clients) {
-    client.onFrame = () => {
+    client.onFrame = (frame) => {
+      frameBytes += frame.payload.length;
       delivered += 1;
       if (delivered === expected) resolveAll();
     };
@@ -586,6 +651,13 @@ async function benchB7(): Promise<{
   const writePathUs = (now() - t1) * 1000;
   await allDelivered;
   const fanOutUs = (now() - t1) * 1000;
+  const frameSize = Math.max(1, Math.round(frameBytes / expected));
+
+  // 3b) Baseline: the SAME 200 sockets and the SAME frame size, but pure
+  //    net.Socket on both ends — no Orbit, no WebSocket framing, no hub. This
+  //    is what the kernel/libuv write+delivery path costs on its own, so the
+  //    page can attribute the fan-out number instead of asserting it.
+  const socketBaselineUs = await netSocketBaseline(N, frameSize);
 
   // 4) Resume replay: c0 drops, K patches land while offline, a reconnected
   //    socket replays exactly the gap over the wire (spec §10 delta sync).
@@ -627,7 +699,11 @@ async function benchB7(): Promise<{
   console.log(
     `    realtime http: ${subsPerSec.toFixed(0)} subs/s · fan-out ${N} sockets ${fanOutUs.toFixed(0)} µs (write path ${writePathUs.toFixed(0)} µs) · resume ${K} patches ${resumeMs.toFixed(2)} ms`,
   );
-  return { subsPerSec, fanOutUs, resumeMs, competitionMs: 200 };
+  console.log(
+    `    socket baseline: ${N} raw net.Socket frames (${frameSize} B each, no Orbit) delivered in ${socketBaselineUs.toFixed(0)} µs`,
+  );
+
+  return { subsPerSec, fanOutUs, resumeMs, socketBaselineUs, competitionMs: 200 };
 }
 
 // ---------------------------------------------------------------------------
@@ -831,6 +907,7 @@ interface Result {
   competitionLabel: string;
   goal: string;
   goalMet: boolean;
+  socketBaselineUs: number;
 }
 
 const ok = (met: boolean): string => (met ? '✅' : '⚠️ ');
@@ -990,6 +1067,7 @@ async function main(): Promise<void> {
       lowerIsBetter: true,
       orbitValue: fanOutMs,
       orbitLabel: `${fanOutMs.toFixed(2)} ms`,
+      socketBaselineUs: r.socketBaselineUs,
       competitionValue: r.competitionMs,
       competitionLabel: `${r.competitionMs} ms (spec goal)`,
       goal: '< 200 ms',
@@ -998,7 +1076,7 @@ async function main(): Promise<void> {
     const resumeLabel =
       r.resumeMs < 1 ? `${(r.resumeMs * 1000).toFixed(0)} µs` : `${r.resumeMs.toFixed(2)} ms`;
     console.log(
-      `B7 · Realtime HTTP WS fan-out        ${ok(met)} orbit ${r.fanOutUs.toFixed(0)} µs  (${r.subsPerSec.toFixed(0)} subs/s · resume ${resumeLabel})  vs  goal < 200 ms`,
+      `B7 · Realtime HTTP WS fan-out        ${ok(met)} orbit ${r.fanOutUs.toFixed(0)} µs  (${r.subsPerSec.toFixed(0)} subs/s · resume ${resumeLabel} · raw-socket baseline ${r.socketBaselineUs.toFixed(0)} µs)  vs  goal < 200 ms`,
     );
   }
 
