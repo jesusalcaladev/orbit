@@ -191,7 +191,7 @@ Orbit is built to be *fast by contract*: one round-trip, batched resolution, bin
 | B9 | Deep nest · warm cache replay vs DataLoader | Warm replay P99 latency | graphql-js + DataLoader **22.17 ms** · **5 DB batches/request** (measured) | **0.09 ms** · **0 DB calls** | < 200 ms (0 DB calls warm) | ✅ |
 | B10 | Client overhead · real HTTP round-trip | P99 round-trip latency | raw fetch **0.775 ms** (measured) | **0.873 ms** (+12.7% — inside the 15% budget) | ≤ 15% overhead | ✅ |
 | B11 | React layer · warm cache hit vs raw fetch | P99 latency (warm cache hit) | raw fetch **0.791 ms** (measured) | **0.002 ms** · **0 HTTP round-trips** (364× faster; miss overhead vs bare client **18.4%**) | < 0.5 ms warm | ✅ |
-| B12 | Wire bytes · agent write + read round-trip | Bytes on the wire (in + out) | raw request + gzip response **191.7 KB** (client default) | **25.5 KB** (gzip request + gzip response; the write request alone **173.7 → 7.5 KB**) | ≥ 50% fewer | ✅ |
+| B12 | Wire bytes · agent write + read round-trip | Bytes on the wire (in + out) | raw request + gzip response **191.7 KB** (client default) | **25.5 KB** (gzip request + gzip response; the write request alone **173.8 → 7.6 KB**) | ≥ 50% fewer | ✅ |
 
 **11 of 11 goals met, against measured graphql-js competition.** (B12's baseline is the protocol's own default round-trip, not graphql-js: it measures the wire, not the engine — see its section.) (B2's goal is its theoretical floor: one batched round-trip per level. B3 compares the engine core — the spec's ~30k claim is about the protocol's own throughput; graphql-js is measured both naive (full pipeline per op) and with a cached document (the production-server equivalent of Orbit's parse LRU). B1 reports the same two-sided story: the cached number is the fair comparison to Orbit's parse LRU. B8 is the REAL wire path: both engines behind an identical `node:http` server, the same keep-alive client, the same machine — Orbit serves ~1.35× the requests of a bare GraphQL HTTP endpoint. B9 measures the repeat-request story: DataLoader (the standard N+1 fix) collapses B2's 1,112 resolver calls to 5 DB batches per request but still pays all 5 on EVERY request, because a fresh loader per request is the correct production setup; Orbit's cache plugin replays the warm request from memory at 0 DB calls. B7's competition column is the spec's realtime target — Apollo-style delta sync under 200 ms — because no load-tool reference exists for a zero-dependency WS server.)
 
@@ -307,14 +307,14 @@ The previous scenarios measure the engine. B10 measures the **client**: `createC
 
 ### B11 — The React layer: warm cache hit vs raw fetch — ✅ `0.002 ms` (0 HTTP) vs `0.791 ms` (364×)
 
-B10 showed the vanilla client is free. B11 extends the same experiment up one layer: what does **`@orbit/react`** (the hooks + cache wrapper) cost — and what does its cache buy? Three paths hit the exact same `node:http` server + `orbit.handler`:
+B10 showed the vanilla client adds ~13% on loopback, inside budget. B11 extends the same experiment up one layer: what does **`@orbit/react`** (the hooks + cache wrapper) cost — and what does its cache buy? Three paths hit the exact same `node:http` server + `orbit.handler`:
 
 - **Raw fetch** — hand-written POST + parse: **0.791 ms** P99.
 - **`@orbit/client`** — `query()`: **0.772 ms** P99.
 - **`@orbit/react` on a miss** — `invalidate()` + `ensureQuery()`: **0.914 ms** P99, a **+18.4% overhead** over the bare client. That extra cost is the cache's bookkeeping — key derivation, entry write, version bump, listener notify, LRU eviction check — the price of getting every *subsequent* read for free.
 - **`@orbit/react` warm cache hit** — `ensureQuery()` on a fresh entry (what the hooks deliver on every repeated read, re-render and remount): **0.002 ms** P99 — **zero HTTP round-trips**, 364× faster than the raw fetch that a hand-written client pays *every single time*.
 
-The story, end to end: the protocol is free on the wire (B10), the cache layer adds ~18% only when it misses (B11), and then turns every repeated read into a **2-microsecond in-memory lookup** — the exact pattern that dominates real apps (the same query re-rendered, re-mounted, re-scrolled).
+The story, end to end: the protocol costs ~13% on the wire in the loopback worst case (B10), the cache layer adds ~18% only when it misses (B11), and then turns every repeated read into a **2-microsecond in-memory lookup** — the exact pattern that dominates real apps (the same query re-rendered, re-mounted, re-scrolled).
 
 > Fairness notes: the miss path includes the explicit `invalidate()` in the timed loop, so +18.4% is the *worst case* per-query tax (eviction + refetch); a plain first-time miss without eviction is cheaper. All three paths were warmed and measured in alternating order (2,000 samples each).
 
@@ -331,7 +331,7 @@ B4 measures a RESPONSE in isolation. Agents and mobile clients spend bytes in **
 | **gzip JSON request, gzip JSON response** (`compressRequests`) | 7.6 KB | 17.9 KB | **25.5 KB** |
 | gzip MessagePack request + response | 7.6 KB | 18.0 KB | 25.6 KB |
 
-The whole saving is the uplink: the write request drops **173.7 KB → 7.5 KB**, and the download is already compressed in every configuration. MessagePack adds nothing on top of gzip here (B4's lesson again — gzip equalizes), so the win is purely the request side, which the protocol could not compress at all before.
+The whole saving is the uplink: the write request drops **173.8 KB → 7.6 KB**, and the download is already compressed in every configuration. MessagePack adds nothing on top of gzip here (B4's lesson again — gzip equalizes), so the win is purely the request side, which the protocol could not compress at all before.
 
 > Fairness note: the B4 fixture's prose is assembled from a small sentence pool, so it compresses better than arbitrary user text (the same caveat as B4's 446 KB → 19 KB). The number to trust is the **direction and the ratio between configurations** — a compressed request is never worse than a compressed response, and the server bounds the decompressed size, so the upside has no matching DoS downside. Numbers are deterministic (fixed fixtures, no sampling): B12 measures bytes, not time — B3/B8 measure the cost of these paths in RPS.
 
