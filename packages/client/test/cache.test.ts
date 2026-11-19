@@ -139,7 +139,7 @@ describe('OrbitClient with a QueryCache (spec §8 end-to-end)', () => {
 
   it('mutations always hit the network and evict via the invalidates echo', async () => {
     let calls = 0;
-    const { fetchImpl } = mockFetch((url, init) => {
+    const { fetchImpl } = mockFetch((_url, init) => {
       calls += 1;
       if (JSON.parse(String(init.body)).do !== undefined) {
         return jsonRes({ data: { success: true }, invalidates: ['user'] });

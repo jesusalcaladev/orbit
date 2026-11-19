@@ -520,27 +520,16 @@ export class Orbit {
         return await this.#toResponse(result, format, encoding, base, conditional);
       }
 
-      // Cheap pre-check before buffering: reject oversized bodies early.
-      const declared = Number(request.headers.get('content-length') ?? 0);
-      if (Number.isFinite(declared) && declared > this.#options.maxPayloadBytes) {
-        throw new OrbitError(
-          ErrorCode.PAYLOAD_TOO_LARGE,
-          'Request payload exceeds the configured limit',
-          {
-            details: {
-              maxBytes: this.#options.maxPayloadBytes,
-              received: declared,
-            },
-          },
-        );
-      }
-
       const contentType = request.headers.get('content-type') ?? '';
+      // The body first: the cheap `content-length` pre-check, the
+      // `content-encoding` decoding and the inflated-size cap all live in one
+      // place (`#readBody`), so compressed and plain bodies share every bound.
+      const raw = await this.#readBody(request);
       // File uploads travel as multipart/form-data: the `envelope` field is the
       // JSON envelope, File fields become `ctx.files` (never touch the frozen
       // envelope contract — files are context, not envelope fields).
       if (contentType.includes('multipart/form-data')) {
-        const { envelope, files } = await this.#readMultipart(request, contentType);
+        const { envelope, files } = await this.#readMultipart(raw, contentType);
         // `#readMultipart` always returns an object (possibly empty).
         const fullCtx: OrbitContext = { ...base, files };
         if (format === 'sse') {
@@ -551,7 +540,6 @@ export class Orbit {
         return await this.#toResponse(result, format, encoding, fullCtx, conditional);
       }
 
-      const raw = new Uint8Array(await request.arrayBuffer());
       const isMsgpack = contentType.includes(MSGPACK_CONTENT_TYPE);
       // Bytes-aware read: uses the known byte length and decodes once.
       const envelope = isMsgpack
@@ -598,6 +586,115 @@ export class Orbit {
   }
 
   /**
+   * Read the request body, honouring a compressed `content-encoding`
+   * (spec §7, additive): `gzip` wherever the runtime can decode it, `br`
+   * where `DecompressionStream('br')` exists.
+   *
+   * The size cap is enforced on the DECOMPRESSED bytes as the stream arrives.
+   * `content-length` bounds the compressed body, but a few KB of gzip can
+   * inflate to gigabytes (a decompression bomb), so `maxPayloadBytes` must
+   * bound the inflated result — and it must do so while inflating, because
+   * buffering the whole expansion first is exactly the DoS being prevented.
+   */
+  async #readBody(request: Request): Promise<Uint8Array> {
+    // Cheap pre-check before buffering: reject oversized bodies early.
+    const declared = Number(request.headers.get('content-length') ?? 0);
+    if (Number.isFinite(declared) && declared > this.#options.maxPayloadBytes) {
+      throw this.#payloadTooLarge(declared);
+    }
+
+    const raw = new Uint8Array(await request.arrayBuffer());
+    const encoding = (request.headers.get('content-encoding') ?? '').trim().toLowerCase();
+    if (encoding === '' || encoding === 'identity') return this.#capBody(raw);
+
+    const codec =
+      encoding === 'gzip' || encoding === 'x-gzip' ? 'gzip' : encoding === 'br' ? 'br' : null;
+    if (codec === null) {
+      throw new OrbitError(
+        ErrorCode.INVALID_QUERY,
+        `Unsupported request content-encoding: ${encoding}`,
+        { details: { encoding } },
+      );
+    }
+    return this.#inflateBody(raw, codec);
+  }
+
+  /** Reject a body that is over the limit; otherwise pass it through. */
+  #capBody(bytes: Uint8Array): Uint8Array {
+    if (bytes.byteLength > this.#options.maxPayloadBytes) {
+      throw this.#payloadTooLarge(bytes.byteLength);
+    }
+    return bytes;
+  }
+
+  #payloadTooLarge(received: number): OrbitError {
+    return new OrbitError(
+      ErrorCode.PAYLOAD_TOO_LARGE,
+      'Request payload exceeds the configured limit',
+      { details: { maxBytes: this.#options.maxPayloadBytes, received } },
+    );
+  }
+
+  /**
+   * Inflate a compressed request body, refusing to grow past
+   * `maxPayloadBytes` — the decompression-bomb guard.
+   */
+  async #inflateBody(bytes: Uint8Array, codec: 'gzip' | 'br'): Promise<Uint8Array> {
+    if (typeof DecompressionStream === 'undefined') {
+      throw new OrbitError(
+        ErrorCode.INVALID_QUERY,
+        `This runtime cannot decode '${codec}' request bodies`,
+      );
+    }
+    let stream: ReadableStream<Uint8Array>;
+    try {
+      stream = new Blob([bytes as BlobPart]).stream().pipeThrough(
+        new DecompressionStream(codec as CompressionFormat) as unknown as {
+          readable: ReadableStream<Uint8Array>;
+          writable: WritableStream<Uint8Array>;
+        },
+      );
+    } catch {
+      throw new OrbitError(
+        ErrorCode.INVALID_QUERY,
+        `This runtime cannot decode '${codec}' request bodies`,
+      );
+    }
+
+    const reader = stream.getReader();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        total += value.byteLength;
+        if (total > this.#options.maxPayloadBytes) {
+          // Cancelling is best-effort: the stream may already have errored.
+          try {
+            await reader.cancel();
+          } catch {
+            // Nothing left to release.
+          }
+          throw this.#payloadTooLarge(total);
+        }
+        chunks.push(value);
+      }
+    } catch (error) {
+      if (error instanceof OrbitError) throw error;
+      throw new OrbitError(ErrorCode.INVALID_QUERY, `Request body is not valid ${codec}`);
+    }
+    if (chunks.length === 1) return chunks[0]!;
+    const out = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      out.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return out;
+  }
+
+  /**
    * Parse a `multipart/form-data` request into an envelope + files.
    *
    * The `envelope` field must be a JSON string (validated exactly like any
@@ -607,27 +704,14 @@ export class Orbit {
    * are rejected — uploads are a deliberate, explicit contract.
    */
   async #readMultipart(
-    request: Request,
+    raw: Uint8Array,
     contentType: string,
   ): Promise<{ envelope: OrbitEnvelope; files: Record<string, File> }> {
-    const raw = new Uint8Array(await request.arrayBuffer());
-    if (raw.byteLength > this.#options.maxPayloadBytes) {
-      throw new OrbitError(
-        ErrorCode.PAYLOAD_TOO_LARGE,
-        'Request payload exceeds the configured limit',
-        {
-          details: {
-            maxBytes: this.#options.maxPayloadBytes,
-            received: raw.byteLength,
-          },
-        },
-      );
-    }
     let form: FormData;
     try {
       // Reconstruct with the ORIGINAL content-type so the boundary travels with
       // the body (a bare Response loses the multipart boundary).
-      form = await new Response(raw, {
+      form = await new Response(new Blob([raw as BlobPart]), {
         headers: { 'content-type': contentType },
       }).formData();
     } catch {

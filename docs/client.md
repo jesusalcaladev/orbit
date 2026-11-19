@@ -76,8 +76,10 @@ interface OrbitClientOptions {
   headers?: Record<string, string> | (() => Record<string, string>); // per-request re-evaluated
   format?: 'json' | 'msgpack';              // default 'json'; per-request override below
   gzip?: boolean;                           // Accept-Encoding + decompress; default true
+  compressRequests?: boolean;               // gzip the envelope when it pays off; default false
   fetch?: typeof fetch;                     // injectable (tests, Workers, custom transports)
   decompress?: Decompress;                  // injectable gunzip (React Native — no DecompressionStream)
+  compress?: Compress;                       // injectable gzip for request bodies
   WebSocket?: typeof WebSocket;             // injectable (Node 20, RN)
   realtimeUrl?: string;                     // explicit WS endpoint; default derived from baseUrl
 }
@@ -93,6 +95,10 @@ spec §8), `return` (re-query after a mutation).
 - **Negotiation is inherited from `@orbit/core`**: `content-type` and `accept`
   are set from the format (`application/json` or `application/x-msgpack`), and
   `accept-encoding: gzip` is sent by default.
+- With `compressRequests: true`, an envelope ≥ 512 bytes that gzip shrinks is
+  sent with `content-encoding: gzip` — `execute`/`query`/`mutate`/`batchMutate`
+  and `stream` alike. No codec, a throwing `compress` or a bigger compressed
+  body falls back to an identity body (spec §7).
 - The envelope is **validated client-side** (`validateEnvelope`) before any
   network I/O — a malformed envelope fails fast instead of wasting a
   round-trip.

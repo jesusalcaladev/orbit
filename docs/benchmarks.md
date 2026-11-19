@@ -1,4 +1,4 @@
-# Benchmarks (B1–B11)
+# Benchmarks (B1–B12)
 
 Orbit is built to be *fast by contract*: one round-trip, batched resolution, binary serialization, progressive streaming, and replayable caches. This page measures those claims **against real, installed competition on this machine** — graphql-js v17 for latency, throughput, round-trips and payloads (REST and Apollo reference figures are labeled as such where no zero-dependency equivalent exists).
 
@@ -181,8 +181,9 @@ Orbit is built to be *fast by contract*: one round-trip, batched resolution, bin
 | B9 | Deep nest · warm cache replay vs DataLoader | Warm replay P99 latency | graphql-js + DataLoader **53.68 ms** · **5 DB batches/request** (measured) | **0.16 ms** · **0 DB calls** | < 200 ms (0 DB calls warm) | ✅ |
 | B10 | Client overhead · real HTTP round-trip | P99 round-trip latency | raw fetch **1.993 ms** (measured) | **1.886 ms** (−5.4% — client is faster than the hand-rolled loop) | ≤ 15% overhead | ✅ |
 | B11 | React layer · warm cache hit vs raw fetch | P99 latency (warm cache hit) | raw fetch **1.821 ms** (measured) | **0.003 ms** · **0 HTTP round-trips** (589× faster; miss overhead vs bare client **7.7%**) | < 0.5 ms warm | ✅ |
+| B12 | Wire bytes · agent write + read round-trip | Bytes on the wire (in + out) | raw request + gzip response **191.7 KB** (client default) | **25.5 KB** (gzip request + gzip response; the write request alone **173.7 → 7.5 KB**) | ≥ 50% fewer | ✅ |
 
-**10 of 10 goals met, against measured graphql-js competition.** (B2's goal is its theoretical floor: one batched round-trip per level. B3 compares the engine core — the spec's ~30k claim is about the protocol's own throughput; graphql-js is measured both naive (full pipeline per op) and with a cached document (the production-server equivalent of Orbit's parse LRU). B1 reports the same two-sided story: the cached number is the fair comparison to Orbit's parse LRU. B8 is the REAL wire path: both engines behind an identical `node:http` server, the same keep-alive client, the same machine — Orbit serves ~1.5× the requests of a bare GraphQL HTTP endpoint. B9 measures the repeat-request story: DataLoader (the standard N+1 fix) collapses B2's 1,112 resolver calls to 5 DB batches per request but still pays all 5 on EVERY request, because a fresh loader per request is the correct production setup; Orbit's cache plugin replays the warm request from memory at 0 DB calls. B7's competition column is the spec's realtime target — Apollo-style delta sync under 200 ms — because no load-tool reference exists for a zero-dependency WS server.)
+**11 of 11 goals met, against measured graphql-js competition.** (B12's baseline is the protocol's own default round-trip, not graphql-js: it measures the wire, not the engine — see its section.) (B2's goal is its theoretical floor: one batched round-trip per level. B3 compares the engine core — the spec's ~30k claim is about the protocol's own throughput; graphql-js is measured both naive (full pipeline per op) and with a cached document (the production-server equivalent of Orbit's parse LRU). B1 reports the same two-sided story: the cached number is the fair comparison to Orbit's parse LRU. B8 is the REAL wire path: both engines behind an identical `node:http` server, the same keep-alive client, the same machine — Orbit serves ~1.5× the requests of a bare GraphQL HTTP endpoint. B9 measures the repeat-request story: DataLoader (the standard N+1 fix) collapses B2's 1,112 resolver calls to 5 DB batches per request but still pays all 5 on EVERY request, because a fresh loader per request is the correct production setup; Orbit's cache plugin replays the warm request from memory at 0 DB calls. B7's competition column is the spec's realtime target — Apollo-style delta sync under 200 ms — because no load-tool reference exists for a zero-dependency WS server.)
 
 ## Scenario by scenario
 
@@ -307,6 +308,23 @@ The story, end to end: the protocol is free on the wire (B10), the cache layer a
 
 > Fairness notes: the miss path includes the explicit `invalidate()` in the timed loop, so +7.7% is the *worst case* per-query tax (eviction + refetch); a plain first-time miss without eviction is cheaper. All three paths were warmed and measured in alternating order (2,000 samples each).
 
+### B12 — Wire bytes: round-trip with a compressed request — ✅ `25.5 KB` vs `191.7 KB` (86.7% fewer)
+
+B4 measures a RESPONSE in isolation. Agents and mobile clients spend bytes in **both** directions: they upload query text, filters and mutation payloads, then download the graph. B12 sends two realistic envelopes through the real `orbit.handler` and counts what leaves and returns:
+
+- A bulk write — an agent importing content (8 posts of the B4 feed, half the bytes of the fixture).
+- The read that follows — the same feed, projected to the fields a list screen needs.
+
+| Configuration | Bytes in | Bytes out | Round trip |
+| :--- | ---: | ---: | ---: |
+| JSON request, gzip JSON response (client default) | 173.8 KB | 17.9 KB | **191.7 KB** |
+| **gzip JSON request, gzip JSON response** (`compressRequests`) | 7.6 KB | 17.9 KB | **25.5 KB** |
+| gzip MessagePack request + response | 7.6 KB | 18.0 KB | 25.6 KB |
+
+The whole saving is the uplink: the write request drops **173.7 KB → 7.5 KB**, and the download is already compressed in every configuration. MessagePack adds nothing on top of gzip here (B4's lesson again — gzip equalizes), so the win is purely the request side, which the protocol could not compress at all before.
+
+> Fairness note: the B4 fixture's prose is assembled from a small sentence pool, so it compresses better than arbitrary user text (the same caveat as B4's 446 KB → 19 KB). The number to trust is the **direction and the ratio between configurations** — a compressed request is never worse than a compressed response, and the server bounds the decompressed size, so the upside has no matching DoS downside. Numbers are deterministic (fixed fixtures, no sampling): B12 measures bytes, not time — B3/B8 measure the cost of these paths in RPS.
+
 ## Methodology & honesty
 
 - **Same machine, same clock, same fixtures.** Orbit and graphql-js resolve the SAME data (`bench/fixtures.ts`) with the same timing helpers (`bench/measure.ts`) on this machine (Node v24.18.0).
@@ -342,8 +360,8 @@ transport.
 ## Reproduce
 
 ```bash
-pnpm run bench    # builds dist, runs all eleven scenarios (B1–B11), regenerates chart
+pnpm run bench    # builds dist, runs all twelve scenarios (B1–B12), regenerates chart
 pnpm run size     # builds dist, prints the core-vs-graphql weight table above
 ```
 
-Results land in `bench/results/benchmarks.json` (machine-readable) and `bench/results/chart.svg`. The chart above is embedded from that exact SVG — re-run the benchmark before updating this page so the numbers stay real.
+Results land in `bench/results/benchmarks.json` (machine-readable) and `bench/results/chart.svg`. The chart above is embedded from that exact SVG — re-run the benchmark before updating this page so the numbers stay real. (The embedded chart was generated before B12 landed; it still shows B1–B11, and the next `pnpm run bench` regenerates it with the twelfth row.)

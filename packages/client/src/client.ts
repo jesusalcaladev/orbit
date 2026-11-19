@@ -6,7 +6,7 @@ import type {
   OrbitStreamEvent,
   SubscriptionEvent,
 } from '@orbit/core';
-import { defaultDecompress, postEnvelope } from './http.js';
+import { defaultCompress, defaultDecompress, postEnvelope } from './http.js';
 import type { HttpDeps } from './http.js';
 import { buildFormData, postFormData } from './multipart.js';
 import type { UploadFiles } from './multipart.js';
@@ -15,8 +15,9 @@ import { RealtimeClient } from './realtime.js';
 import type { SubscriptionHandle, SubscribeOptions } from './realtime.js';
 import { streamEvents } from './stream.js';
 import type {
-  Decompress,
   ClientFormat,
+  Compress,
+  Decompress,
   OrbitClientOptions,
   OrbitResponse,
   RealtimeStatus,
@@ -52,8 +53,10 @@ export class OrbitClient {
   readonly #clientHeaders: OrbitClientOptions['headers'];
   readonly #defaultFormat: ClientFormat;
   readonly #gzip: boolean;
+  readonly #compressRequests: boolean;
   readonly #fetchImpl: typeof fetch;
   readonly #decompress: Decompress;
+  readonly #compress: Compress;
   readonly #WebSocket: typeof WebSocket;
   readonly #cache: QueryCache | undefined;
   #realtime: RealtimeClient | undefined;
@@ -63,8 +66,10 @@ export class OrbitClient {
     this.#clientHeaders = options.headers;
     this.#defaultFormat = options.format ?? 'json';
     this.#gzip = options.gzip ?? true;
+    this.#compressRequests = options.compressRequests ?? false;
     this.#fetchImpl = options.fetch ?? fetch;
     this.#decompress = options.decompress ?? defaultDecompress;
+    this.#compress = options.compress ?? defaultCompress;
     this.#WebSocket = options.WebSocket ?? WebSocket;
     this.#cache = options.cache;
     this.realtimeUrl = options.realtimeUrl;
@@ -252,6 +257,8 @@ export class OrbitClient {
       baseUrl: this.baseUrl,
       fetchImpl: this.#fetchImpl,
       decompress: this.#decompress,
+      compress: this.#compress,
+      compressRequests: this.#compressRequests,
       defaultHeaders: resolveHeaders(this.#clientHeaders),
       gzip: this.#gzip,
     };

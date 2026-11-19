@@ -301,6 +301,22 @@ Brotli the handler silently falls back to gzip, and to identity encoding when
 neither is supported. Negotiation prefers `br` over `gzip` at equal
 `q`-values and only compresses responses above 1 KiB.
 
+**Request bodies (additive).** A client may gzip its envelope:
+`Content-Encoding: gzip` (or `x-gzip`) is inflated before parsing, and `br`
+where the runtime can decode it. The size limit applies to the **inflated**
+bytes and is enforced *while inflating* — `maxPayloadBytes` bounds the
+expansion (a decompression bomb answers `413 ORBIT_PAYLOAD_TOO_LARGE` and the
+stream is cancelled), not just the upload; `content-length` keeps its early
+413 fast path. An encoding the server cannot honour is `400
+ORBIT_INVALID_QUERY` with `details.encoding`. Multipart uploads are covered
+by the same path.
+
+`@orbit/client` opts in with `compressRequests: true`: envelopes ≥ 512 bytes
+are gzipped when the result is smaller, and fall back to identity when the
+runtime has no `CompressionStream` — request compression never fails a
+request. Measured by B12: 191.7 KB → 25.5 KB for an agent write + read
+round-trip.
+
 ### Response headers (additive)
 
 Plugins and adapters may attach response headers by setting
@@ -745,6 +761,7 @@ Measured on real hardware by `npm run bench` (see `docs/benchmarks.md`).
 | B9  | Deep nest · warm cache replay vs DataLoader         | Warm replay P99 latency       | graphql-js + DataLoader: 5 DB batches/request (measured)                   | < 200 ms — ✅ 0.17 ms · 0 DB calls warm (DataLoader still pays all 5 per request) |
 | B10 | Client overhead · real HTTP round-trip              | P99 round-trip latency        | raw fetch 1.993 ms (measured)                                              | ≤ 15% added — ✅ 1.886 ms (≈0% overhead)                                          |
 | B11 | React layer (hooks + cache) · warm hit vs raw fetch | P99 latency (warm cache hit)  | raw fetch 1.821 ms (measured)                                              | < 0.5 ms warm — ✅ 0.003 ms (0 HTTP); miss overhead vs bare client +7.7%          |
+| B12 | Wire bytes · agent write + read round-trip           | Bytes on the wire (in + out)  | raw request + gzip response: 191.7 KB (client default)                     | ≥ 50% fewer — ✅ 25.5 KB with a gzip request (write alone 173.7 → 7.5 KB)          |
 
 > Competition column note: graphql-js and dataloader numbers are MEASURED on
 > the benchmark machine (both are devDependencies of the bench harness only —

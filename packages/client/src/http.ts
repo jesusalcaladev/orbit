@@ -2,15 +2,26 @@ import { decodeMsgpack, encodeMsgpack, isRecord } from '@orbit/core';
 import type { OrbitEnvelope } from '@orbit/core';
 import { MSGPACK_CONTENT_TYPE } from '@orbit/core';
 import { OrbitNetworkError, orbitErrorFromWire } from './errors.js';
-import type { ClientFormat, Decompress, OrbitResponse } from './types.js';
+import type { ClientFormat, Compress, Decompress, OrbitResponse } from './types.js';
 
 export const JSON_CONTENT_TYPE = 'application/json';
 const textDecoder = new TextDecoder();
+const textEncoder = new TextEncoder();
+
+/**
+ * Below this size the gzip frame overhead (and the extra CPU) is not worth it:
+ * a small envelope grows when compressed, so it travels as identity.
+ */
+const REQUEST_COMPRESSION_MIN_BYTES = 512;
 
 export interface HttpDeps {
   baseUrl: string;
   fetchImpl: typeof fetch;
   decompress: Decompress;
+  /** Compress request bodies. `defaultCompress` unless the runtime lacks it. */
+  compress: Compress;
+  /** Send the envelope gzip-compressed when it pays off. */
+  compressRequests: boolean;
   defaultHeaders: Record<string, string>;
   gzip: boolean;
 }
@@ -19,6 +30,8 @@ export interface WireRequest {
   body: BodyInit;
   /** Sets `content-type`. Omit for FormData bodies (fetch appends the boundary). */
   contentType?: string;
+  /** Sets `content-encoding` when the body travels compressed. */
+  contentEncoding?: string;
   accept: string;
   headers?: Record<string, string>;
   signal?: AbortSignal;
@@ -33,6 +46,9 @@ export async function sendRequest(deps: HttpDeps, request: WireRequest): Promise
   const headers: Record<string, string> = {
     ...deps.defaultHeaders,
     ...(request.contentType !== undefined ? { 'content-type': request.contentType } : {}),
+    ...(request.contentEncoding !== undefined
+      ? { 'content-encoding': request.contentEncoding }
+      : {}),
     accept: request.accept,
     ...(deps.gzip ? { 'accept-encoding': 'gzip' } : {}),
     ...request.headers,
@@ -58,13 +74,58 @@ export async function sendRequest(deps: HttpDeps, request: WireRequest): Promise
   }
 }
 
+export interface EncodedBody {
+  body: BodyInit;
+  contentType: string;
+  contentEncoding?: string;
+}
+
+/**
+ * Encode an envelope without compression — the default path, kept synchronous
+ * so an ordinary request costs exactly the microtasks it always did (stream
+ * abort timing depends on it).
+ */
+export function plainEnvelopeBody(envelope: OrbitEnvelope, format: ClientFormat): EncodedBody {
+  return format === 'msgpack'
+    ? { body: encodeMsgpack(envelope), contentType: MSGPACK_CONTENT_TYPE }
+    : { body: JSON.stringify(envelope), contentType: JSON_CONTENT_TYPE };
+}
+
+/**
+ * Encode an envelope gzip-compressed, when compression actually shrinks the
+ * body (spec §7, additive).
+ *
+ * A runtime without a compression codec (React Native/Hermes) is not an
+ * error: the request travels uncompressed, which is what it did before.
+ */
+export async function compressEnvelopeBody(
+  deps: HttpDeps,
+  envelope: OrbitEnvelope,
+  format: ClientFormat,
+): Promise<EncodedBody> {
+  const plain = plainEnvelopeBody(envelope, format);
+  // A MessagePack body is already bytes; only a JSON body needs encoding.
+  const raw =
+    typeof plain.body === 'string'
+      ? textEncoder.encode(plain.body)
+      : (plain.body as Uint8Array<ArrayBuffer>);
+  if (raw.byteLength < REQUEST_COMPRESSION_MIN_BYTES) return plain;
+  let compressed: Uint8Array<ArrayBuffer>;
+  try {
+    compressed = await deps.compress(raw);
+  } catch {
+    return plain;
+  }
+  // The header is only worth carrying when the bytes actually shrink.
+  if (compressed.byteLength >= raw.byteLength) return plain;
+  return { body: compressed, contentType: plain.contentType, contentEncoding: 'gzip' };
+}
+
 /** POST a validated envelope and parse the reply (spec §6/§7). */
 export async function postEnvelope(deps: HttpDeps, request: PostRequest): Promise<OrbitResponse> {
-  const contentType = request.format === 'msgpack' ? MSGPACK_CONTENT_TYPE : JSON_CONTENT_TYPE;
-  const body =
-    request.format === 'msgpack'
-      ? encodeMsgpack(request.envelope)
-      : JSON.stringify(request.envelope);
+  const { body, contentType, contentEncoding } = deps.compressRequests
+    ? await compressEnvelopeBody(deps, request.envelope, request.format)
+    : plainEnvelopeBody(request.envelope, request.format);
 
   const { signal, cleanup } = effectiveSignal(request.signal, request.timeoutMs);
   let res: Response;
@@ -72,6 +133,7 @@ export async function postEnvelope(deps: HttpDeps, request: PostRequest): Promis
     res = await sendRequest(deps, {
       body,
       contentType,
+      contentEncoding,
       accept: contentType,
       headers: request.headers,
       signal,
@@ -104,6 +166,19 @@ export interface PostRequest {
   signal?: AbortSignal;
   timeoutMs?: number;
 }
+
+/** The default gzip: the web-standard `CompressionStream`. */
+export const defaultCompress: Compress = async (body) => {
+  // Same cast as `defaultDecompress`: the lib.dom writable is typed with a
+  // `BufferSource` that pipeThrough's contravariant check rejects.
+  const stream = new Blob([body as BlobPart]).stream().pipeThrough(
+    new CompressionStream('gzip') as unknown as {
+      readable: ReadableStream<Uint8Array>;
+      writable: WritableStream<Uint8Array>;
+    },
+  );
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+};
 
 /** The default gunzip: the web-standard `DecompressionStream`. */
 export const defaultDecompress: Decompress = async (body) => {

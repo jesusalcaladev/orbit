@@ -20,6 +20,10 @@ Zero third-party runtime dependencies — the only import is `@orbit/core`
 - `upload` — multipart mutations with files (`ctx.files` on the server)
 - JSON / MessagePack negotiation (request body + `Accept`), gzip with
   automatic double-gunzip detection (undici leaves the header visible)
+- **Request compression** (`compressRequests: true`) — envelopes ≥ 512 bytes
+  are gzipped when that shrinks them, with an identity fallback on runtimes
+  without `CompressionStream`; the server bounds the inflated size (B12:
+  191.7 KB → 25.5 KB round-trip)
 - typed errors reusing the `@orbit/core` contract (`OrbitError` codes) plus
   `OrbitNetworkError` for transport/parse failures
 - `AbortSignal` + per-request timeout; the abort propagates to the server
@@ -126,7 +130,9 @@ No intermediate layers, no added latency. Re-run locally with
 ## Environment notes
 
 - **React Native:** no `DecompressionStream` — inject a gunzip via
-  `decompress` (or set `gzip: false`); `WebSocket` is native.
+  `decompress` (or set `gzip: false`); `WebSocket` is native. Request
+  compression degrades on its own: with no `CompressionStream`, envelopes are
+  sent uncompressed (inject `compress` to keep it).
 - **Node 20:** global `WebSocket` is not stable — inject one via the
   `WebSocket` option (e.g. `ws`).
 - **Cloudflare Workers / browsers:** everything is global — defaults work.

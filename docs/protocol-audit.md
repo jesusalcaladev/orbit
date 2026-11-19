@@ -207,7 +207,7 @@ project) → onBeforeSerialize → serialize` ✅ (pinned by contract test).
 
 ### §12 Benchmarks
 
-- The B1–B11 harness exists (`bench/`) and asserts its goals (`pnpm run bench`).
+- The B1–B12 harness exists (`bench/`) and asserts its goals (`pnpm run bench`).
   Numbers are machine-measured; not re-run in this audit. The `resume`
   benchmark uses the numeric `seq` cursor, consistent with the transport (#2).
 

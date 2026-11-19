@@ -1,8 +1,8 @@
-import { encodeMsgpack, isRecord } from '@orbit/core';
+import { isRecord } from '@orbit/core';
 import type { OrbitEnvelope, OrbitStreamEvent } from '@orbit/core';
-import { MSGPACK_CONTENT_TYPE, SSE_CONTENT_TYPE } from '@orbit/core';
+import { SSE_CONTENT_TYPE } from '@orbit/core';
 import { OrbitNetworkError, orbitErrorFromWire } from './errors.js';
-import { JSON_CONTENT_TYPE, effectiveSignal, sendRequest } from './http.js';
+import { compressEnvelopeBody, effectiveSignal, plainEnvelopeBody, sendRequest } from './http.js';
 import type { HttpDeps } from './http.js';
 import type { ClientFormat } from './types.js';
 
@@ -33,11 +33,9 @@ export async function* streamEvents(
   deps: HttpDeps,
   request: StreamRequest,
 ): AsyncGenerator<OrbitStreamEvent> {
-  const contentType = request.format === 'msgpack' ? MSGPACK_CONTENT_TYPE : JSON_CONTENT_TYPE;
-  const body =
-    request.format === 'msgpack'
-      ? encodeMsgpack(request.envelope)
-      : JSON.stringify(request.envelope);
+  const { body, contentType, contentEncoding } = deps.compressRequests
+    ? await compressEnvelopeBody(deps, request.envelope, request.format)
+    : plainEnvelopeBody(request.envelope, request.format);
   const { signal, cleanup } = effectiveSignal(request.signal, request.timeoutMs);
 
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
@@ -56,6 +54,7 @@ export async function* streamEvents(
     const res = await sendRequest(deps, {
       body,
       contentType,
+      contentEncoding,
       accept: SSE_CONTENT_TYPE,
       headers: request.headers,
       signal,

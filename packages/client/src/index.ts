@@ -27,6 +27,7 @@ export { ErrorCode, OrbitError, isOrbitError } from '@orbit/core';
 export type { OrbitStreamEvent, SubscriptionEvent } from '@orbit/core';
 export type {
   ClientFormat,
+  Compress,
   Decompress,
   OrbitClientOptions,
   OrbitResponse,

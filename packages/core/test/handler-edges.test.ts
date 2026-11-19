@@ -82,7 +82,7 @@ describe('handler — response header merging', () => {
         onAfterExecute: ({ ctx }) => {
           // 'accept' is already set by the engine; 'x-custom' is new. Case
           // differences must not produce a duplicate token.
-          (ctx.responseHeaders ??= {})['vary'] = 'Accept, x-custom, accept';
+          (ctx.responseHeaders ??= {}).vary = 'Accept, x-custom, accept';
         },
       },
     };
@@ -102,7 +102,7 @@ describe('handler — response header merging', () => {
       name: 'vary-blank',
       hooks: {
         onAfterExecute: ({ ctx }) => {
-          (ctx.responseHeaders ??= {})['vary'] = ' , ,x-ok, ';
+          (ctx.responseHeaders ??= {}).vary = ' , ,x-ok, ';
         },
       },
     };
@@ -121,7 +121,7 @@ describe('handler — response header merging', () => {
       name: 'vary-sse',
       hooks: {
         onAfterExecute: ({ ctx }) => {
-          (ctx.responseHeaders ??= {})['vary'] = 'origin';
+          (ctx.responseHeaders ??= {}).vary = 'origin';
         },
       },
     };
@@ -142,7 +142,7 @@ describe('handler — response header merging', () => {
       name: 'vary-new',
       hooks: {
         onAfterExecute: ({ ctx }) => {
-          (ctx.responseHeaders ??= {})['vary'] = 'origin, x-fresh';
+          (ctx.responseHeaders ??= {}).vary = 'origin, x-fresh';
         },
       },
     };

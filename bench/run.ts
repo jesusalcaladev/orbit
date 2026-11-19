@@ -1,5 +1,5 @@
 /**
- * Orbit benchmark suite — scenarios B1–B11 from the protocol spec.
+ * Orbit benchmark suite — scenarios B1–B12 from the protocol spec.
  *
  * Every measurement runs against the real `@orbit/core` engine (dist build)
  * on this machine. The competition is now MEASURED, not assumed: the
@@ -28,6 +28,7 @@ import type { DataAdapter, SubscriptionEvent } from '@orbit/core';
 import { buildDeepNest, buildFeed, users } from './fixtures.ts';
 import { graphqlB1, graphqlB2, graphqlB3, graphqlB4, graphqlB9 } from './graphql.ts';
 import { httpB8 } from './http-bench.ts';
+import { wireB12 } from './wire-bench.ts';
 import { createClient } from '@orbit/client';
 import { createReactClient } from '@orbit/react';
 import { gzip, measure, measureThroughput, now, pct } from './measure.ts';
@@ -835,7 +836,7 @@ interface Result {
 const ok = (met: boolean): string => (met ? '✅' : '⚠️ ');
 
 async function main(): Promise<void> {
-  console.log('Orbit benchmark suite (B1–B11)\n');
+  console.log('Orbit benchmark suite (B1–B12)\n');
 
   const results: Result[] = [];
 
@@ -1092,6 +1093,28 @@ async function main(): Promise<void> {
     );
   }
 
+  // B12
+  {
+    const r = await wireB12();
+    const met = r.savedPct >= 50;
+    results.push({
+      id: 'B12',
+      label: 'Wire bytes · agent write + read round-trip',
+      metric: 'Bytes on the wire (in + out)',
+      unit: 'KB',
+      lowerIsBetter: true,
+      orbitValue: r.compressedKb,
+      orbitLabel: `${r.compressedKb.toFixed(0)} KB (gzip request + gzip response)`,
+      competitionValue: r.competitionKb,
+      competitionLabel: `${r.competitionKb.toFixed(0)} KB (raw request + gzip response, today's client default)`,
+      goal: '≥ 50% fewer bytes',
+      goalMet: met,
+    });
+    console.log(
+      `B12 · Wire bytes round-trip          ${ok(met)} orbit ${r.compressedKb.toFixed(0)} KB  vs  ${r.baselineKb.toFixed(0)} KB baseline  (${r.savedPct.toFixed(0)}% fewer; the write request alone ${r.writeRawKb.toFixed(0)} → ${r.writeGzipKb.toFixed(0)} KB; msgpack both ways ${r.msgpackKb.toFixed(0)} KB)  (goal ≥ 50%)`,
+    );
+  }
+
   // Persist machine-readable results.
   writeFileSync(join(benchDir, 'benchmarks.json'), JSON.stringify(results, null, 2));
 
@@ -1107,7 +1130,7 @@ async function main(): Promise<void> {
     lowerIsBetter: r.lowerIsBetter,
     goalMet: r.goalMet,
   }));
-  const svg = renderChart('Orbit benchmark suite — B1 to B11', rows);
+  const svg = renderChart('Orbit benchmark suite — B1 to B12', rows);
   writeFileSync(join(benchDir, 'chart.svg'), svg);
 
   console.log('\nBenchmark results written to bench/results/ (benchmarks.json + chart.svg).');

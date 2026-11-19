@@ -43,6 +43,16 @@ export interface SocketRequestOptions {
  */
 export type Decompress = (body: ReadableStream<Uint8Array>) => Promise<Uint8Array>;
 
+/**
+ * Gzip a request body.
+ *
+ * Injectable for runtimes without a web-standard `CompressionStream`
+ * (React Native/Hermes). When the default is unavailable, OR a custom one
+ * throws, the envelope is sent uncompressed — request compression is an
+ * optimization, never a hard requirement.
+ */
+export type Compress = (body: Uint8Array) => Promise<Uint8Array<ArrayBuffer>>;
+
 export interface OrbitClientOptions {
   /** The Orbit endpoint, e.g. `'/orbit'` or `'https://api.example.com/orbit'`. */
   baseUrl: string;
@@ -55,6 +65,14 @@ export interface OrbitClientOptions {
   format?: ClientFormat;
   /** Send `Accept-Encoding: gzip` and decompress gzip responses. Default `true`. */
   gzip?: boolean;
+  /**
+   * Gzip the request envelope when it pays off (bodies ≥ 512 bytes that get
+   * smaller), so agents and mobile clients stop uploading the same query text
+   * — and big mutation payloads — verbatim. Default `false`.
+   */
+  compressRequests?: boolean;
+  /** Injectable gzip for request bodies (see {@link Compress}). */
+  compress?: Compress;
   /** Injectable fetch (tests, runtimes without a global, custom transports). */
   fetch?: typeof fetch;
   /** Injectable gunzip (see {@link Decompress}). */

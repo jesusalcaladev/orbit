@@ -84,6 +84,42 @@ const bytes = new Uint8Array(await response.arrayBuffer());
 const inflated = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
 ```
 
+## Request compression
+
+Compression works in both directions. A client may POST a gzipped envelope —
+agents and mobile clients spend most of their bytes uploading query text and
+mutation payloads:
+
+```ts
+const gzipped = new Blob([JSON.stringify(envelope)])
+  .stream()
+  .pipeThrough(new CompressionStream('gzip'));
+
+await fetch('/orbit', {
+  method: 'POST',
+  headers: { 'content-type': 'application/json', 'content-encoding': 'gzip' },
+  body: gzipped, // or a Uint8Array
+});
+```
+
+The handler inflates it before parsing (`gzip`/`x-gzip` always, `br` where the
+runtime can decode it) and applies `maxPayloadBytes` to the **inflated** bytes
+as they stream in — a small gzip bomb answers `413 ORBIT_PAYLOAD_TOO_LARGE` and
+the stream is cancelled, so accepting compressed bodies does not grow the DoS
+surface. An unknown `content-encoding` is a `400 ORBIT_INVALID_QUERY` with
+`details.encoding`. Multipart uploads take the same path.
+
+`@orbit/client` does it for you with `compressRequests: true`:
+
+```ts
+const client = createClient({ baseUrl: '/orbit', compressRequests: true });
+```
+
+Envelopes ≥ 512 bytes are gzipped **only when the result is smaller**; a
+runtime without `CompressionStream` (React Native/Hermes), a throwing
+`compress`, or a bigger compressed body all fall back to an identity body.
+Measured by B12 (see [benchmarks](./benchmarks.md)).
+
 ## SSE streaming
 
 With `Accept: text/event-stream`, the handler streams the graph **level by level** instead of waiting for the whole tree. The root level is emitted as soon as its adapter answers; relations follow as their levels resolve. This is the TTFB win: the client starts rendering while the database is still working on the deep relations.

@@ -607,7 +607,7 @@ describe('batch mutations (ops)', () => {
         {
           entity: 'user',
           resolve: () => null,
-          mutate: (action, { filter }) => {
+          mutate: (_action, { filter }) => {
             mutate();
             if (filter?.id === 'bad') throw new OrbitError(ErrorCode.FILTER_INVALID, 'bad');
             return { id: filter?.id };
